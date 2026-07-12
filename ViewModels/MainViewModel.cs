@@ -14,6 +14,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly FactoryContentService _contentService = new();
     private readonly UserKitStore _userKitStore = new();
+    private readonly DrumLibraryImportService _libraryImport = new();
     private readonly DrumRemovalService _drumRemoval = new();
     private readonly AudioEngine _audio = new();
     private readonly MidiInputService _midi = new();
@@ -92,6 +93,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 _ = ImportSampleAsync(pad);
             }
         });
+        ImportSoundLibraryCommand = new RelayCommand(() => _ = ImportSoundLibraryAsync());
         ImportTrackCommand = new RelayCommand<string>(variant => _ = ImportTrackAsync(variant));
         ToggleTrackCommand = new RelayCommand(ToggleTrack);
         StopTrackCommand = new RelayCommand(StopTrack);
@@ -134,6 +136,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public RelayCommand<DrumKit> ActivateKitCommand { get; }
     public RelayCommand<PadViewModel> PlayPadCommand { get; }
     public RelayCommand<PadViewModel> ImportSampleCommand { get; }
+    public RelayCommand ImportSoundLibraryCommand { get; }
     public RelayCommand<string> ImportTrackCommand { get; }
     public RelayCommand ToggleTrackCommand { get; }
     public RelayCommand StopTrackCommand { get; }
@@ -460,6 +463,60 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         await ActivateKitAsync(targetKit);
         StatusMessage = $"{targetPad.Name} usa ahora {Path.GetFileName(dialog.FileName)} · guardado en Mis sonidos";
+    }
+
+    private async Task ImportSoundLibraryAsync()
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Selecciona la carpeta de muestras WAV",
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Importando librería de batería…";
+            var result = _libraryImport.ImportFolder(dialog.FolderName, _userKitStore.ImportSample);
+            var userLibrary = Libraries.First(library => library.Id == "user.sounds");
+            userLibrary.Kits.Add(result.Kit);
+            _userKitStore.Save(userLibrary.Kits);
+
+            _isSynchronizingKitSelection = true;
+            try
+            {
+                SelectedLibrary = userLibrary;
+                SelectedKit = result.Kit;
+            }
+            finally
+            {
+                _isSynchronizingKitSelection = false;
+            }
+
+            await ActivateKitAsync(result.Kit);
+            StatusMessage = result.SkippedFiles == 0
+                ? $"Librería importada: {result.Kit.Name} · {result.ImportedFiles} muestras"
+                : $"Librería importada: {result.Kit.Name} · {result.ImportedFiles} muestras · " +
+                  $"{result.SkippedFiles} WAV sin reconocer";
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = $"No se pudo importar la librería: {exception.Message}";
+            MessageBox.Show(
+                exception.Message,
+                "Importar librería",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private async Task ImportTrackAsync(string? variantValue)
