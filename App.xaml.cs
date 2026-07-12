@@ -19,6 +19,14 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 3 &&
+            string.Equals(e.Args[0], Vst3RuntimeProtocol.Argument, StringComparison.Ordinal))
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            Vst3RuntimeProtocol.Start(e.Args[1], e.Args[2]);
+            return;
+        }
+
         base.OnStartup(e);
     }
 }
