@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using DrumPracticeStudio.Services;
 
 namespace DrumPracticeStudio.Tests;
@@ -49,5 +50,36 @@ public sealed class DrumLibraryImportServiceTests
         Assert.AreEqual(127, layer.MaxVelocity);
         Assert.AreEqual(2, layer.Samples.Count);
         Assert.AreEqual(1, result.SkippedFiles);
+    }
+
+    [TestMethod]
+    public void ImportZip_ExtractsImportsAndRemovesTemporaryFiles()
+    {
+        using var temporary = new TemporaryDirectory();
+        var zipPath = temporary.Combine("Salamander.zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            archive.CreateEntry("Samples/kick_P_1.wav");
+            archive.CreateEntry("Samples/kick_F_1.wav");
+            archive.CreateEntry("Samples/kick_FF_1.wav");
+            archive.CreateEntry("Samples/hitom_P_1.wav");
+            archive.CreateEntry("Samples/lotom_FF_1.wav");
+        }
+
+        var copiedFolder = temporary.Combine("Copied");
+        Directory.CreateDirectory(copiedFolder);
+        var result = new DrumLibraryImportService().ImportZip(zipPath, source =>
+        {
+            var destination = Path.Combine(copiedFolder, $"{Guid.NewGuid():N}.wav");
+            File.Copy(source, destination);
+            return destination;
+        });
+
+        Assert.AreEqual("Salamander", result.Kit.Name);
+        Assert.AreEqual(5, result.ImportedFiles);
+        Assert.AreEqual(3, result.Kit.Pads.Single(pad => pad.Articulation == "kick.main").Layers.Count);
+        Assert.IsTrue(result.Kit.Pads.Any(pad => pad.Articulation == "tom.high"));
+        Assert.IsTrue(result.Kit.Pads.Any(pad => pad.Articulation == "tom.low"));
+        Assert.AreEqual(5, Directory.EnumerateFiles(copiedFolder).Count());
     }
 }
