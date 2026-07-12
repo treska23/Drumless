@@ -6,7 +6,6 @@ using DrumPracticeStudio.Infrastructure;
 using DrumPracticeStudio.Midi;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
-using DrumPracticeStudio.Views;
 using Microsoft.Win32;
 
 namespace DrumPracticeStudio.ViewModels;
@@ -24,9 +23,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _transportTimer;
     private CancellationTokenSource? _kitLoadCancellation;
     private CancellationTokenSource? _drumRemovalCancellation;
+    private CancellationTokenSource? _vstLoadCancellation;
     private int _kitLoadSequence;
     private bool _isSynchronizingKitSelection;
-    private Vst3EditorWindow? _vstEditorWindow;
     private bool _hasScannedVstInstruments;
 
     private string _currentPage = "Practice";
@@ -112,7 +111,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         RefreshMidiCommand = new RelayCommand(RefreshMidiDevices);
         ConnectMidiCommand = new RelayCommand(ToggleMidiConnection);
         ScanVstInstrumentsCommand = new RelayCommand(() => _ = ScanVstInstrumentsAsync(force: true));
-        LoadVstInstrumentCommand = new RelayCommand(LoadSelectedVstInstrument);
+        LoadVstInstrumentCommand = new RelayCommand(() => _ = LoadSelectedVstInstrumentAsync());
         UseInternalDrumsCommand = new RelayCommand(UseInternalDrums);
         OpenVstEditorCommand = new RelayCommand(OpenVstEditor);
         PanicVstCommand = new RelayCommand(() => _audio.PanicVstInstrument());
@@ -122,6 +121,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _midi.NoteOffReceived += OnMidiNoteOffReceived;
         _midi.ControlChangeReceived += OnMidiControlChangeReceived;
         _midi.Error += (_, message) => PostStatus($"MIDI: {message}");
+        _audio.VstInstrumentExited += OnVstInstrumentExited;
 
         _transportTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _transportTimer.Tick += (_, _) => RefreshTransport();
@@ -402,10 +402,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _kitLoadCancellation?.Dispose();
         _drumRemovalCancellation?.Cancel();
         _drumRemovalCancellation?.Dispose();
+        _vstLoadCancellation?.Cancel();
+        _vstLoadCancellation?.Dispose();
         _trackLoadCancellation?.Cancel();
         _trackLoadCancellation?.Dispose();
         SaveTrackWorkspace(silent: true);
-        CloseVstEditor();
+        _audio.VstInstrumentExited -= OnVstInstrumentExited;
         _midi.NoteReceived -= OnMidiNoteReceived;
         _midi.NoteOffReceived -= OnMidiNoteOffReceived;
         _midi.ControlChangeReceived -= OnMidiControlChangeReceived;
@@ -416,6 +418,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private async Task ActivateKitAsync(DrumKit kit)
     {
         var requestId = Interlocked.Increment(ref _kitLoadSequence);
+        var instrument = SelectedVstInstrument;
         var cancellation = new CancellationTokenSource();
         var previous = Interlocked.Exchange(ref _kitLoadCancellation, cancellation);
         previous?.Cancel();
@@ -946,26 +949,40 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void LoadSelectedVstInstrument()
+    private async Task LoadSelectedVstInstrumentAsync()
     {
-        if (SelectedVstInstrument is null)
+        if (SelectedVstInstrument is not { } instrument)
         {
             VstStatus = "Selecciona un instrumento VST3.";
             return;
         }
 
+        var cancellation = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _vstLoadCancellation, cancellation);
+        previous?.Cancel();
+        previous?.Dispose();
         try
         {
-            CloseVstEditor();
-            VstStatus = $"Cargando {SelectedVstInstrument.DisplayName}…";
-            _audio.LoadVstInstrument(SelectedVstInstrument);
+            VstStatus = $"Cargando {instrument.DisplayName}…";
+            await _audio.LoadVstInstrumentAsync(instrument, cancellation.Token);
             OnPropertyChanged(nameof(IsVstInstrumentLoaded));
             OnPropertyChanged(nameof(ActiveDrumEngineLabel));
-            VstStatus = $"Activo: {SelectedVstInstrument.DisplayName} · abre su editor para elegir el kit";
-            StatusMessage = $"Motor de batería: {SelectedVstInstrument.DisplayName}";
+            VstStatus = $"Activo: {instrument.DisplayName} · abre su editor para elegir el kit";
+            StatusMessage = $"Motor de batería: {instrument.DisplayName}";
+        }
+        catch (OperationCanceledException)
+        {
+            if (ReferenceEquals(Volatile.Read(ref _vstLoadCancellation), cancellation))
+            {
+                VstStatus = "Carga del instrumento cancelada.";
+            }
         }
         catch (Exception exception)
         {
+            if (!ReferenceEquals(Volatile.Read(ref _vstLoadCancellation), cancellation))
+            {
+                return;
+            }
             VstStatus = $"No se pudo cargar el instrumento: {exception.Message}";
             MessageBox.Show(
                 exception.Message,
@@ -973,11 +990,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
+        finally
+        {
+            if (ReferenceEquals(
+                    Interlocked.CompareExchange(ref _vstLoadCancellation, null, cancellation),
+                    cancellation))
+            {
+                cancellation.Dispose();
+            }
+        }
     }
 
     private void UseInternalDrums()
     {
-        CloseVstEditor();
+        var loading = Interlocked.Exchange(ref _vstLoadCancellation, null);
+        loading?.Cancel();
+        loading?.Dispose();
         _audio.UnloadVstInstrument();
         OnPropertyChanged(nameof(IsVstInstrumentLoaded));
         OnPropertyChanged(nameof(ActiveDrumEngineLabel));
@@ -987,48 +1015,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void OpenVstEditor()
     {
-        var view = _audio.VstInstrumentView;
-        if (view is null)
+        if (!_audio.IsVstInstrumentLoaded)
         {
-            VstStatus = _audio.IsVstInstrumentLoaded
-                ? "Este instrumento no ofrece una ventana de edición."
-                : "Carga primero un instrumento VST3.";
+            VstStatus = "Carga primero un instrumento VST3.";
             return;
         }
 
-        if (_vstEditorWindow is not null)
+        if (!_audio.OpenVstEditor())
         {
-            _vstEditorWindow.Activate();
-            return;
+            VstStatus = "Este instrumento no ofrece una ventana de edición.";
         }
-
-        _vstEditorWindow = new Vst3EditorWindow(
-            _audio.VstInstrumentName ?? "Instrumento VST3",
-            view)
-        {
-            Owner = Application.Current.MainWindow
-        };
-        _vstEditorWindow.ClosedByUser += (_, _) => _vstEditorWindow = null;
-        _vstEditorWindow.Show();
     }
 
-    private void CloseVstEditor()
+    private void OnVstInstrumentExited(object? sender, string message)
     {
-        if (_vstEditorWindow is null)
+        Application.Current.Dispatcher.BeginInvoke(() =>
         {
-            return;
-        }
-
-        var window = _vstEditorWindow;
-        _vstEditorWindow = null;
-        try
-        {
-            window.Close();
-        }
-        catch
-        {
-            // La ventana ya puede estar cerrándose por acción del usuario.
-        }
+            OnPropertyChanged(nameof(IsVstInstrumentLoaded));
+            OnPropertyChanged(nameof(ActiveDrumEngineLabel));
+            VstStatus = message;
+            StatusMessage = "Motor de batería interno activo";
+        });
     }
 
     private void Navigate(string page)
