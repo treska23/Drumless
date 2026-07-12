@@ -93,7 +93,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 _ = ImportSampleAsync(pad);
             }
         });
-        ImportSoundLibraryCommand = new RelayCommand(() => _ = ImportSoundLibraryAsync());
+        ImportSoundLibraryCommand = new RelayCommand(() => _ = ImportSoundLibraryZipAsync());
+        ImportSoundFolderCommand = new RelayCommand(() => _ = ImportSoundLibraryFolderAsync());
         ImportTrackCommand = new RelayCommand<string>(variant => _ = ImportTrackAsync(variant));
         ToggleTrackCommand = new RelayCommand(ToggleTrack);
         StopTrackCommand = new RelayCommand(StopTrack);
@@ -137,6 +138,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public RelayCommand<PadViewModel> PlayPadCommand { get; }
     public RelayCommand<PadViewModel> ImportSampleCommand { get; }
     public RelayCommand ImportSoundLibraryCommand { get; }
+    public RelayCommand ImportSoundFolderCommand { get; }
     public RelayCommand<string> ImportTrackCommand { get; }
     public RelayCommand ToggleTrackCommand { get; }
     public RelayCommand StopTrackCommand { get; }
@@ -465,7 +467,26 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         StatusMessage = $"{targetPad.Name} usa ahora {Path.GetFileName(dialog.FileName)} · guardado en Mis sonidos";
     }
 
-    private async Task ImportSoundLibraryAsync()
+    private async Task ImportSoundLibraryZipAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Selecciona una librería de batería comprimida",
+            Filter = "Librería ZIP (*.zip)|*.zip",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        await ImportSoundLibraryAsync(() =>
+            _libraryImport.ImportZip(dialog.FileName, _userKitStore.ImportSample));
+    }
+
+    private async Task ImportSoundLibraryFolderAsync()
     {
         var dialog = new OpenFolderDialog
         {
@@ -478,11 +499,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        await ImportSoundLibraryAsync(() =>
+            _libraryImport.ImportFolder(dialog.FolderName, _userKitStore.ImportSample));
+    }
+
+    private async Task ImportSoundLibraryAsync(Func<DrumLibraryImportResult> import)
+    {
         try
         {
             IsBusy = true;
             StatusMessage = "Importando librería de batería…";
-            var result = _libraryImport.ImportFolder(dialog.FolderName, _userKitStore.ImportSample);
+            var result = import();
             var userLibrary = Libraries.First(library => library.Id == "user.sounds");
             userLibrary.Kits.Add(result.Kit);
             _userKitStore.Save(userLibrary.Kits);
