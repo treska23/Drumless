@@ -615,8 +615,15 @@
                                     </Grid.ColumnDefinitions>
                                     <ComboBox ItemsSource="{Binding Vst3Instruments}"
                                               SelectedItem="{Binding SelectedVstInstrument}"
-                                              DisplayMemberPath="DisplayLabel"
-                                              MinWidth="430" />
+                                              Background="#F4F6FA"
+                                              Foreground="#151820"
+                                              MinWidth="430">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding DisplayLabel}" Foreground="#151820" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                     <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Buscar instrumentos"
                                             Margin="10,0,0,0" Command="{Binding ScanVstInstrumentsCommand}" />
                                 </Grid>
