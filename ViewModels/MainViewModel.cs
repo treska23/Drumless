@@ -50,7 +50,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string _removalStatus = "Selecciona una pista original para crear una copia sin batería.";
     private string _removalEngineStatus = "Motor local no instalado";
     private Vst3InstrumentItem? _selectedVstInstrument;
-    private string _vstStatus = "Abre Dispositivos para buscar Addictive Drums y Groove Agent.";
+    private string _vstStatus = "Pulsa «Buscar instrumentos» para localizar Addictive Drums y Groove Agent de forma aislada.";
     private bool _isScanningVst;
 
     public MainViewModel()
@@ -1039,10 +1039,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsTracksPage));
         OnPropertyChanged(nameof(IsYouTubePage));
         OnPropertyChanged(nameof(IsSettingsPage));
-        if (page == "Settings")
-        {
-            _ = ScanVstInstrumentsAsync(force: false);
-        }
     }
 
     private void BuildMappingRows()
