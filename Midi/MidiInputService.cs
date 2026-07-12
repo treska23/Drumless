@@ -8,12 +8,16 @@ public sealed record MidiDeviceItem(int Index, string Name)
 }
 
 public sealed record MidiNoteMessage(int Note, int Velocity, int Channel);
+public sealed record MidiNoteOffMessage(int Note, int Velocity, int Channel);
+public sealed record MidiControlChangeMessage(int Controller, int Value, int Channel);
 
 public sealed class MidiInputService : IDisposable
 {
     private MidiIn? _input;
 
     public event EventHandler<MidiNoteMessage>? NoteReceived;
+    public event EventHandler<MidiNoteOffMessage>? NoteOffReceived;
+    public event EventHandler<MidiControlChangeMessage>? ControlChangeReceived;
     public event EventHandler<string>? Error;
 
     public bool IsConnected => _input is not null;
@@ -80,12 +84,26 @@ public sealed class MidiInputService : IDisposable
 
     private void OnMessageReceived(object? sender, MidiInMessageEventArgs args)
     {
-        if (args.MidiEvent is NoteOnEvent noteOn && noteOn.Velocity > 0)
+        switch (args.MidiEvent)
         {
-            NoteReceived?.Invoke(this, new MidiNoteMessage(
-                noteOn.NoteNumber,
-                noteOn.Velocity,
-                noteOn.Channel));
+            case NoteOnEvent noteOn when noteOn.Velocity > 0:
+                NoteReceived?.Invoke(this, new MidiNoteMessage(
+                    noteOn.NoteNumber,
+                    noteOn.Velocity,
+                    noteOn.Channel));
+                break;
+            case NoteEvent note when note.CommandCode is MidiCommandCode.NoteOff or MidiCommandCode.NoteOn:
+                NoteOffReceived?.Invoke(this, new MidiNoteOffMessage(
+                    note.NoteNumber,
+                    note.Velocity,
+                    note.Channel));
+                break;
+            case ControlChangeEvent controlChange:
+                ControlChangeReceived?.Invoke(this, new MidiControlChangeMessage(
+                    (int)controlChange.Controller,
+                    controlChange.ControllerValue,
+                    controlChange.Channel));
+                break;
         }
     }
 
