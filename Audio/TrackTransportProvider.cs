@@ -249,34 +249,26 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
     public bool TryDequeueTrackEnded(out TrackEndedNotification notification) =>
         _endedNotifications.TryDequeue(out notification);
 
-    public int Read(float[] buffer, int offset, int count)
+    public int Read(Span<float> buffer)
     {
-        ArgumentNullException.ThrowIfNull(buffer);
-        ArgumentOutOfRangeException.ThrowIfNegative(offset);
-        ArgumentOutOfRangeException.ThrowIfNegative(count);
-        if (offset > buffer.Length - count)
-        {
-            throw new ArgumentException("El intervalo solicitado queda fuera del búfer.", nameof(count));
-        }
-
-        Array.Clear(buffer, offset, count);
+        buffer.Clear();
         lock (_gate)
         {
             if (_disposed || _playbackState != TrackPlaybackState.Playing || _session is null)
             {
-                return count;
+                return buffer.Length;
             }
 
-            var read = _session.Provider.Read(buffer, offset, count);
+            var read = _session.Provider.Read(buffer);
             for (var index = 0; index < read; index++)
             {
-                buffer[offset + index] *= _volume;
+                buffer[index] *= _volume;
             }
 
             _positionSeconds = _session.Reader.CurrentTime.TotalSeconds;
-            if (read < count)
+            if (read < buffer.Length)
             {
-                Array.Clear(buffer, offset + read, count - read);
+                buffer[read..].Clear();
                 _positionSeconds = _durationSeconds;
                 _playbackState = TrackPlaybackState.Ended;
 
@@ -290,7 +282,7 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
                 }
             }
 
-            return count;
+            return buffer.Length;
         }
     }
 
