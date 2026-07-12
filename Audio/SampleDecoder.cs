@@ -25,7 +25,7 @@ internal static class SampleDecoder
         var samples = new List<float>(targetSampleRate);
         var buffer = new float[16_384];
         int read;
-        while ((read = provider.Read(buffer, 0, buffer.Length)) > 0)
+        while ((read = provider.Read(buffer)) > 0)
         {
             for (var index = 0; index < read; index++)
             {
