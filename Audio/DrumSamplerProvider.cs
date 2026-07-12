@@ -26,22 +26,22 @@ internal sealed class DrumSamplerProvider : ISampleProvider
 
     public void Choke(string group) => _commands.Enqueue(new ChokeCommand(group));
 
-    public int Read(float[] buffer, int offset, int count)
+    public int Read(Span<float> buffer)
     {
-        Array.Clear(buffer, offset, count);
+        buffer.Clear();
         ProcessCommands();
 
         for (var voiceIndex = _voices.Count - 1; voiceIndex >= 0; voiceIndex--)
         {
             var voice = _voices[voiceIndex];
-            voice.MixInto(buffer, offset, count);
+            voice.MixInto(buffer);
             if (voice.IsFinished)
             {
                 _voices.RemoveAt(voiceIndex);
             }
         }
 
-        return count;
+        return buffer.Length;
     }
 
     private void ProcessCommands()
@@ -148,13 +148,13 @@ internal sealed class SampleVoice
         }
     }
 
-    public void MixInto(float[] destination, int offset, int count)
+    public void MixInto(Span<float> destination)
     {
-        var available = Math.Min(count, _buffer.Samples.Length - _position);
+        var available = Math.Min(destination.Length, _buffer.Samples.Length - _position);
         for (var index = 0; index < available; index++)
         {
             var fade = _fadeRemaining > 0 ? _fadeRemaining / (float)_fadeLength : 1f;
-            destination[offset + index] += _buffer.Samples[_position++] * _gain * fade;
+            destination[index] += _buffer.Samples[_position++] * _gain * fade;
 
             if (_fadeRemaining > 0 && --_fadeRemaining == 0)
             {
