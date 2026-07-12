@@ -602,6 +602,42 @@
                             </Grid>
                         </Border>
 
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,18">
+                            <StackPanel>
+                                <TextBlock Text="INSTRUMENTO VST3" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
+                                <TextBlock Text="{Binding ActiveDrumEngineLabel}" FontSize="19" FontWeight="SemiBold" Margin="0,6,0,3" />
+                                <TextBlock Text="Usa Addictive Drums 2, Groove Agent u otro instrumento VST3 instalado sin extraer sus librerías protegidas."
+                                           Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,14" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox ItemsSource="{Binding Vst3Instruments}"
+                                              SelectedItem="{Binding SelectedVstInstrument}"
+                                              DisplayMemberPath="DisplayLabel"
+                                              MinWidth="430" />
+                                    <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Volver a buscar"
+                                            Margin="10,0,0,0" Command="{Binding ScanVstInstrumentsCommand}" />
+                                </Grid>
+                                <WrapPanel Margin="0,12,0,0">
+                                    <Button Style="{StaticResource PrimaryButton}" Content="Cargar instrumento"
+                                            Margin="0,0,8,8" Command="{Binding LoadVstInstrumentCommand}" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Abrir editor"
+                                            Margin="0,0,8,8" Command="{Binding OpenVstEditorCommand}"
+                                            IsEnabled="{Binding IsVstInstrumentLoaded}" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Pánico MIDI"
+                                            Margin="0,0,8,8" Command="{Binding PanicVstCommand}"
+                                            IsEnabled="{Binding IsVstInstrumentLoaded}" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Usar motor interno"
+                                            Margin="0,0,8,8" Command="{Binding UseInternalDrumsCommand}" />
+                                </WrapPanel>
+                                <ProgressBar Height="5" Margin="0,6,0,8" IsIndeterminate="True"
+                                             Visibility="{Binding IsScanningVst, Converter={StaticResource BoolToVisibility}}" />
+                                <TextBlock Text="{Binding VstStatus}" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
                         <Border Style="{StaticResource CardStyle}">
                             <StackPanel>
                                 <TextBlock Text="Perfil General Drums · inicial" FontSize="18" FontWeight="SemiBold" />
