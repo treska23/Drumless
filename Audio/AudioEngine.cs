@@ -2,7 +2,6 @@ using DrumPracticeStudio.Models;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
-using NAudio.Vst3;
 
 namespace DrumPracticeStudio.Audio;
 
@@ -22,6 +21,7 @@ public sealed class AudioEngine : IDisposable
         _drums = new DrumSamplerProvider(format);
         _track = new TrackTransportProvider(format);
         _mixer = new MixingSampleProvider([_track, _drums]) { ReadFully = true };
+        _vstInstrument.Exited += (_, message) => VstInstrumentExited?.Invoke(this, message);
 
         try
         {
@@ -50,6 +50,8 @@ public sealed class AudioEngine : IDisposable
         }
     }
 
+    public event EventHandler<string>? VstInstrumentExited;
+
     public bool IsAvailable { get; }
     public string Status { get; } = "Audio no inicializado";
     public bool IsTrackPlaying => _track.IsPlaying;
@@ -58,7 +60,6 @@ public sealed class AudioEngine : IDisposable
     public TimeSpan TrackDuration => _track.Duration;
     public bool IsVstInstrumentLoaded => _vstInstrument.IsLoaded;
     public string? VstInstrumentName => _vstInstrument.DisplayName;
-    public Vst3PluginView? VstInstrumentView => _vstInstrument.View;
 
     public async Task LoadKitAsync(DrumKit kit, CancellationToken cancellationToken = default)
     {
@@ -86,29 +87,15 @@ public sealed class AudioEngine : IDisposable
 
     public void PanicVstInstrument() => _vstInstrument.Panic();
 
-    public void LoadVstInstrument(Vst3InstrumentItem instrument)
-    {
-        UnloadVstInstrument();
-        var provider = _vstInstrument.Load(instrument, SampleRate);
-        try
-        {
-            _mixer.AddMixerInput(provider);
-        }
-        catch
-        {
-            _vstInstrument.Unload();
-            throw;
-        }
-    }
+    public Task LoadVstInstrumentAsync(
+        Vst3InstrumentItem instrument,
+        CancellationToken cancellationToken = default) =>
+        _vstInstrument.LoadAsync(instrument, SampleRate, cancellationToken);
+
+    public bool OpenVstEditor() => _vstInstrument.OpenEditor();
 
     public void UnloadVstInstrument()
     {
-        var provider = _vstInstrument.Provider;
-        if (provider is not null)
-        {
-            _mixer.RemoveMixerInput(provider);
-        }
-
         _vstInstrument.Unload();
     }
     public void Choke(string group) => _drums.Choke(group);
