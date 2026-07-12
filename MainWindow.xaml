@@ -274,11 +274,21 @@
                         </StackPanel>
 
                         <StackPanel Grid.Column="1">
-                            <TextBlock Text="{Binding SelectedLibrary.Name}" FontSize="27" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding SelectedLibrary.Description}" Foreground="{StaticResource TextSecondary}"
-                                       FontSize="13" Margin="0,5,0,22" TextWrapping="Wrap" />
+                            <Grid>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding SelectedLibrary.Name}" FontSize="27" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding SelectedLibrary.Description}" Foreground="{StaticResource TextSecondary}"
+                                               FontSize="13" Margin="0,5,190,22" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Button Style="{StaticResource PrimaryButton}" Content="Importar librería"
+                                        HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Command="{Binding ImportSoundLibraryCommand}" />
+                            </Grid>
                             <TextBlock Text="Seleccionar una librería carga automáticamente su primer kit."
                                        Foreground="{StaticResource Success}" FontSize="11" Margin="0,-14,0,18" />
+                            <TextBlock Text="Al importar una carpeta se reconocen kick/bombo, snare/caja, hihat abierto o cerrado, tom agudo o grave, crash y ride. Las etiquetas soft, medium, hard o velNN crean capas de fuerza."
+                                       Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,-8,0,18"
+                                       TextWrapping="Wrap" />
 
                             <ItemsControl ItemsSource="{Binding SelectedLibrary.Kits}">
                                 <ItemsControl.ItemTemplate>
