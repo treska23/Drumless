@@ -2,6 +2,7 @@ using DrumPracticeStudio.Models;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using NAudio.Vst3;
 
 namespace DrumPracticeStudio.Audio;
 
@@ -11,6 +12,8 @@ public sealed class AudioEngine : IDisposable
 
     private readonly DrumSamplerProvider _drums;
     private readonly TrackTransportProvider _track;
+    private readonly MixingSampleProvider _mixer;
+    private readonly Vst3InstrumentHost _vstInstrument = new();
     private IWavePlayer? _output;
 
     public AudioEngine()
@@ -18,12 +21,12 @@ public sealed class AudioEngine : IDisposable
         var format = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, 2);
         _drums = new DrumSamplerProvider(format);
         _track = new TrackTransportProvider(format);
-        var mixer = new MixingSampleProvider([_track, _drums]) { ReadFully = true };
+        _mixer = new MixingSampleProvider([_track, _drums]) { ReadFully = true };
 
         try
         {
             var wasapi = new WasapiOut(AudioClientShareMode.Shared, useEventSync: true, latency: 20);
-            wasapi.Init(mixer.ToWaveProvider());
+            wasapi.Init(_mixer.ToWaveProvider());
             wasapi.Play();
             _output = wasapi;
             Status = "Audio WASAPI · 48 kHz";
@@ -34,7 +37,7 @@ public sealed class AudioEngine : IDisposable
             try
             {
                 var fallback = new WaveOutEvent { DesiredLatency = 50, NumberOfBuffers = 2 };
-                fallback.Init(mixer.ToWaveProvider());
+                fallback.Init(_mixer.ToWaveProvider());
                 fallback.Play();
                 _output = fallback;
                 Status = "Audio WaveOut · modo compatible";
@@ -53,6 +56,9 @@ public sealed class AudioEngine : IDisposable
     public TrackPlaybackState PlaybackState => _track.PlaybackState;
     public TimeSpan TrackPosition => _track.Position;
     public TimeSpan TrackDuration => _track.Duration;
+    public bool IsVstInstrumentLoaded => _vstInstrument.IsLoaded;
+    public string? VstInstrumentName => _vstInstrument.DisplayName;
+    public Vst3PluginView? VstInstrumentView => _vstInstrument.View;
 
     public async Task LoadKitAsync(DrumKit kit, CancellationToken cancellationToken = default)
     {
@@ -61,7 +67,50 @@ public sealed class AudioEngine : IDisposable
         _drums.SetKit(loaded);
     }
 
-    public void Trigger(string articulation, int velocity) => _drums.Trigger(articulation, velocity);
+    public void Trigger(string articulation, int velocity, int midiNote, int midiChannel = 1)
+    {
+        if (_vstInstrument.IsLoaded)
+        {
+            _vstInstrument.SendNoteOn(midiNote, velocity, midiChannel);
+            return;
+        }
+
+        _drums.Trigger(articulation, velocity);
+    }
+
+    public void SendNoteOff(int midiNote, int velocity, int midiChannel = 1) =>
+        _vstInstrument.SendNoteOff(midiNote, velocity, midiChannel);
+
+    public void SendControlChange(int controller, int value) =>
+        _vstInstrument.SendControlChange(controller, value);
+
+    public void PanicVstInstrument() => _vstInstrument.Panic();
+
+    public void LoadVstInstrument(Vst3InstrumentItem instrument)
+    {
+        UnloadVstInstrument();
+        var provider = _vstInstrument.Load(instrument, SampleRate);
+        try
+        {
+            _mixer.AddMixerInput(provider);
+        }
+        catch
+        {
+            _vstInstrument.Unload();
+            throw;
+        }
+    }
+
+    public void UnloadVstInstrument()
+    {
+        var provider = _vstInstrument.Provider;
+        if (provider is not null)
+        {
+            _mixer.RemoveMixerInput(provider);
+        }
+
+        _vstInstrument.Unload();
+    }
     public void Choke(string group) => _drums.Choke(group);
     public Task<long> LoadTrackAsync(string path, CancellationToken cancellationToken = default) => _track.LoadAsync(path, cancellationToken);
     public long PlayTrack() => _track.Play();
@@ -76,6 +125,7 @@ public sealed class AudioEngine : IDisposable
     public void Dispose()
     {
         _output?.Stop();
+        UnloadVstInstrument();
         _output?.Dispose();
         _track.Dispose();
     }
