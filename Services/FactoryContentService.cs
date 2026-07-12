@@ -45,7 +45,7 @@ public sealed class FactoryContentService
         {
             Id = "user.sounds",
             Name = "Mis sonidos",
-            Description = "Kits creados al sustituir pads por tus propios WAV.",
+            Description = "Kits importados o creados al sustituir pads por tus propios WAV.",
             Category = "Usuario",
             Accent = "#A58BFF",
             IsFactory = false
