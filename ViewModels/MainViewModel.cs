@@ -246,7 +246,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public double TrackProgress
     {
         get => _trackProgress;
-        private set => SetProperty(ref _trackProgress, value);
+        set
+        {
+            var boundedPosition = Math.Clamp(value, 0d, TrackDurationSeconds);
+            if (!SetProperty(ref _trackProgress, boundedPosition))
+            {
+                return;
+            }
+
+            var runGeneration = _audio.SeekTrack(TimeSpan.FromSeconds(boundedPosition));
+            if (_desiredTrackPlaying)
+            {
+                _activeRunGeneration = runGeneration;
+            }
+
+            TrackPositionLabel = FormatTime(TimeSpan.FromSeconds(boundedPosition));
+        }
     }
 
     public double TrackDurationSeconds
@@ -689,7 +704,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var duration = _audio.TrackDuration;
         TrackPositionLabel = FormatTime(position);
         TrackDurationLabel = FormatTime(duration);
-        TrackProgress = position.TotalSeconds;
+        SetProperty(ref _trackProgress, position.TotalSeconds, nameof(TrackProgress));
         TrackDurationSeconds = duration.TotalSeconds;
         PlayButtonLabel = _desiredTrackPlaying ? "Pausar" : "Reproducir";
     }

@@ -136,11 +136,13 @@
                                                 AutomationProperties.AutomationId="NextTrackButton" />
                                     </WrapPanel>
 
-                                    <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Height="5" Margin="0,20,0,8"
-                                                 Minimum="0"
-                                                 Maximum="{Binding TrackDurationSeconds, Mode=OneWay}"
-                                                 Value="{Binding TrackProgress, Mode=OneWay}"
-                                                 Background="#0D1016" Foreground="{StaticResource Accent}" BorderThickness="0" />
+                                    <Slider Grid.Row="1" Grid.ColumnSpan="2" Height="16" Margin="0,14,0,3"
+                                            Minimum="0"
+                                            Maximum="{Binding TrackDurationSeconds, Mode=OneWay}"
+                                            Value="{Binding TrackProgress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            IsMoveToPointEnabled="True"
+                                            ToolTip="Arrastra o pulsa para avanzar y retroceder"
+                                            AutomationProperties.Name="Posición de reproducción" />
                                     <Grid Grid.Row="2" Grid.ColumnSpan="2">
                                         <TextBlock Text="{Binding TrackPositionLabel}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
                                         <TextBlock Text="{Binding TrackDurationLabel}" Foreground="{StaticResource TextSecondary}" FontSize="11" HorizontalAlignment="Right" />
