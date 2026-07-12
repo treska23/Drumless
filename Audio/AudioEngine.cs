@@ -36,7 +36,7 @@ public sealed class AudioEngine : IDisposable
         {
             try
             {
-                var fallback = new WaveOutEvent { DesiredLatency = 50, NumberOfBuffers = 2 };
+                var fallback = new WaveOut { BufferMilliseconds = 50, NumberOfBuffers = 2 };
                 fallback.Init(_mixer.ToWaveProvider());
                 fallback.Play();
                 _output = fallback;
