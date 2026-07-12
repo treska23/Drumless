@@ -20,7 +20,7 @@ public sealed class TrackTransportProviderTests
         var loadGeneration = await transport.LoadAsync(trackPath);
         var runGeneration = transport.Play();
         var buffer = new float[2_048];
-        transport.Read(buffer, 0, buffer.Length);
+        transport.Read(buffer);
 
         Assert.AreEqual(TrackPlaybackState.Ended, transport.PlaybackState);
         Assert.IsFalse(transport.IsPlaying);
@@ -30,7 +30,7 @@ public sealed class TrackTransportProviderTests
         Assert.AreEqual(runGeneration, completion.RunGeneration);
         Assert.IsFalse(transport.TryDequeueTrackEnded(out _));
 
-        transport.Read(buffer, 0, buffer.Length);
+        transport.Read(buffer);
         Assert.IsFalse(transport.TryDequeueTrackEnded(out _),
             "El mismo final natural no debe notificarse más de una vez.");
     }
@@ -47,13 +47,13 @@ public sealed class TrackTransportProviderTests
 
         transport.Play();
         transport.Pause();
-        transport.Read(buffer, 0, buffer.Length);
+        transport.Read(buffer);
         Assert.AreEqual(TrackPlaybackState.Paused, transport.PlaybackState);
         Assert.IsFalse(transport.TryDequeueTrackEnded(out _));
 
         transport.Play();
         transport.Stop();
-        transport.Read(buffer, 0, buffer.Length);
+        transport.Read(buffer);
         Assert.AreEqual(TrackPlaybackState.Stopped, transport.PlaybackState);
         Assert.AreEqual(TimeSpan.Zero, transport.Position);
         Assert.IsFalse(transport.TryDequeueTrackEnded(out _));
@@ -91,7 +91,7 @@ public sealed class TrackTransportProviderTests
 
         var firstGeneration = await transport.LoadAsync(firstPath);
         transport.Play();
-        transport.Read(buffer, 0, buffer.Length);
+        transport.Read(buffer);
         var secondGeneration = await transport.LoadAsync(secondPath);
 
         Assert.IsTrue(secondGeneration > firstGeneration);
