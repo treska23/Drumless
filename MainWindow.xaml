@@ -617,7 +617,7 @@
                                               SelectedItem="{Binding SelectedVstInstrument}"
                                               DisplayMemberPath="DisplayLabel"
                                               MinWidth="430" />
-                                    <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Volver a buscar"
+                                    <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Buscar instrumentos"
                                             Margin="10,0,0,0" Command="{Binding ScanVstInstrumentsCommand}" />
                                 </Grid>
                                 <WrapPanel Margin="0,12,0,0">
