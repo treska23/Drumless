@@ -1,0 +1,111 @@
+param(
+    [string] $ProcessName = "DrumPracticeStudio"
+)
+
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+
+$process = Get-Process -Name $ProcessName -ErrorAction Stop |
+    Where-Object { $_.MainWindowHandle -ne 0 } |
+    Select-Object -First 1
+
+if (-not $process) {
+    throw "No se encontró la ventana de $ProcessName."
+}
+
+$root = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+
+function Find-ElementByName([string] $name) {
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        $name
+    )
+    return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+}
+
+function Find-ElementByAutomationId([string] $automationId) {
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+        $automationId
+    )
+    return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+}
+
+function Invoke-Element([System.Windows.Automation.AutomationElement] $element) {
+    if (-not $element) {
+        throw "No se encontró el control solicitado."
+    }
+
+    $pattern = $element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $pattern.Invoke()
+    Start-Sleep -Milliseconds 250
+}
+
+$buttonsCondition = New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::Button
+)
+$buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
+$names = @($buttons | ForEach-Object { $_.Current.Name })
+Write-Output ("BOTONES: " + ($names -join " | "))
+
+$practice = $buttons | Where-Object { $_.Current.Name -like "*Practicar" } | Select-Object -First 1
+Invoke-Element $practice
+
+$buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
+Write-Output ("TRAS PRACTICAR: " + (@($buttons | ForEach-Object { $_.Current.Name }) -join " | "))
+$kick = $buttons | Where-Object { $_.Current.Name -eq "Bombo" } | Select-Object -First 1
+Invoke-Element $kick
+
+$buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
+$libraries = $buttons | Where-Object { $_.Current.Name -like "*Librer*" } | Select-Object -First 1
+Invoke-Element $libraries
+
+$factory = Find-ElementByName "Factory Sessions"
+if (-not $factory) {
+    throw "La página de librerías no mostró Factory Sessions."
+}
+
+$buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
+$tracksPage = $buttons | Where-Object { $_.Current.Name -like "*Pistas locales" } | Select-Object -First 1
+Invoke-Element $tracksPage
+
+$requiredTrackControls = @(
+    "OutputFolderPathText",
+    "ChooseOutputFolderButton",
+    "RescanLibraryButton",
+    "TrackLibraryList",
+    "PlaylistSelector",
+    "PlaylistNameTextBox",
+    "NewPlaylistButton",
+    "RenamePlaylistButton",
+    "DeletePlaylistButton",
+    "PlaybackModeCombo"
+)
+foreach ($automationId in $requiredTrackControls) {
+    if (-not (Find-ElementByAutomationId $automationId)) {
+        throw "La página de pistas no expuso el control $automationId."
+    }
+}
+
+$buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
+$devices = $buttons | Where-Object { $_.Current.Name -like "*Dispositivos" } | Select-Object -First 1
+Invoke-Element $devices
+
+$allElements = $root.FindAll(
+    [System.Windows.Automation.TreeScope]::Descendants,
+    [System.Windows.Automation.Condition]::TrueCondition
+)
+$mapping = $allElements | Where-Object { $_.Current.Name -like "Perfil General Drums*" } | Select-Object -First 1
+if (-not $mapping) {
+    throw "La página de dispositivos no mostró el perfil MIDI."
+}
+
+[pscustomobject]@{
+    Window = $root.Current.Name
+    ButtonsFound = $names.Count
+    PadTriggered = $kick.Current.Name
+    LibrariesVerified = $factory.Current.Name
+    TrackControlsVerified = $requiredTrackControls.Count
+    MidiProfileVerified = $mapping.Current.Name
+}

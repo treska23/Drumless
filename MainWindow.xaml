@@ -1,0 +1,618 @@
+<Window x:Class="DrumPracticeStudio.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Drum Practice Studio"
+        Width="1420"
+        Height="900"
+        MinWidth="1120"
+        MinHeight="720"
+        WindowStartupLocation="CenterScreen">
+    <Grid Background="{StaticResource AppBackground}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="224" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Navegación -->
+        <Border Grid.Column="0" Background="#0F1218" BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,1,0">
+            <Grid Margin="18,20">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <Border Width="42" Height="42" HorizontalAlignment="Left" CornerRadius="10" Background="{StaticResource Accent}">
+                        <TextBlock Text="DS" Foreground="#15120D" FontWeight="Bold" FontSize="15"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="DRUM PRACTICE" FontWeight="Bold" FontSize="15" Margin="0,14,0,2" />
+                    <TextBlock Text="STUDIO" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Margin="0,28,0,0">
+                    <Button Style="{StaticResource NavButton}" Content="●  Practicar"
+                            Command="{Binding NavigateCommand}" CommandParameter="Practice" />
+                    <Button Style="{StaticResource NavButton}" Content="▦  Librerías"
+                            Command="{Binding NavigateCommand}" CommandParameter="Libraries" />
+                    <Button Style="{StaticResource NavButton}" Content="♫  Pistas locales"
+                            Command="{Binding NavigateCommand}" CommandParameter="Tracks" />
+                    <Button Style="{StaticResource NavButton}" Content="▶  YouTube"
+                            Command="{Binding NavigateCommand}" CommandParameter="YouTube" />
+                    <Button Style="{StaticResource NavButton}" Content="⚙  Dispositivos"
+                            Command="{Binding NavigateCommand}" CommandParameter="Settings" />
+                </StackPanel>
+
+                <Border Grid.Row="3" Style="{StaticResource CardStyle}" Padding="13" Background="#151922">
+                    <StackPanel>
+                        <TextBlock Text="PROTOTIPO 0.1" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
+                        <TextBlock Text="Audio y MIDI locales" Margin="0,5,0,0" FontSize="12" />
+                        <TextBlock Text="Sin secretos guardados" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Área principal -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="70" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Background="#0D1016">
+                <Grid Margin="28,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding StatusMessage}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="El controlador y el kit están desacoplados"
+                                   Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,3,0,0" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Background="#18251F" CornerRadius="8" Padding="12,7" Margin="0,0,10,0">
+                            <TextBlock Text="{Binding MidiStatus}" Foreground="{StaticResource Success}" FontSize="11" />
+                        </Border>
+                        <Border Background="{StaticResource AccentDark}" CornerRadius="8" Padding="12,7">
+                            <TextBlock Text="{Binding ActiveKitName}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" FontSize="11" />
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="1" Background="{StaticResource AppBackground}"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid Margin="30,26,30,36">
+                    <!-- PRACTICAR -->
+                    <Grid Visibility="{Binding IsPracticePage, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="330" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Margin="0,0,22,0">
+                            <TextBlock Text="Practicar" FontSize="30" FontWeight="SemiBold" />
+                            <TextBlock Text="Elige una pista, carga un kit y empieza a tocar."
+                                       Foreground="{StaticResource TextSecondary}" FontSize="14" Margin="0,5,0,22" />
+
+                            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,20">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel>
+                                        <TextBlock Text="PISTA LOCAL" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
+                                        <TextBlock Text="{Binding CurrentTrackTitle}" FontSize="19" FontWeight="SemiBold" Margin="0,7,0,2" />
+                                        <TextBlock Text="{Binding CurrentTrackSubtitle}" Foreground="{StaticResource TextSecondary}" FontSize="12" />
+                                    </StackPanel>
+                                    <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <Button Style="{StaticResource SecondaryButton}" Content="Anterior" Padding="11,8" Margin="0,0,8,0"
+                                                Command="{Binding PreviousTrackCommand}"
+                                                AutomationProperties.AutomationId="PreviousTrackButton" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="−10 s" Padding="11,8" Margin="0,0,8,0"
+                                                Command="{Binding SeekTrackCommand}" CommandParameter="-10" />
+                                        <Button Style="{StaticResource PrimaryButton}" Content="{Binding PlayButtonLabel}" MinWidth="105"
+                                                Command="{Binding ToggleTrackCommand}"
+                                                AutomationProperties.AutomationId="TogglePlaybackButton" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="Parar" Padding="11,8" Margin="8,0,8,0"
+                                                Command="{Binding StopTrackCommand}"
+                                                AutomationProperties.AutomationId="StopPlaybackButton" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="Siguiente" Padding="11,8"
+                                                Command="{Binding NextTrackCommand}"
+                                                AutomationProperties.AutomationId="NextTrackButton" />
+                                    </WrapPanel>
+
+                                    <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Height="5" Margin="0,20,0,8"
+                                                 Minimum="0"
+                                                 Maximum="{Binding TrackDurationSeconds, Mode=OneWay}"
+                                                 Value="{Binding TrackProgress, Mode=OneWay}"
+                                                 Background="#0D1016" Foreground="{StaticResource Accent}" BorderThickness="0" />
+                                    <Grid Grid.Row="2" Grid.ColumnSpan="2">
+                                        <TextBlock Text="{Binding TrackPositionLabel}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                        <TextBlock Text="{Binding TrackDurationLabel}" Foreground="{StaticResource TextSecondary}" FontSize="11" HorizontalAlignment="Right" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Grid Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Pads del kit" FontSize="20" FontWeight="SemiBold" />
+                                    <TextBlock Text="La altura del golpe MIDI controla la capa de velocidad."
+                                               Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,3,0,0" />
+                                </StackPanel>
+                                <TextBlock Text="Haz clic para probar" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                           Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                            </Grid>
+
+                            <ItemsControl ItemsSource="{Binding ActivePads}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="4" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Margin="0,0,10,10" Height="132"
+                                                Command="{Binding DataContext.PlayPadCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}" Cursor="Hand" BorderThickness="0" Padding="0"
+                                                AutomationProperties.Name="{Binding Name}"
+                                                AutomationProperties.HelpText="{Binding MidiLabel}">
+                                            <Button.Style>
+                                                <Style TargetType="Button">
+                                                    <Setter Property="Background" Value="{Binding Accent}" />
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="Button">
+                                                                <Border x:Name="PadRoot" Background="{TemplateBinding Background}" CornerRadius="12" Padding="15">
+                                                                    <Grid>
+                                                                        <StackPanel VerticalAlignment="Bottom">
+                                                                            <TextBlock Text="{Binding ShortName}" Foreground="#101217" FontWeight="Bold" FontSize="14" />
+                                                                            <TextBlock Text="{Binding MidiLabel}" Foreground="#5D4F40" FontSize="10" Margin="0,4,0,0" />
+                                                                        </StackPanel>
+                                                                        <Ellipse Width="10" Height="10" Fill="#66101217" HorizontalAlignment="Right" VerticalAlignment="Top" />
+                                                                    </Grid>
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsHit}" Value="True">
+                                                                        <Setter TargetName="PadRoot" Property="Opacity" Value="0.55" />
+                                                                    </DataTrigger>
+                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                        <Setter TargetName="PadRoot" Property="Opacity" Value="0.86" />
+                                                                    </Trigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1">
+                            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16">
+                                <StackPanel>
+                                    <TextBlock Text="KIT ACTIVO" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding ActiveKitName}" FontSize="23" FontWeight="SemiBold" Margin="0,8,0,3" />
+                                    <TextBlock Text="{Binding ActiveLibraryName}" Foreground="{StaticResource TextSecondary}" />
+                                    <Border Height="1" Background="{StaticResource Stroke}" Margin="0,18" />
+                                    <TextBlock Text="Cambiar de kit no cambia las notas asignadas a tu batería."
+                                               TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}" FontSize="12" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Elegir otro kit" Margin="0,16,0,0"
+                                            Command="{Binding NavigateCommand}" CommandParameter="Libraries" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16">
+                                <StackPanel>
+                                    <TextBlock Text="IMPORTAR PISTA" FontSize="12" FontWeight="SemiBold" />
+                                    <Button Style="{StaticResource PrimaryButton}" Content="Añadir pista original" Margin="0,12,0,8"
+                                            Command="{Binding ImportTrackCommand}" CommandParameter="original" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Añadir pista ya drumless"
+                                            Command="{Binding ImportTrackCommand}" CommandParameter="drumless" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="VOLUMEN DE PISTA" FontSize="11" Foreground="{StaticResource TextSecondary}" />
+                                    <Slider Minimum="0" Maximum="1" Value="{Binding TrackVolume}" Margin="0,10,0,2" />
+                                    <TextBlock Text="La batería mantiene su nivel independiente."
+                                               TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- LIBRERÍAS -->
+                    <Grid Visibility="{Binding IsLibrariesPage, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="310" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Margin="0,0,22,0">
+                            <TextBlock Text="Librerías" FontSize="30" FontWeight="SemiBold" />
+                            <TextBlock Text="Contenido instalado" Foreground="{StaticResource TextSecondary}" Margin="0,5,0,20" />
+                            <ListBox ItemsSource="{Binding Libraries}" SelectedItem="{Binding SelectedLibrary}" ItemContainerStyle="{x:Null}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource CardStyle}" Padding="15" Margin="0,0,0,10" Width="292">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="6" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Background="{Binding Accent}" CornerRadius="3" />
+                                                <StackPanel Grid.Column="1" Margin="13,0,0,0">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14" />
+                                                    <TextBlock Text="{Binding Category}" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,3,0,0" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="{Binding SelectedLibrary.Name}" FontSize="27" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding SelectedLibrary.Description}" Foreground="{StaticResource TextSecondary}"
+                                       FontSize="13" Margin="0,5,0,22" TextWrapping="Wrap" />
+                            <TextBlock Text="Seleccionar una librería carga automáticamente su primer kit."
+                                       Foreground="{StaticResource Success}" FontSize="11" Margin="0,-14,0,18" />
+
+                            <ItemsControl ItemsSource="{Binding SelectedLibrary.Kits}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="92" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Background="{Binding Accent}" Width="72" Height="72" CornerRadius="14" HorizontalAlignment="Left">
+                                                    <TextBlock Text="KIT" Foreground="#17130C" FontSize="16" FontWeight="Bold"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" FontSize="20" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextSecondary}"
+                                                               TextWrapping="Wrap" Margin="0,4,16,0" />
+                                                    <TextBlock Text="{Binding PadCountLabel}" Foreground="{Binding Accent}" FontSize="11" Margin="0,7,0,0" />
+                                                </StackPanel>
+                                                <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Content="Cargar kit" VerticalAlignment="Center"
+                                                        Command="{Binding DataContext.ActivateKitCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <Border Style="{StaticResource CardStyle}" Margin="0,8,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="Personalizar el kit activo" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="Sustituye un pad por un WAV. Si el kit es de fábrica, se creará una copia en Mis sonidos."
+                                               Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,5,0,15" />
+                                    <ItemsControl ItemsSource="{Binding ActivePads}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" Padding="11,8"
+                                                        Command="{Binding DataContext.ImportSampleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="＋ " Foreground="{Binding Accent}" FontWeight="Bold" />
+                                                        <TextBlock Text="{Binding Name}" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- PISTAS -->
+                    <StackPanel Visibility="{Binding IsTracksPage, Converter={StaticResource BoolToVisibility}}">
+                        <Grid Margin="0,0,0,20">
+                            <StackPanel>
+                                <TextBlock Text="Biblioteca y playlists" FontSize="30" FontWeight="SemiBold" />
+                                <TextBlock Text="Tus pistas externas siguen registradas y las versiones generadas aparecen automáticamente."
+                                           Foreground="{StaticResource TextSecondary}" Margin="0,5,0,0" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <Button Style="{StaticResource PrimaryButton}" Content="Importar original" Margin="0,0,10,0"
+                                        Command="{Binding ImportTrackCommand}" CommandParameter="original" />
+                                <Button Style="{StaticResource SecondaryButton}" Content="Añadir pista ya drumless"
+                                        Command="{Binding ImportTrackCommand}" CommandParameter="drumless" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16" Background="#141923">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="CARPETA PARA PISTAS GENERADAS" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding OutputFolderPath}" Margin="0,7,18,0" TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding OutputFolderPath}"
+                                               AutomationProperties.AutomationId="OutputFolderPathText" />
+                                    <TextBlock Text="Cambiarla no mueve ni elimina las pistas anteriores."
+                                               Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,5,0,0" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Elegir carpeta" Margin="0,0,8,0"
+                                        Command="{Binding ChooseOutputFolderCommand}" VerticalAlignment="Center"
+                                        AutomationProperties.AutomationId="ChooseOutputFolderButton" />
+                                <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Escanear ahora"
+                                        Command="{Binding RescanLibraryCommand}" VerticalAlignment="Center"
+                                        AutomationProperties.AutomationId="RescanLibraryButton" />
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="PISTA CARGADA" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding CurrentTrackTitle}" FontSize="21" FontWeight="SemiBold" Margin="0,7,0,3" />
+                                    <TextBlock Text="{Binding CurrentTrackSubtitle}" Foreground="{StaticResource TextSecondary}" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Crear versión sin batería"
+                                        Command="{Binding CreateDrumlessCommand}" IsEnabled="{Binding CanCreateDrumless}"
+                                        VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3*" />
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="2*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Style="{StaticResource CardStyle}" Padding="16">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <TextBlock Text="Biblioteca" FontSize="20" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding LibrarySummary}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <ListBox ItemsSource="{Binding Tracks}" SelectedItem="{Binding SelectedLibraryTrack}"
+                                             MaxHeight="430" AutomationProperties.AutomationId="TrackLibraryList">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="4,10">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel Margin="0,0,12,0">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                                                <TextBlock Text=" · ARCHIVO NO ENCONTRADO" Foreground="#FF7B7B" FontSize="10" FontWeight="Bold" Margin="7,2,0,0"
+                                                                           Visibility="{Binding IsMissing, Converter={StaticResource BoolToVisibility}}"
+                                                                           AutomationProperties.AutomationId="MissingTrackBadge" />
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding VariantLabel}" Foreground="{StaticResource Accent}" FontSize="11" Margin="0,3,0,0" />
+                                                            <TextBlock Text="{Binding Path}" Foreground="{StaticResource TextSecondary}" FontSize="10"
+                                                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="Cargar" Padding="10,7" Margin="0,0,6,0"
+                                                                    Command="{Binding DataContext.LoadTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" IsEnabled="{Binding IsAvailable}" />
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="+ Playlist" Padding="10,7"
+                                                                    Command="{Binding DataContext.AddTrackToPlaylistCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    AutomationProperties.AutomationId="AddTrackToPlaylistButton" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="16">
+                                <StackPanel>
+                                    <TextBlock Text="Playlists" FontSize="20" FontWeight="SemiBold" />
+                                    <ComboBox ItemsSource="{Binding Playlists}" SelectedItem="{Binding SelectedPlaylist}"
+                                              DisplayMemberPath="Name" Margin="0,10,0,8"
+                                              AutomationProperties.AutomationId="PlaylistSelector" />
+                                    <TextBox Text="{Binding PlaylistNameDraft, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Nombre para crear o renombrar" Margin="0,0,0,8"
+                                             AutomationProperties.AutomationId="PlaylistNameTextBox" />
+                                    <WrapPanel Margin="0,0,0,12">
+                                        <Button Style="{StaticResource PrimaryButton}" Content="Nueva" Padding="11,7" Margin="0,0,6,6"
+                                                Command="{Binding CreatePlaylistCommand}"
+                                                AutomationProperties.AutomationId="NewPlaylistButton" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="Renombrar" Padding="11,7" Margin="0,0,6,6"
+                                                Command="{Binding RenamePlaylistCommand}"
+                                                AutomationProperties.AutomationId="RenamePlaylistButton" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="Eliminar" Padding="11,7" Margin="0,0,0,6"
+                                                Command="{Binding DeletePlaylistCommand}"
+                                                AutomationProperties.AutomationId="DeletePlaylistButton" />
+                                    </WrapPanel>
+
+                                    <TextBlock Text="MODO DE REPRODUCCIÓN" Foreground="{StaticResource TextSecondary}" FontSize="10" FontWeight="Bold" />
+                                    <ComboBox ItemsSource="{Binding PlaybackModeOptions}" SelectedItem="{Binding SelectedPlaybackMode}"
+                                              DisplayMemberPath="Label" Margin="0,7,0,12"
+                                              AutomationProperties.AutomationId="PlaybackModeCombo" />
+
+                                    <ListBox ItemsSource="{Binding PlaylistTracks}" SelectedItem="{Binding SelectedPlaylistTrack}"
+                                             MaxHeight="300" AutomationProperties.AutomationId="PlaylistTrackList">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="2,8">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding AvailabilityLabel}" Foreground="{StaticResource TextSecondary}" FontSize="10" Margin="0,2,0,6" />
+                                                        <WrapPanel>
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="Cargar" Padding="8,5" Margin="0,0,5,0"
+                                                                    Command="{Binding DataContext.LoadTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" IsEnabled="{Binding IsAvailable}" />
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="↑" Padding="8,5" Margin="0,0,5,0"
+                                                                    Command="{Binding DataContext.MovePlaylistTrackUpCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    AutomationProperties.AutomationId="MovePlaylistTrackUpButton" />
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="↓" Padding="8,5" Margin="0,0,5,0"
+                                                                    Command="{Binding DataContext.MovePlaylistTrackDownCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    AutomationProperties.AutomationId="MovePlaylistTrackDownButton" />
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="Quitar" Padding="8,5"
+                                                                    Command="{Binding DataContext.RemovePlaylistTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    AutomationProperties.AutomationId="RemovePlaylistTrackButton" />
+                                                        </WrapPanel>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Border Style="{StaticResource CardStyle}" Margin="0,16,0,0" Background="#121D1A">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="MOTOR DE SEPARACIÓN" Foreground="{StaticResource Success}" FontSize="10" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding RemovalEngineStatus}" FontWeight="SemiBold" Margin="0,5,0,2" />
+                                    <TextBlock Text="{Binding RemovalStatus}" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Cancelar"
+                                        Command="{Binding CancelDrumRemovalCommand}"
+                                        Visibility="{Binding IsRemovingDrums, Converter={StaticResource BoolToVisibility}}"
+                                        VerticalAlignment="Center" Margin="14,0,0,0" />
+                                <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Height="6" Margin="0,15,0,0"
+                                             Minimum="0" Maximum="1" Value="{Binding RemovalProgress, Mode=OneWay}"
+                                             IsIndeterminate="{Binding IsRemovalIndeterminate, Mode=OneWay}"
+                                             Visibility="{Binding IsRemovingDrums, Converter={StaticResource BoolToVisibility}}"
+                                             Background="#0D1513" Foreground="{StaticResource Success}" BorderThickness="0" />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- YOUTUBE -->
+                    <StackPanel Visibility="{Binding IsYouTubePage, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="YouTube" FontSize="30" FontWeight="SemiBold" />
+                        <TextBlock Text="Búsqueda y reproducción intactas dentro de la aplicación."
+                                   Foreground="{StaticResource TextSecondary}" Margin="0,5,0,22" />
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="Buscar pistas drumless" FontSize="20" FontWeight="SemiBold" />
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="rock drumless backing track" IsEnabled="False" />
+                                    <Button Grid.Column="1" Style="{StaticResource PrimaryButton}" Content="Buscar" Margin="10,0,0,0" IsEnabled="False" />
+                                </Grid>
+                                <Border Background="#121D1A" BorderBrush="#29483E" BorderThickness="1" CornerRadius="10" Padding="15" Margin="0,18,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="Siguiente integración" Foreground="{StaticResource Success}" FontWeight="SemiBold" />
+                                        <TextBlock Text="Se conectará la Data API mediante un backend sin guardar claves en la aplicación y el reproductor oficial dentro de WebView2. El audio de YouTube nunca llegará al separador."
+                                                   Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,5,0,0" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- DISPOSITIVOS -->
+                    <StackPanel Visibility="{Binding IsSettingsPage, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Dispositivos MIDI" FontSize="30" FontWeight="SemiBold" />
+                        <TextBlock Text="Conecta una batería electrónica o un teclado y conserva el perfil al cambiar de kit."
+                                   Foreground="{StaticResource TextSecondary}" Margin="0,5,0,22" />
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Entrada MIDI" FontSize="16" FontWeight="SemiBold" />
+                                    <ComboBox ItemsSource="{Binding MidiDevices}" SelectedItem="{Binding SelectedMidiDevice}"
+                                              DisplayMemberPath="DisplayName" Margin="0,10,0,0" MinWidth="360" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Actualizar" Margin="14,29,8,0"
+                                        Command="{Binding RefreshMidiCommand}" />
+                                <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Content="{Binding MidiButtonLabel}" Margin="0,29,0,0"
+                                        Command="{Binding ConnectMidiCommand}" MinWidth="105" />
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="Perfil General Drums · inicial" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Text="Estas notas producen articulaciones, no nombres de archivos. MIDI Learn y perfiles por fabricante llegarán después."
+                                           Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,5,0,16" />
+                                <ItemsControl ItemsSource="{Binding MappingRows}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><UniformGrid Columns="2" /></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#12161E" BorderBrush="{StaticResource Stroke}" BorderThickness="1"
+                                                    CornerRadius="8" Padding="12" Margin="0,0,10,10">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="75" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding NoteLabel}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding ArticulationLabel}" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Window>
