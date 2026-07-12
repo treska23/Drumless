@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
 using DrumPracticeStudio.Models;
@@ -32,6 +33,58 @@ public sealed class DrumLibraryImportService
         }
 
         importSample ??= static path => path;
+        return ImportDirectory(folderPath, new DirectoryInfo(folderPath).Name, importSample);
+    }
+
+    public DrumLibraryImportResult ImportZip(
+        string zipPath,
+        Func<string, string> importSample)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(zipPath);
+        ArgumentNullException.ThrowIfNull(importSample);
+        if (!File.Exists(zipPath))
+        {
+            throw new FileNotFoundException("No se encuentra el archivo ZIP.", zipPath);
+        }
+
+        if (!string.Equals(Path.GetExtension(zipPath), ".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new NotSupportedException("La librería comprimida debe ser un archivo ZIP.");
+        }
+
+        var temporaryFolder = Path.Combine(
+            Path.GetTempPath(),
+            "DrumPracticeStudio",
+            "LibraryImports",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryFolder);
+
+        try
+        {
+            ExtractZipSafely(zipPath, temporaryFolder);
+            return ImportDirectory(
+                temporaryFolder,
+                Path.GetFileNameWithoutExtension(zipPath),
+                importSample);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(temporaryFolder, recursive: true);
+            }
+            catch
+            {
+                // Los temporales no deben ocultar el resultado de la importación.
+            }
+        }
+    }
+
+    private static DrumLibraryImportResult ImportDirectory(
+        string folderPath,
+        string kitName,
+        Func<string, string> importSample)
+    {
         var wavFiles = Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories)
             .Where(path => string.Equals(Path.GetExtension(path), ".wav", StringComparison.OrdinalIgnoreCase))
             .Order(StringComparer.OrdinalIgnoreCase)
@@ -59,7 +112,6 @@ public sealed class DrumLibraryImportService
                 "hihat-open, tom-high, tom-low, crash o ride.");
         }
 
-        var kitName = new DirectoryInfo(folderPath).Name;
         var kit = new DrumKit
         {
             Id = $"user.imported.{Guid.NewGuid():N}",
@@ -87,6 +139,28 @@ public sealed class DrumLibraryImportService
         }
 
         return new DrumLibraryImportResult(kit, recognized.Count, wavFiles.Length - recognized.Count);
+    }
+
+    private static void ExtractZipSafely(string zipPath, string destinationFolder)
+    {
+        var destinationRoot = Path.GetFullPath(destinationFolder) + Path.DirectorySeparatorChar;
+        using var archive = ZipFile.OpenRead(zipPath);
+        foreach (var entry in archive.Entries)
+        {
+            if (string.IsNullOrEmpty(entry.Name))
+            {
+                continue;
+            }
+
+            var destinationPath = Path.GetFullPath(Path.Combine(destinationFolder, entry.FullName));
+            if (!destinationPath.StartsWith(destinationRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("El ZIP contiene una ruta no segura.");
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            entry.ExtractToFile(destinationPath, overwrite: false);
+        }
     }
 
     private static DrumPad CreatePad(PadDefinition definition) => new()
@@ -181,13 +255,13 @@ public sealed class DrumLibraryImportService
             return "ride.bow";
         }
 
-        var isTom = tokens.Contains("tom") || HasAny(tokens, "tom1", "tom2", "tom3", "tomhigh", "tomlow");
-        if (isTom && HasAny(tokens, "low", "floor", "grave", "bajo", "tom2", "tom3", "tomlow"))
+        var isTom = tokens.Contains("tom") || HasAny(tokens, "tom1", "tom2", "tom3", "tomhigh", "tomlow", "hitom", "lotom");
+        if (isTom && HasAny(tokens, "low", "floor", "grave", "bajo", "tom2", "tom3", "tomlow", "lotom"))
         {
             return "tom.low";
         }
 
-        if (isTom && HasAny(tokens, "high", "rack", "agudo", "alto", "tom1", "tomhigh"))
+        if (isTom && HasAny(tokens, "high", "rack", "agudo", "alto", "tom1", "tomhigh", "hitom"))
         {
             return "tom.high";
         }
@@ -209,12 +283,12 @@ public sealed class DrumLibraryImportService
             return 32;
         }
 
-        if (HasAny(tokens, "medium", "mediumsoft", "mid", "medio", "mp", "mf"))
+        if (HasAny(tokens, "medium", "mediumsoft", "mid", "medio", "mp", "mf", "f"))
         {
             return 80;
         }
 
-        if (HasAny(tokens, "hard", "loud", "fuerte", "forte", "ff", "f"))
+        if (HasAny(tokens, "hard", "loud", "fuerte", "forte", "ff"))
         {
             return 112;
         }
