@@ -1,103 +1,354 @@
+using System.Diagnostics;
+using System.IO.Pipes;
+using System.Text;
+using System.Text.Json;
 using DrumPracticeStudio.Models;
-using NAudio.Vst3;
-using NAudio.Wave;
+using DrumPracticeStudio.Services;
 
 namespace DrumPracticeStudio.Audio;
 
 internal sealed class Vst3InstrumentHost : IDisposable
 {
-    private const int MaximumBlockSize = 2_048;
+    private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(45);
+    private readonly object _sync = new();
+    private Process? _process;
+    private NamedPipeServerStream? _pipe;
+    private StreamWriter? _writer;
+    private string? _configurationPath;
+    private bool _stopping;
+    private bool _hasEditor;
 
-    private Vst3Module? _module;
-    private Vst3Plugin? _plugin;
-    private Vst3PluginView? _view;
+    public event EventHandler<string>? Exited;
 
-    public ISampleProvider? Provider { get; private set; }
-    public Vst3PluginView? View => _view;
-    public bool IsLoaded => _plugin is not null;
+    public bool IsLoaded
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return IsProcessRunning(_process) && _writer is not null;
+            }
+        }
+    }
+
     public string? DisplayName { get; private set; }
 
-    public ISampleProvider Load(Vst3InstrumentItem instrument, int sampleRate)
+    public async Task LoadAsync(
+        Vst3InstrumentItem instrument,
+        int sampleRate,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(instrument);
         Unload();
 
-        Vst3Module? module = null;
-        Vst3Plugin? plugin = null;
-        Vst3PluginView? view = null;
+        var executablePath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            throw new InvalidOperationException("No se pudo localizar el ejecutable de Drum Practice Studio.");
+        }
+
+        var pipeName = $"DrumPracticeStudio.Vst3.{Guid.NewGuid():N}";
+        var configurationPath = Path.Combine(
+            Path.GetTempPath(),
+            $"DrumPracticeStudio.Vst3.{Guid.NewGuid():N}.json");
+        var configuration = new Vst3RuntimeConfiguration(
+            instrument.Module.Path,
+            instrument.Module.Name,
+            instrument.PluginClass.ClassId,
+            instrument.PluginClass.Category,
+            instrument.PluginClass.Name,
+            instrument.PluginClass.Vendor,
+            instrument.PluginClass.Version,
+            instrument.PluginClass.SdkVersion,
+            instrument.PluginClass.SubCategories,
+            sampleRate);
+        await File.WriteAllTextAsync(
+            configurationPath,
+            JsonSerializer.Serialize(configuration),
+            cancellationToken);
+
+        var pipe = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+        var startInfo = new ProcessStartInfo(executablePath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
+        startInfo.ArgumentList.Add(Vst3RuntimeProtocol.Argument);
+        startInfo.ArgumentList.Add(configurationPath);
+        startInfo.ArgumentList.Add(pipeName);
+
+        Process? process = null;
+        StreamWriter? commandWriter = null;
         try
         {
-            module = Vst3Module.Load(instrument.Module.Path);
-            plugin = module.CreatePlugin(instrument.PluginClass, sampleRate, MaximumBlockSize);
-            if (!plugin.IsInstrument)
+            process = Process.Start(startInfo)
+                      ?? throw new InvalidOperationException("No se pudo iniciar el motor VST3 aislado.");
+            process.EnableRaisingEvents = true;
+            process.Exited += OnProcessExited;
+
+            lock (_sync)
             {
-                throw new InvalidOperationException($"{instrument.DisplayName} no se identificó como instrumento VST3.");
+                _process = process;
+                _pipe = pipe;
+                _configurationPath = configurationPath;
+                _stopping = false;
+                DisplayName = instrument.DisplayName;
             }
 
-            var provider = new Vst3InstrumentSampleProvider(plugin);
-            if (provider.WaveFormat.Channels != 2)
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(StartupTimeout);
+            await pipe.WaitForConnectionAsync(timeout.Token);
+
+            var reader = new StreamReader(
+                pipe,
+                Encoding.UTF8,
+                detectEncodingFromByteOrderMarks: true,
+                bufferSize: 1_024,
+                leaveOpen: true);
+            commandWriter = new StreamWriter(
+                pipe,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                bufferSize: 1_024,
+                leaveOpen: true) { AutoFlush = true };
+            var responseLine = await reader.ReadLineAsync(timeout.Token);
+            var response = responseLine is null
+                ? null
+                : JsonSerializer.Deserialize<Vst3RuntimeResponse>(responseLine);
+            reader.Dispose();
+            if (response is null || !response.Ready)
             {
-                throw new NotSupportedException(
-                    $"{instrument.DisplayName} ha abierto {provider.WaveFormat.Channels} canales. " +
-                    "Esta primera versión necesita una salida principal estéreo.");
+                throw new InvalidOperationException(
+                    response?.Message ?? "El motor VST3 se cerró durante la carga.");
             }
 
-            view = plugin.CreateView();
-            _module = module;
-            _plugin = plugin;
-            _view = view;
-            Provider = provider;
-            DisplayName = instrument.DisplayName;
-            return provider;
+            lock (_sync)
+            {
+                _writer = commandWriter;
+                _hasEditor = response.HasEditor;
+            }
+            commandWriter = null;
+            TryDeleteConfiguration();
         }
         catch
         {
-            view?.Dispose();
-            plugin?.Dispose();
-            module?.Dispose();
+            if (process is not null)
+            {
+                try
+                {
+                    process.Exited -= OnProcessExited;
+                }
+                catch
+                {
+                    // El evento puede haberse disparado y liberado ya el proceso.
+                }
+            }
+            commandWriter?.Dispose();
+            Unload();
+            pipe.Dispose();
+            TryDelete(configurationPath);
             throw;
         }
     }
 
     public void SendNoteOn(int note, int velocity, int channel) =>
-        _plugin?.SendNoteOn(
+        Send(new Vst3RuntimeCommand(
+            "NoteOn",
             Math.Clamp(note, 0, 127),
-            Math.Clamp(velocity, 1, 127) / 127f,
-            Math.Clamp(channel - 1, 0, 15));
+            Math.Clamp(velocity, 1, 127),
+            Math.Clamp(channel - 1, 0, 15)));
 
     public void SendNoteOff(int note, int velocity, int channel) =>
-        _plugin?.SendNoteOff(
+        Send(new Vst3RuntimeCommand(
+            "NoteOff",
             Math.Clamp(note, 0, 127),
-            Math.Clamp(velocity, 0, 127) / 127f,
-            Math.Clamp(channel - 1, 0, 15));
+            Math.Clamp(velocity, 0, 127),
+            Math.Clamp(channel - 1, 0, 15)));
 
     public void SendControlChange(int controller, int value) =>
-        _plugin?.SendControlChange(
+        Send(new Vst3RuntimeCommand(
+            "ControlChange",
             Math.Clamp(controller, 0, 127),
-            Math.Clamp(value, 0, 127) / 127d);
+            Math.Clamp(value, 0, 127)));
 
-    public void Panic() => _plugin?.AllNotesOff();
+    public void Panic() => Send(new Vst3RuntimeCommand("Panic"));
+
+    public bool OpenEditor()
+    {
+        lock (_sync)
+        {
+            if (!_hasEditor || !IsProcessRunning(_process) || _writer is null)
+            {
+                return false;
+            }
+        }
+
+        Send(new Vst3RuntimeCommand("OpenEditor"));
+        return true;
+    }
 
     public void Unload()
     {
+        Process? process;
+        NamedPipeServerStream? pipe;
+        StreamWriter? writer;
+        lock (_sync)
+        {
+            _stopping = true;
+            process = _process;
+            pipe = _pipe;
+            writer = _writer;
+            _process = null;
+            _pipe = null;
+            _writer = null;
+            _hasEditor = false;
+            DisplayName = null;
+        }
+
         try
         {
-            _plugin?.AllNotesOff();
+            writer?.WriteLine(JsonSerializer.Serialize(new Vst3RuntimeCommand("Stop")));
         }
         catch
         {
-            // El instrumento puede estar cerrándose después de un fallo interno.
+            // El motor puede haberse cerrado antes de recibir Stop.
+        }
+        writer?.Dispose();
+        pipe?.Dispose();
+
+        if (process is not null)
+        {
+            process.Exited -= OnProcessExited;
+            try
+            {
+                if (!process.HasExited && !process.WaitForExit(2_000))
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // El proceso puede haberse cerrado mientras se comprobaba.
+            }
+            process.Dispose();
         }
 
-        _view?.Dispose();
-        _view = null;
-        _plugin?.Dispose();
-        _plugin = null;
-        _module?.Dispose();
-        _module = null;
-        Provider = null;
-        DisplayName = null;
+        TryDeleteConfiguration();
+        lock (_sync)
+        {
+            _stopping = false;
+        }
     }
 
     public void Dispose() => Unload();
+
+    private void Send(Vst3RuntimeCommand command)
+    {
+        string? failure = null;
+        lock (_sync)
+        {
+            if (!IsProcessRunning(_process) || _writer is null)
+            {
+                return;
+            }
+
+            try
+            {
+                _writer.WriteLine(JsonSerializer.Serialize(command));
+            }
+            catch (Exception exception)
+            {
+                failure = exception.Message;
+            }
+        }
+
+        if (failure is not null)
+        {
+            Exited?.Invoke(this, $"El motor VST3 dejó de responder: {failure}");
+        }
+    }
+
+    private void OnProcessExited(object? sender, EventArgs e)
+    {
+        var notify = false;
+        Process? exitedProcess = null;
+        lock (_sync)
+        {
+            if (ReferenceEquals(sender, _process) && !_stopping)
+            {
+                try
+                {
+                    _writer?.Dispose();
+                    _pipe?.Dispose();
+                }
+                catch
+                {
+                    // La tubería ya está rota cuando el proceso nativo termina abruptamente.
+                }
+                exitedProcess = _process;
+                _writer = null;
+                _pipe = null;
+                _process = null;
+                _hasEditor = false;
+                DisplayName = null;
+                notify = true;
+            }
+        }
+
+        exitedProcess?.Dispose();
+        TryDeleteConfiguration();
+        if (notify)
+        {
+            Exited?.Invoke(
+                this,
+                "El instrumento VST3 se cerró por un fallo interno. Drumless continúa usando el motor interno.");
+        }
+    }
+
+    private void TryDeleteConfiguration()
+    {
+        string? path;
+        lock (_sync)
+        {
+            path = _configurationPath;
+            _configurationPath = null;
+        }
+        if (path is not null)
+        {
+            TryDelete(path);
+        }
+    }
+
+    private static bool IsProcessRunning(Process? process)
+    {
+        if (process is null)
+        {
+            return false;
+        }
+        try
+        {
+            return !process.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
+            // La limpieza temporal no debe impedir cerrar el motor.
+        }
+    }
 }
