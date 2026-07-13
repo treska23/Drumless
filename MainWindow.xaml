@@ -7,55 +7,59 @@
         Title="Drum Practice Studio"
         Width="1420"
         Height="900"
-        MinWidth="1120"
-        MinHeight="720"
-        WindowStartupLocation="CenterScreen">
+        MinWidth="240"
+        MinHeight="140"
+        WindowStartupLocation="Manual"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
     <Grid Background="{StaticResource AppBackground}">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="224" />
+            <ColumnDefinition Width="0.22*" MinWidth="160" MaxWidth="224" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
         <!-- Navegación -->
         <Border Grid.Column="0" Background="#0F1218" BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,1,0">
-            <Grid Margin="18,20">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid Margin="18,20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
 
-                <StackPanel>
-                    <Border Width="42" Height="42" HorizontalAlignment="Left" CornerRadius="10" Background="{StaticResource Accent}">
-                        <TextBlock Text="DS" Foreground="#15120D" FontWeight="Bold" FontSize="15"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
-                    <TextBlock Text="DRUM PRACTICE" FontWeight="Bold" FontSize="15" Margin="0,14,0,2" />
-                    <TextBlock Text="STUDIO" Foreground="{StaticResource TextSecondary}" FontSize="11" />
-                </StackPanel>
-
-                <StackPanel Grid.Row="1" Margin="0,28,0,0">
-                    <Button Style="{StaticResource NavButton}" Content="●  Practicar"
-                            Command="{Binding NavigateCommand}" CommandParameter="Practice" />
-                    <Button Style="{StaticResource NavButton}" Content="▦  Librerías"
-                            Command="{Binding NavigateCommand}" CommandParameter="Libraries" />
-                    <Button Style="{StaticResource NavButton}" Content="♫  Pistas locales"
-                            Command="{Binding NavigateCommand}" CommandParameter="Tracks" />
-                    <Button Style="{StaticResource NavButton}" Content="▶  YouTube"
-                            Command="{Binding NavigateCommand}" CommandParameter="YouTube" />
-                    <Button Style="{StaticResource NavButton}" Content="⚙  Dispositivos"
-                            Command="{Binding NavigateCommand}" CommandParameter="Settings" />
-                </StackPanel>
-
-                <Border Grid.Row="3" Style="{StaticResource CardStyle}" Padding="13" Background="#151922">
                     <StackPanel>
-                        <TextBlock Text="PROTOTIPO 0.1" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
-                        <TextBlock Text="Audio y MIDI locales" Margin="0,5,0,0" FontSize="12" />
-                        <TextBlock Text="Sin secretos guardados" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                        <Border Width="42" Height="42" HorizontalAlignment="Left" CornerRadius="10" Background="{StaticResource Accent}">
+                            <TextBlock Text="DS" Foreground="#15120D" FontWeight="Bold" FontSize="15"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="DRUM PRACTICE" FontWeight="Bold" FontSize="15" Margin="0,14,0,2" />
+                        <TextBlock Text="STUDIO" Foreground="{StaticResource TextSecondary}" FontSize="11" />
                     </StackPanel>
-                </Border>
-            </Grid>
+
+                    <StackPanel Grid.Row="1" Margin="0,28,0,0">
+                        <Button Style="{StaticResource NavButton}" Content="●  Practicar"
+                                Command="{Binding NavigateCommand}" CommandParameter="Practice" />
+                        <Button Style="{StaticResource NavButton}" Content="▦  Librerías"
+                                Command="{Binding NavigateCommand}" CommandParameter="Libraries" />
+                        <Button Style="{StaticResource NavButton}" Content="♫  Pistas locales"
+                                Command="{Binding NavigateCommand}" CommandParameter="Tracks" />
+                        <Button Style="{StaticResource NavButton}" Content="▶  YouTube"
+                                Command="{Binding NavigateCommand}" CommandParameter="YouTube" />
+                        <Button Style="{StaticResource NavButton}" Content="⚙  Dispositivos"
+                                Command="{Binding NavigateCommand}" CommandParameter="Settings" />
+                    </StackPanel>
+
+                    <Border Grid.Row="3" Style="{StaticResource CardStyle}" Padding="13" Background="#151922">
+                        <StackPanel>
+                            <TextBlock Text="PROTOTIPO 0.1" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="Audio y MIDI locales" Margin="0,5,0,0" FontSize="12" />
+                            <TextBlock Text="Sin secretos guardados" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </ScrollViewer>
         </Border>
 
         <!-- Área principal -->
@@ -88,7 +92,7 @@
             </Border>
 
             <ScrollViewer Grid.Row="1" Background="{StaticResource AppBackground}"
-                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
                 <Grid Margin="30,26,30,36">
                     <!-- PRACTICAR -->
                     <Grid Visibility="{Binding IsPracticePage, Converter={StaticResource BoolToVisibility}}">
