@@ -16,6 +16,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly UserKitStore _userKitStore = new();
     private readonly DrumLibraryImportService _libraryImport = new();
     private readonly Vst3InstrumentScanner _vstScanner = new();
+    private readonly AudioOutputDeviceService _audioOutputDevices = new();
     private readonly DrumRemovalService _drumRemoval = new();
     private readonly AudioEngine _audio = new();
     private readonly MidiInputService _midi = new();
@@ -33,6 +34,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private DrumKit? _selectedKit;
     private DrumKit? _activeKit;
     private MidiDeviceItem? _selectedMidiDevice;
+    private AudioOutputDeviceItem? _selectedAudioOutputDevice;
     private LocalTrack? _currentTrack;
     private string _statusMessage = "Preparando el estudio…";
     private string _midiStatus = "No conectado";
@@ -51,6 +53,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private Vst3InstrumentItem? _selectedVstInstrument;
     private string _vstStatus = "Pulsa «Buscar instrumentos» para localizar Addictive Drums y Groove Agent de forma aislada.";
     private bool _isScanningVst;
+    private string _audioOutputStatus = "Buscando salidas de audio…";
 
     public MainViewModel()
     {
@@ -62,6 +65,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         ActivePads = [];
         MidiDevices = [];
+        AudioOutputDevices = [];
         MappingRows = [];
         Vst3Instruments = [];
         Tracks = _trackLibrary.Tracks;
@@ -110,6 +114,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CancelDrumRemovalCommand = new RelayCommand(CancelDrumRemoval);
         RefreshMidiCommand = new RelayCommand(RefreshMidiDevices);
         ConnectMidiCommand = new RelayCommand(ToggleMidiConnection);
+        RefreshAudioOutputsCommand = new RelayCommand(RefreshAudioOutputDevices);
+        ApplyAudioOutputCommand = new RelayCommand(ApplyAudioOutputDevice);
         ScanVstInstrumentsCommand = new RelayCommand(() => _ = ScanVstInstrumentsAsync(force: true));
         LoadVstInstrumentCommand = new RelayCommand(() => _ = LoadSelectedVstInstrumentAsync());
         UseInternalDrumsCommand = new RelayCommand(UseInternalDrums);
@@ -128,6 +134,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _transportTimer.Start();
 
         RefreshMidiDevices();
+        RefreshAudioOutputDevices();
         SelectedLibrary = Libraries.FirstOrDefault(library => library.Kits.Count > 0);
 
         StatusMessage = _audio.IsAvailable
@@ -145,6 +152,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<SoundLibrary> Libraries { get; }
     public ObservableCollection<PadViewModel> ActivePads { get; }
     public ObservableCollection<MidiDeviceItem> MidiDevices { get; }
+    public ObservableCollection<AudioOutputDeviceItem> AudioOutputDevices { get; }
     public ObservableCollection<MidiMappingRow> MappingRows { get; }
     public ObservableCollection<Vst3InstrumentItem> Vst3Instruments { get; }
     public ObservableCollection<LocalTrack> Tracks { get; }
@@ -163,6 +171,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public RelayCommand CancelDrumRemovalCommand { get; }
     public RelayCommand RefreshMidiCommand { get; }
     public RelayCommand ConnectMidiCommand { get; }
+    public RelayCommand RefreshAudioOutputsCommand { get; }
+    public RelayCommand ApplyAudioOutputCommand { get; }
     public RelayCommand ScanVstInstrumentsCommand { get; }
     public RelayCommand LoadVstInstrumentCommand { get; }
     public RelayCommand UseInternalDrumsCommand { get; }
@@ -210,6 +220,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         get => _selectedMidiDevice;
         set => SetProperty(ref _selectedMidiDevice, value);
+    }
+
+    public AudioOutputDeviceItem? SelectedAudioOutputDevice
+    {
+        get => _selectedAudioOutputDevice;
+        set => SetProperty(ref _selectedAudioOutputDevice, value);
+    }
+
+    public string AudioOutputStatus
+    {
+        get => _audioOutputStatus;
+        private set => SetProperty(ref _audioOutputStatus, value);
     }
 
     public LocalTrack? CurrentTrack
@@ -476,7 +498,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void TriggerPad(PadViewModel pad, int velocity)
     {
         _audio.Trigger(pad.Articulation, velocity, pad.Pad.DefaultMidiNote);
+        if (_audio.IsVstInstrumentLoaded)
+        {
+            _ = ReleaseClickedVstNoteAsync(pad.Pad.DefaultMidiNote);
+        }
         _ = pad.FlashAsync();
+    }
+
+    private async Task ReleaseClickedVstNoteAsync(int midiNote)
+    {
+        await Task.Delay(120);
+        _audio.SendNoteOff(midiNote, 0);
     }
 
     private async Task ImportSampleAsync(PadViewModel sourcePad)
@@ -855,6 +887,61 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         MidiStatus = MidiDevices.Count == 0 ? "No se encontraron entradas MIDI" : "Listo para conectar";
     }
 
+    private void RefreshAudioOutputDevices()
+    {
+        try
+        {
+            var selectedId = SelectedAudioOutputDevice?.Id ?? _audio.OutputDeviceId;
+            AudioOutputDevices.Clear();
+            foreach (var device in _audioOutputDevices.GetDevices())
+            {
+                AudioOutputDevices.Add(device);
+            }
+
+            SelectedAudioOutputDevice = AudioOutputDevices.FirstOrDefault(device =>
+                                            string.Equals(device.Id, selectedId, StringComparison.Ordinal))
+                                        ?? AudioOutputDevices.FirstOrDefault(device => device.IsDefault)
+                                        ?? AudioOutputDevices.FirstOrDefault();
+            AudioOutputStatus = AudioOutputDevices.Count == 0
+                ? "No se encontraron salidas de audio activas."
+                : $"Salida activa: {_audio.OutputDeviceName ?? "predeterminada de Windows"}";
+        }
+        catch (Exception exception)
+        {
+            AudioOutputStatus = $"No se pudieron leer las salidas: {exception.Message}";
+        }
+    }
+
+    private void ApplyAudioOutputDevice()
+    {
+        if (SelectedAudioOutputDevice is not { } selected)
+        {
+            AudioOutputStatus = "Selecciona una salida de audio.";
+            return;
+        }
+
+        try
+        {
+            _audio.SelectOutputDevice(selected.Id);
+            AudioOutputStatus = $"Salida activa: {selected.Name}";
+            StatusMessage = $"El programa y el VST3 suenan por {selected.Name}";
+            if (_audio.IsVstInstrumentLoaded)
+            {
+                VstStatus = $"Activo: {_audio.VstInstrumentName} · salida {selected.Name}";
+            }
+        }
+        catch (Exception exception)
+        {
+            AudioOutputStatus = $"No se pudo usar {selected.Name}: {exception.Message}";
+            MessageBox.Show(
+                $"No se pudo abrir la salida «{selected.Name}».\n\n{exception.Message}\n\n" +
+                "La salida anterior sigue activa.",
+                "Salida de audio",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
     private void ToggleMidiConnection()
     {
         if (_midi.IsConnected)
@@ -967,8 +1054,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             await _audio.LoadVstInstrumentAsync(instrument, cancellation.Token);
             OnPropertyChanged(nameof(IsVstInstrumentLoaded));
             OnPropertyChanged(nameof(ActiveDrumEngineLabel));
-            VstStatus = $"Activo: {instrument.DisplayName} · abre su editor para elegir el kit";
-            StatusMessage = $"Motor de batería: {instrument.DisplayName}";
+            var editorOpened = _audio.OpenVstEditor();
+            VstStatus = editorOpened
+                ? $"Activo: {instrument.DisplayName} · editor abierto; elige el kit dentro del instrumento"
+                : $"Activo: {instrument.DisplayName} · este instrumento no ofrece editor";
+            StatusMessage = $"Los pads están conectados a {instrument.DisplayName}";
         }
         catch (OperationCanceledException)
         {
