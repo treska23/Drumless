@@ -1,4 +1,5 @@
 using DrumPracticeStudio.Models;
+using DrumPracticeStudio.Midi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
@@ -73,8 +74,13 @@ public sealed class AudioEngine : IDisposable
     public void SendNoteOff(int midiNote, int velocity, int midiChannel = 1) =>
         _vstInstrument.SendNoteOff(midiNote, velocity, midiChannel);
 
-    public void SendControlChange(int controller, int value) =>
-        _vstInstrument.SendControlChange(controller, value);
+    public void SendControlChange(int controller, int value)
+    {
+        if (Vst3MidiControllerPolicy.ShouldForward(controller))
+        {
+            _vstInstrument.SendControlChange(controller, value);
+        }
+    }
 
     public void PanicVstInstrument() => _vstInstrument.Panic();
 
