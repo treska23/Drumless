@@ -2,8 +2,8 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
+using DrumPracticeStudio.Audio;
 using DrumPracticeStudio.Views;
-using NAudio.CoreAudioApi;
 using NAudio.Vst3;
 using NAudio.Wave;
 
@@ -19,11 +19,17 @@ internal sealed record Vst3RuntimeConfiguration(
     string Version,
     string SdkVersion,
     string SubCategories,
-    int SampleRate);
+    int SampleRate,
+    string? OutputDeviceId);
 
 internal sealed record Vst3RuntimeResponse(bool Ready, bool HasEditor, string Message);
 
-internal sealed record Vst3RuntimeCommand(string Type, int Value1 = 0, int Value2 = 0, int Value3 = 0);
+internal sealed record Vst3RuntimeCommand(
+    string Type,
+    int Value1 = 0,
+    int Value2 = 0,
+    int Value3 = 0,
+    string? Text = null);
 
 internal static class Vst3RuntimeProtocol
 {
@@ -136,6 +142,9 @@ internal static class Vst3RuntimeProtocol
             case "CloseEditor":
                 runtime.CloseEditor();
                 break;
+            case "SetOutput":
+                runtime.SetOutput(command.Text);
+                break;
         }
     }
 
@@ -155,19 +164,22 @@ internal static class Vst3RuntimeProtocol
     {
         private readonly Vst3Module _module;
         private readonly Vst3PluginView? _view;
-        private readonly IWavePlayer _output;
+        private readonly ISampleProvider _provider;
+        private AudioOutputSession _output;
         private Vst3EditorWindow? _editor;
 
         private Vst3Runtime(
             Vst3Module module,
             Vst3Plugin plugin,
             Vst3PluginView? view,
-            IWavePlayer output,
+            ISampleProvider provider,
+            AudioOutputSession output,
             string displayName)
         {
             _module = module;
             Plugin = plugin;
             _view = view;
+            _provider = provider;
             _output = output;
             DisplayName = displayName;
         }
@@ -181,7 +193,7 @@ internal static class Vst3RuntimeProtocol
             Vst3Module? module = null;
             Vst3Plugin? plugin = null;
             Vst3PluginView? view = null;
-            IWavePlayer? output = null;
+            AudioOutputSession? output = null;
             try
             {
                 module = Vst3Module.Load(configuration.ModulePath);
@@ -209,9 +221,9 @@ internal static class Vst3RuntimeProtocol
                 }
 
                 view = plugin.CreateView();
-                output = CreateOutput(provider);
+                output = AudioOutputSession.Open(provider, configuration.OutputDeviceId);
                 output.Play();
-                return new Vst3Runtime(module, plugin, view, output, configuration.Name);
+                return new Vst3Runtime(module, plugin, view, provider, output, configuration.Name);
             }
             catch
             {
@@ -259,6 +271,26 @@ internal static class Vst3RuntimeProtocol
             }
         }
 
+        public void SetOutput(string? deviceId)
+        {
+            var replacement = AudioOutputSession.Open(_provider, deviceId);
+            var previous = _output;
+            previous.Stop();
+            try
+            {
+                replacement.Play();
+            }
+            catch
+            {
+                replacement.Dispose();
+                previous.Play();
+                throw;
+            }
+
+            _output = replacement;
+            previous.Dispose();
+        }
+
         public void Dispose()
         {
             CloseEditor();
@@ -270,27 +302,11 @@ internal static class Vst3RuntimeProtocol
             {
                 // El plugin puede estar cerrándose después de un fallo nativo.
             }
-            _output.Stop();
             _output.Dispose();
             _view?.Dispose();
             Plugin.Dispose();
             _module.Dispose();
         }
 
-        private static IWavePlayer CreateOutput(ISampleProvider provider)
-        {
-            try
-            {
-                var wasapi = new WasapiOut(AudioClientShareMode.Shared, useEventSync: true, latency: 20);
-                wasapi.Init(provider.ToWaveProvider());
-                return wasapi;
-            }
-            catch
-            {
-                var fallback = new WaveOut { BufferMilliseconds = 50, NumberOfBuffers = 2 };
-                fallback.Init(provider.ToWaveProvider());
-                return fallback;
-            }
-        }
     }
 }
