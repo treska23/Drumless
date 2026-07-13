@@ -50,10 +50,12 @@ internal sealed class AudioOutputSession : IDisposable
                 player = BuildPlayer(device, provider, useRawMode: true);
                 rawModeActive = true;
             }
-            catch (InvalidOperationException)
+            catch (Exception)
             {
-                // Algunos endpoints antiguos no admiten AUDCLNT_STREAMOPTIONS_RAW.
-                // La baja latencia sigue siendo preferible a rechazar la salida entera.
+                // RAW es una mejora opcional. NAudio puede comunicar su rechazo como
+                // NotSupportedException, COMException u otra excepción según el driver.
+                // Reintentamos una sola vez sin RAW; si el endpoint tampoco abre así,
+                // la excepción del segundo intento sí se entrega al usuario.
                 player?.Dispose();
                 player = BuildPlayer(device, provider, useRawMode: false);
             }

@@ -92,7 +92,8 @@
             </Border>
 
             <ScrollViewer Grid.Row="1" Background="{StaticResource AppBackground}"
-                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          CanContentScroll="False">
                 <Grid Margin="30,26,30,36">
                     <!-- PRACTICAR -->
                     <Grid Visibility="{Binding IsPracticePage, Converter={StaticResource BoolToVisibility}}">
@@ -601,59 +602,49 @@
                                    Foreground="{StaticResource TextSecondary}" Margin="0,5,0,22" />
 
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,18">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="Salida de audio" FontSize="16" FontWeight="SemiBold" />
-                                    <ComboBox ItemsSource="{Binding AudioOutputDevices}"
-                                              SelectedItem="{Binding SelectedAudioOutputDevice}"
-                                              Margin="0,10,0,0" MinWidth="360"
-                                              AutomationProperties.AutomationId="AudioOutputCombo">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding DisplayName}" Foreground="#151820" />
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                    <TextBlock Text="{Binding AudioOutputStatus}" Foreground="{StaticResource TextSecondary}"
-                                               TextWrapping="Wrap" Margin="0,8,0,0" />
-                                </StackPanel>
-                                <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Actualizar"
-                                        Margin="14,29,8,0" VerticalAlignment="Top"
-                                        Command="{Binding RefreshAudioOutputsCommand}" />
-                                <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Content="Usar salida"
-                                        Margin="0,29,0,0" VerticalAlignment="Top" MinWidth="105"
-                                        Command="{Binding ApplyAudioOutputCommand}" />
-                            </Grid>
+                            <StackPanel>
+                                <TextBlock Text="Salida de audio" FontSize="16" FontWeight="SemiBold" />
+                                <ComboBox ItemsSource="{Binding AudioOutputDevices}"
+                                          SelectedItem="{Binding SelectedAudioOutputDevice}"
+                                          Margin="0,10,0,0"
+                                          HorizontalAlignment="Stretch"
+                                          AutomationProperties.AutomationId="AudioOutputCombo">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding DisplayName}" Foreground="#151820" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <WrapPanel Margin="0,10,0,0" HorizontalAlignment="Right">
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Actualizar"
+                                            Margin="0,0,8,0"
+                                            Command="{Binding RefreshAudioOutputsCommand}" />
+                                    <Button Style="{StaticResource PrimaryButton}" Content="Usar salida"
+                                            Command="{Binding ApplyAudioOutputCommand}" />
+                                </WrapPanel>
+                                <TextBlock Text="{Binding AudioOutputStatus}" Foreground="{StaticResource TextSecondary}"
+                                           TextWrapping="Wrap" Margin="0,8,0,0" />
+                            </StackPanel>
                         </Border>
 
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,18">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="Entrada MIDI" FontSize="16" FontWeight="SemiBold" />
-                                    <ComboBox ItemsSource="{Binding MidiDevices}" SelectedItem="{Binding SelectedMidiDevice}"
-                                              Margin="0,10,0,0" MinWidth="360">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding DisplayName}" Foreground="#151820" />
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                </StackPanel>
-                                <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Actualizar" Margin="14,29,8,0"
-                                        Command="{Binding RefreshMidiCommand}" />
-                                <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Content="{Binding MidiButtonLabel}" Margin="0,29,0,0"
-                                        Command="{Binding ConnectMidiCommand}" MinWidth="105" />
-                            </Grid>
+                            <StackPanel>
+                                <TextBlock Text="Entrada MIDI" FontSize="16" FontWeight="SemiBold" />
+                                <ComboBox ItemsSource="{Binding MidiDevices}" SelectedItem="{Binding SelectedMidiDevice}"
+                                          Margin="0,10,0,0" HorizontalAlignment="Stretch">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding DisplayName}" Foreground="#151820" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <WrapPanel Margin="0,10,0,0" HorizontalAlignment="Right">
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Actualizar" Margin="0,0,8,0"
+                                            Command="{Binding RefreshMidiCommand}" />
+                                    <Button Style="{StaticResource PrimaryButton}" Content="{Binding MidiButtonLabel}"
+                                            Command="{Binding ConnectMidiCommand}" />
+                                </WrapPanel>
+                            </StackPanel>
                         </Border>
 
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,18">
@@ -662,37 +653,30 @@
                                 <TextBlock Text="{Binding ActiveDrumEngineLabel}" FontSize="19" FontWeight="SemiBold" Margin="0,6,0,3" />
                                 <TextBlock Text="Usa Addictive Drums 2, Groove Agent u otro instrumento VST3 instalado sin extraer sus librerías protegidas."
                                            Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,14" />
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
+                                <StackPanel>
                                     <ComboBox ItemsSource="{Binding Vst3Instruments}"
                                               SelectedItem="{Binding SelectedVstInstrument}"
                                               Background="#F4F6FA"
                                               Foreground="#151820"
-                                              MinWidth="430">
+                                              HorizontalAlignment="Stretch">
                                         <ComboBox.ItemTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding DisplayLabel}" Foreground="#151820" />
                                             </DataTemplate>
                                         </ComboBox.ItemTemplate>
                                     </ComboBox>
-                                    <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Buscar instrumentos"
-                                            Margin="10,0,0,0" Command="{Binding ScanVstInstrumentsCommand}" />
-                                </Grid>
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Buscar instrumentos"
+                                            Margin="0,10,0,0" HorizontalAlignment="Right"
+                                            Command="{Binding ScanVstInstrumentsCommand}" />
+                                </StackPanel>
                                 <TextBlock Text="KIT / PROGRAMA EXPUESTO POR EL VST3"
                                            Foreground="{StaticResource TextSecondary}" FontSize="10" FontWeight="Bold"
                                            Margin="0,14,0,6" />
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
+                                <StackPanel>
                                     <ComboBox ItemsSource="{Binding Vst3Programs}"
                                               SelectedItem="{Binding SelectedVstProgram}"
                                               IsEnabled="{Binding HasVstPrograms}"
-                                              MinWidth="430"
+                                              HorizontalAlignment="Stretch"
                                               AutomationProperties.AutomationId="Vst3ProgramCombo">
                                         <ComboBox.ItemTemplate>
                                             <DataTemplate>
@@ -700,11 +684,12 @@
                                             </DataTemplate>
                                         </ComboBox.ItemTemplate>
                                     </ComboBox>
-                                    <Button Grid.Column="1" Style="{StaticResource SecondaryButton}"
-                                            Content="Usar kit/programa" Margin="10,0,0,0"
+                                    <Button Style="{StaticResource SecondaryButton}"
+                                            Content="Usar kit/programa" Margin="0,10,0,0"
+                                            HorizontalAlignment="Right"
                                             IsEnabled="{Binding HasVstPrograms}"
                                             Command="{Binding SelectVstProgramCommand}" />
-                                </Grid>
+                                </StackPanel>
                                 <WrapPanel Margin="0,12,0,0">
                                     <Button Style="{StaticResource PrimaryButton}" Content="Cargar instrumento"
                                             Margin="0,0,8,8" Command="{Binding LoadVstInstrumentCommand}" />
@@ -721,9 +706,7 @@
                                             Margin="0,0,8,8" Command="{Binding UseInternalDrumsCommand}" />
                                 </WrapPanel>
                                 <ProgressBar Height="5" Margin="0,6,0,8" IsIndeterminate="True"
-                                             Width="{Binding ActualWidth, ElementName=VstInstrumentPanel}"
-                                             MaxWidth="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"
-                                             HorizontalAlignment="Left" ClipToBounds="True"
+                                             HorizontalAlignment="Stretch" ClipToBounds="True"
                                              Visibility="{Binding IsScanningVst, Converter={StaticResource BoolToVisibility}}" />
                                 <TextBlock Text="{Binding VstStatus}" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" />
                             </StackPanel>
