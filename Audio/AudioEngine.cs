@@ -1,5 +1,4 @@
 using DrumPracticeStudio.Models;
-using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
@@ -13,7 +12,7 @@ public sealed class AudioEngine : IDisposable
     private readonly TrackTransportProvider _track;
     private readonly MixingSampleProvider _mixer;
     private readonly Vst3InstrumentHost _vstInstrument = new();
-    private IWavePlayer? _output;
+    private AudioOutputSession? _output;
 
     public AudioEngine()
     {
@@ -25,35 +24,20 @@ public sealed class AudioEngine : IDisposable
 
         try
         {
-            var wasapi = new WasapiOut(AudioClientShareMode.Shared, useEventSync: true, latency: 20);
-            wasapi.Init(_mixer.ToWaveProvider());
-            wasapi.Play();
-            _output = wasapi;
-            Status = "Audio WASAPI · 48 kHz";
-            IsAvailable = true;
+            SelectOutputDevice(null);
         }
-        catch (Exception wasapiError)
+        catch (Exception exception)
         {
-            try
-            {
-                var fallback = new WaveOut { BufferMilliseconds = 50, NumberOfBuffers = 2 };
-                fallback.Init(_mixer.ToWaveProvider());
-                fallback.Play();
-                _output = fallback;
-                Status = "Audio WaveOut · modo compatible";
-                IsAvailable = true;
-            }
-            catch (Exception fallbackError)
-            {
-                Status = $"Audio no disponible: {fallbackError.Message} ({wasapiError.GetType().Name})";
-            }
+            Status = $"Audio no disponible: {exception.Message}";
         }
     }
 
     public event EventHandler<string>? VstInstrumentExited;
 
-    public bool IsAvailable { get; }
-    public string Status { get; } = "Audio no inicializado";
+    public bool IsAvailable { get; private set; }
+    public string Status { get; private set; } = "Audio no inicializado";
+    public string? OutputDeviceId { get; private set; }
+    public string? OutputDeviceName { get; private set; }
     public bool IsTrackPlaying => _track.IsPlaying;
     public TrackPlaybackState PlaybackState => _track.PlaybackState;
     public TimeSpan TrackPosition => _track.Position;
@@ -87,10 +71,35 @@ public sealed class AudioEngine : IDisposable
 
     public void PanicVstInstrument() => _vstInstrument.Panic();
 
+    public void SelectOutputDevice(string? deviceId)
+    {
+        var replacement = AudioOutputSession.Open(_mixer, deviceId);
+        var previous = _output;
+        previous?.Stop();
+        try
+        {
+            replacement.Play();
+        }
+        catch
+        {
+            replacement.Dispose();
+            previous?.Play();
+            throw;
+        }
+
+        _output = replacement;
+        OutputDeviceId = replacement.DeviceId;
+        OutputDeviceName = replacement.DeviceName;
+        Status = $"Audio WASAPI · {replacement.DeviceName} · 48 kHz";
+        IsAvailable = true;
+        _vstInstrument.SetOutputDevice(replacement.DeviceId);
+        previous?.Dispose();
+    }
+
     public Task LoadVstInstrumentAsync(
         Vst3InstrumentItem instrument,
         CancellationToken cancellationToken = default) =>
-        _vstInstrument.LoadAsync(instrument, SampleRate, cancellationToken);
+        _vstInstrument.LoadAsync(instrument, SampleRate, OutputDeviceId, cancellationToken);
 
     public bool OpenVstEditor() => _vstInstrument.OpenEditor();
 
@@ -111,7 +120,6 @@ public sealed class AudioEngine : IDisposable
 
     public void Dispose()
     {
-        _output?.Stop();
         UnloadVstInstrument();
         _output?.Dispose();
         _track.Dispose();
