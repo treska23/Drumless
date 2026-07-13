@@ -352,6 +352,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
                 _pipe = null;
                 _process = null;
                 _hasEditor = false;
+                AudioStatus = "Audio VST3 detenido";
                 notify = true;
             }
         }

@@ -624,6 +624,9 @@
                                 </WrapPanel>
                                 <TextBlock Text="{Binding AudioOutputStatus}" Foreground="{StaticResource TextSecondary}"
                                            TextWrapping="Wrap" Margin="0,8,0,0" />
+                                <TextBlock Text="El búfer de Focusrite Control solo gobierna ASIO; este motor usa el periodo WASAPI real indicado arriba."
+                                           Foreground="{StaticResource TextSecondary}" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,5,0,0" />
                             </StackPanel>
                         </Border>
 
@@ -644,6 +647,26 @@
                                     <Button Style="{StaticResource PrimaryButton}" Content="{Binding MidiButtonLabel}"
                                             Command="{Binding ConnectMidiCommand}" />
                                 </WrapPanel>
+                                <TextBlock Text="Sensibilidad de los pads" FontWeight="SemiBold" Margin="0,16,0,0" />
+                                <Slider Minimum="0" Maximum="100"
+                                        Value="{Binding MidiVelocitySensitivity, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                        TickFrequency="1" IsSnapToTickEnabled="True"
+                                        Margin="0,8,0,0"
+                                        AutomationProperties.AutomationId="MidiVelocitySensitivitySlider" />
+                                <Grid Margin="0,3,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Menos sensible" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                    <TextBlock Grid.Column="1" Text="{Binding MidiVelocitySensitivityLabel}"
+                                               Foreground="{StaticResource Accent}" FontWeight="SemiBold" FontSize="11" />
+                                    <TextBlock Grid.Column="2" Text="Más sensible" HorizontalAlignment="Right"
+                                               Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                </Grid>
+                                <TextBlock Text="{Binding MidiVelocityMonitor}" Foreground="{StaticResource TextSecondary}"
+                                           TextWrapping="Wrap" Margin="0,7,0,0" />
                             </StackPanel>
                         </Border>
 
@@ -709,6 +732,8 @@
                                              HorizontalAlignment="Stretch" ClipToBounds="True"
                                              Visibility="{Binding IsScanningVst, Converter={StaticResource BoolToVisibility}}" />
                                 <TextBlock Text="{Binding VstStatus}" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding VstAudioStatus}" Foreground="{StaticResource Accent}"
+                                           TextWrapping="Wrap" Margin="0,5,0,0" />
                             </StackPanel>
                         </Border>
 

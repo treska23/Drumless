@@ -47,6 +47,7 @@ public sealed class AudioEngine : IDisposable
     public bool IsVstInstrumentLoaded => _vstInstrument.IsLoaded;
     public bool IsExternalInstrumentSelected => _externalInstrumentSelected;
     public string? VstInstrumentName => _vstInstrument.DisplayName;
+    public string VstAudioStatus => _vstInstrument.AudioStatus;
     public IReadOnlyList<string> VstPrograms => _vstInstrument.Programs;
     public int CurrentVstProgram => _vstInstrument.CurrentProgram;
 

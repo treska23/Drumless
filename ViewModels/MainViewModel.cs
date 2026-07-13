@@ -55,6 +55,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string _vstStatus = "Pulsa «Buscar instrumentos» para localizar Addictive Drums y Groove Agent de forma aislada.";
     private bool _isScanningVst;
     private string _audioOutputStatus = "Buscando salidas de audio…";
+    private double _midiVelocitySensitivity = MidiVelocityCurve.DefaultSensitivity;
+    private string _midiVelocityMonitor = "Toca un pad para comprobar la velocidad recibida.";
 
     public MainViewModel()
     {
@@ -241,6 +243,33 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _audioOutputStatus, value);
     }
 
+    public double MidiVelocitySensitivity
+    {
+        get => _midiVelocitySensitivity;
+        set
+        {
+            var bounded = Math.Clamp(value, 0d, 100d);
+            if (SetProperty(ref _midiVelocitySensitivity, bounded))
+            {
+                OnPropertyChanged(nameof(MidiVelocitySensitivityLabel));
+            }
+        }
+    }
+
+    public string MidiVelocitySensitivityLabel => MidiVelocitySensitivity switch
+    {
+        < 35d => $"{MidiVelocitySensitivity:0} · menos sensible",
+        < 60d => $"{MidiVelocitySensitivity:0} · lineal",
+        < 85d => $"{MidiVelocitySensitivity:0} · sensible",
+        _ => $"{MidiVelocitySensitivity:0} · muy sensible"
+    };
+
+    public string MidiVelocityMonitor
+    {
+        get => _midiVelocityMonitor;
+        private set => SetProperty(ref _midiVelocityMonitor, value);
+    }
+
     public LocalTrack? CurrentTrack
     {
         get => _currentTrack;
@@ -404,6 +433,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     public bool IsVstInstrumentLoaded => _audio.IsVstInstrumentLoaded;
+    public string VstAudioStatus => _audio.VstAudioStatus;
     public bool HasVstPrograms => Vst3Programs.Count > 0;
     public string ActiveDrumEngineLabel => _audio.IsVstInstrumentLoaded
         ? $"VST3 · {_audio.VstInstrumentName}"
@@ -993,14 +1023,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _audio.Trigger(articulation ?? string.Empty, message.Velocity, message.Note, message.Channel);
-        if (!hasMapping)
-        {
-            return;
-        }
+        var adjustedVelocity = MidiVelocityCurve.Apply(
+            message.Velocity,
+            Volatile.Read(ref _midiVelocitySensitivity));
+        _audio.Trigger(articulation ?? string.Empty, adjustedVelocity, message.Note, message.Channel);
 
         Application.Current.Dispatcher.BeginInvoke(() =>
         {
+            MidiVelocityMonitor = $"Último golpe: entrada {message.Velocity} → salida {adjustedVelocity}";
+            if (!hasMapping)
+            {
+                return;
+            }
+
             var pad = ActivePads.FirstOrDefault(candidate =>
                 string.Equals(candidate.Articulation, articulation, StringComparison.OrdinalIgnoreCase));
             if (pad is not null)
@@ -1070,6 +1105,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             await _audio.LoadVstInstrumentAsync(instrument, cancellation.Token);
             OnPropertyChanged(nameof(IsVstInstrumentLoaded));
             OnPropertyChanged(nameof(ActiveDrumEngineLabel));
+            OnPropertyChanged(nameof(VstAudioStatus));
             Vst3Programs.Clear();
             for (var index = 0; index < _audio.VstPrograms.Count; index++)
             {
@@ -1103,6 +1139,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             VstStatus = $"No se pudo cargar el instrumento: {exception.Message}";
             OnPropertyChanged(nameof(IsVstInstrumentLoaded));
             OnPropertyChanged(nameof(ActiveDrumEngineLabel));
+            OnPropertyChanged(nameof(VstAudioStatus));
             MessageBox.Show(
                 exception.Message,
                 "Instrumento VST3",
@@ -1131,6 +1168,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasVstPrograms));
         OnPropertyChanged(nameof(IsVstInstrumentLoaded));
         OnPropertyChanged(nameof(ActiveDrumEngineLabel));
+        OnPropertyChanged(nameof(VstAudioStatus));
         VstStatus = "Motor interno activo.";
         StatusMessage = "Motor de batería interno activo";
     }
@@ -1205,6 +1243,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             OnPropertyChanged(nameof(IsVstInstrumentLoaded));
             OnPropertyChanged(nameof(ActiveDrumEngineLabel));
+            OnPropertyChanged(nameof(VstAudioStatus));
             VstStatus = message;
             StatusMessage = "VST3 detenido · la batería está silenciada; el kit interno no se ha activado";
         });
