@@ -26,6 +26,8 @@ internal sealed class DrumSamplerProvider : ISampleProvider
 
     public void Choke(string group) => _commands.Enqueue(new ChokeCommand(group));
 
+    public void StopAll() => _commands.Enqueue(new StopAllCommand());
+
     public int Read(Span<float> buffer)
     {
         buffer.Clear();
@@ -59,6 +61,9 @@ internal sealed class DrumSamplerProvider : ISampleProvider
                     break;
                 case ChokeCommand choke:
                     ChokeVoices(choke.Group);
+                    break;
+                case StopAllCommand _:
+                    _voices.Clear();
                     break;
             }
         }
@@ -119,6 +124,7 @@ internal sealed class DrumSamplerProvider : ISampleProvider
     private sealed record SwapKitCommand(LoadedKit Kit) : SamplerCommand;
     private sealed record TriggerCommand(string Articulation, int Velocity) : SamplerCommand;
     private sealed record ChokeCommand(string Group) : SamplerCommand;
+    private sealed record StopAllCommand() : SamplerCommand;
 }
 
 internal sealed class SampleVoice
