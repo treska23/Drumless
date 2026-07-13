@@ -467,8 +467,14 @@
                                 <StackPanel>
                                     <TextBlock Text="Playlists" FontSize="20" FontWeight="SemiBold" />
                                     <ComboBox ItemsSource="{Binding Playlists}" SelectedItem="{Binding SelectedPlaylist}"
-                                              DisplayMemberPath="Name" Margin="0,10,0,8"
-                                              AutomationProperties.AutomationId="PlaylistSelector" />
+                                              Margin="0,10,0,8"
+                                              AutomationProperties.AutomationId="PlaylistSelector">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Name}" Foreground="#151820" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                     <TextBox Text="{Binding PlaylistNameDraft, UpdateSourceTrigger=PropertyChanged}"
                                              ToolTip="Nombre para crear o renombrar" Margin="0,0,0,8"
                                              AutomationProperties.AutomationId="PlaylistNameTextBox" />
@@ -486,8 +492,14 @@
 
                                     <TextBlock Text="MODO DE REPRODUCCIÓN" Foreground="{StaticResource TextSecondary}" FontSize="10" FontWeight="Bold" />
                                     <ComboBox ItemsSource="{Binding PlaybackModeOptions}" SelectedItem="{Binding SelectedPlaybackMode}"
-                                              DisplayMemberPath="Label" Margin="0,7,0,12"
-                                              AutomationProperties.AutomationId="PlaybackModeCombo" />
+                                              Margin="0,7,0,12"
+                                              AutomationProperties.AutomationId="PlaybackModeCombo">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Label}" Foreground="#151820" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
 
                                     <ListBox ItemsSource="{Binding PlaylistTracks}" SelectedItem="{Binding SelectedPlaylistTrack}"
                                              MaxHeight="300" AutomationProperties.AutomationId="PlaylistTrackList">
@@ -580,9 +592,41 @@
 
                     <!-- DISPOSITIVOS -->
                     <StackPanel Visibility="{Binding IsSettingsPage, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="Dispositivos MIDI" FontSize="30" FontWeight="SemiBold" />
-                        <TextBlock Text="Conecta una batería electrónica o un teclado y conserva el perfil al cambiar de kit."
+                        <TextBlock Text="Dispositivos" FontSize="30" FontWeight="SemiBold" />
+                        <TextBlock Text="Elige la salida de audio y conecta una batería electrónica o un teclado."
                                    Foreground="{StaticResource TextSecondary}" Margin="0,5,0,22" />
+
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Salida de audio" FontSize="16" FontWeight="SemiBold" />
+                                    <ComboBox ItemsSource="{Binding AudioOutputDevices}"
+                                              SelectedItem="{Binding SelectedAudioOutputDevice}"
+                                              Margin="0,10,0,0" MinWidth="360"
+                                              AutomationProperties.AutomationId="AudioOutputCombo">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding DisplayName}" Foreground="#151820" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <TextBlock Text="{Binding AudioOutputStatus}" Foreground="{StaticResource TextSecondary}"
+                                               TextWrapping="Wrap" Margin="0,8,0,0" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Actualizar"
+                                        Margin="14,29,8,0" VerticalAlignment="Top"
+                                        Command="{Binding RefreshAudioOutputsCommand}" />
+                                <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Content="Usar salida"
+                                        Margin="0,29,0,0" VerticalAlignment="Top" MinWidth="105"
+                                        Command="{Binding ApplyAudioOutputCommand}" />
+                            </Grid>
+                        </Border>
+
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,18">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -593,7 +637,13 @@
                                 <StackPanel>
                                     <TextBlock Text="Entrada MIDI" FontSize="16" FontWeight="SemiBold" />
                                     <ComboBox ItemsSource="{Binding MidiDevices}" SelectedItem="{Binding SelectedMidiDevice}"
-                                              DisplayMemberPath="DisplayName" Margin="0,10,0,0" MinWidth="360" />
+                                              Margin="0,10,0,0" MinWidth="360">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding DisplayName}" Foreground="#151820" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                 </StackPanel>
                                 <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Actualizar" Margin="14,29,8,0"
                                         Command="{Binding RefreshMidiCommand}" />
