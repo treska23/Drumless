@@ -135,10 +135,16 @@ internal static class Vst3RuntimeProtocol
         switch (command.Type)
         {
             case "NoteOn":
-                runtime.Plugin.SendNoteOn(command.Value1, command.Value2 / 127f, command.Value3);
+                runtime.Plugin.SendNoteOn(
+                    command.Value1,
+                    command.Value2 / 127f,
+                    ToVstChannel(command.Value3));
                 break;
             case "NoteOff":
-                runtime.Plugin.SendNoteOff(command.Value1, command.Value2 / 127f, command.Value3);
+                runtime.Plugin.SendNoteOff(
+                    command.Value1,
+                    command.Value2 / 127f,
+                    ToVstChannel(command.Value3));
                 break;
             case "ControlChange":
                 runtime.Plugin.SendControlChange(command.Value1, command.Value2 / 127d);
@@ -163,6 +169,9 @@ internal static class Vst3RuntimeProtocol
                 break;
         }
     }
+
+    private static int ToVstChannel(int midiChannel) =>
+        Math.Clamp(midiChannel - 1, 0, 15);
 
     private static void TryDelete(string path)
     {
