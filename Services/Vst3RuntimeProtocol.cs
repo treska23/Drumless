@@ -22,7 +22,12 @@ internal sealed record Vst3RuntimeConfiguration(
     int SampleRate,
     string? OutputDeviceId);
 
-internal sealed record Vst3RuntimeResponse(bool Ready, bool HasEditor, string Message);
+internal sealed record Vst3RuntimeResponse(
+    bool Ready,
+    bool HasEditor,
+    string Message,
+    string[]? Programs = null,
+    int CurrentProgram = -1);
 
 internal sealed record Vst3RuntimeCommand(
     string Type,
@@ -71,7 +76,12 @@ internal static class Vst3RuntimeProtocol
             runtime = await Application.Current.Dispatcher.InvokeAsync(
                 () => Vst3Runtime.Load(configuration));
             await writer.WriteLineAsync(JsonSerializer.Serialize(
-                new Vst3RuntimeResponse(true, runtime.HasEditor, "Instrumento preparado")));
+                new Vst3RuntimeResponse(
+                    true,
+                    runtime.HasEditor,
+                    "Instrumento preparado",
+                    runtime.Programs.ToArray(),
+                    runtime.CurrentProgram)));
 
             while (await reader.ReadLineAsync() is { } line)
             {
@@ -145,6 +155,12 @@ internal static class Vst3RuntimeProtocol
             case "SetOutput":
                 runtime.SetOutput(command.Text);
                 break;
+            case "ProgramChange":
+                runtime.SelectProgram(command.Value1);
+                break;
+            case "LoadPreset":
+                runtime.LoadPreset(command.Text);
+                break;
         }
     }
 
@@ -187,6 +203,9 @@ internal static class Vst3RuntimeProtocol
         public Vst3Plugin Plugin { get; }
         public string DisplayName { get; }
         public bool HasEditor => _view is not null;
+        public IReadOnlyList<string> Programs =>
+            Plugin.ActiveProgramList?.Programs ?? Array.Empty<string>();
+        public int CurrentProgram => Plugin.CurrentProgram;
 
         public static Vst3Runtime Load(Vst3RuntimeConfiguration configuration)
         {
@@ -289,6 +308,30 @@ internal static class Vst3RuntimeProtocol
 
             _output = replacement;
             previous.Dispose();
+        }
+
+        public void SelectProgram(int programIndex)
+        {
+            if (!Plugin.SupportsProgramChange ||
+                programIndex < 0 ||
+                programIndex >= Programs.Count)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(programIndex),
+                    "El instrumento no expone ese programa mediante VST3.");
+            }
+
+            Plugin.SendProgramChange(programIndex);
+        }
+
+        public void LoadPreset(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                throw new FileNotFoundException("No se encontró el preset VST3.", path);
+            }
+
+            Plugin.LoadPreset(path);
         }
 
         public void Dispose()
