@@ -107,7 +107,7 @@ internal static class Vst3RuntimeProtocol
 
                 var activeRuntime = runtime
                                     ?? throw new InvalidOperationException("El motor VST3 no está preparado.");
-                Vst3RuntimeDiagnostics.Info($"Orden recibida: {command.Type}");
+                Vst3RuntimeDiagnostics.Info(DescribeCommand(command));
                 await Application.Current.Dispatcher.InvokeAsync(() =>
                     ExecuteCommand(activeRuntime, command));
             }
@@ -150,13 +150,16 @@ internal static class Vst3RuntimeProtocol
         switch (command.Type)
         {
             case "NoteOn":
-                runtime.Plugin.SendNoteOn(
+                // La orden ya llega serializada por la tubería. Enviarla al inicio del
+                // siguiente bloque conserva el orden de note-on/note-off y evita proyectar
+                // el reloj del proceso principal sobre el reloj de audio del proceso VST3.
+                runtime.Plugin.EnqueueNoteOn(
                     command.Value1,
                     command.Value2 / 127f,
                     ClampVstChannel(command.Value3));
                 break;
             case "NoteOff":
-                runtime.Plugin.SendNoteOff(
+                runtime.Plugin.EnqueueNoteOff(
                     command.Value1,
                     command.Value2 / 127f,
                     ClampVstChannel(command.Value3));
@@ -184,6 +187,17 @@ internal static class Vst3RuntimeProtocol
                 break;
         }
     }
+
+    private static string DescribeCommand(Vst3RuntimeCommand command) =>
+        command.Type switch
+        {
+            "NoteOn" or "NoteOff" =>
+                $"Orden recibida: {command.Type} · nota {command.Value1} · " +
+                $"velocidad {command.Value2} · canal VST3 {command.Value3}",
+            "ControlChange" =>
+                $"Orden recibida: ControlChange · CC {command.Value1} · valor {command.Value2}",
+            _ => $"Orden recibida: {command.Type}"
+        };
 
     private static int ClampVstChannel(int vstChannel) =>
         Math.Clamp(vstChannel, 0, 15);

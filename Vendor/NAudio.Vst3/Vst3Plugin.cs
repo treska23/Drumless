@@ -459,7 +459,9 @@ public sealed unsafe class Vst3Plugin : IDisposable
         // 7. Setup processing — must happen before ActivateBus per the SDK state machine.
         var setup = new ProcessSetup
         {
-            ProcessMode = (int)ProcessMode.Offline,
+            // Este host alimenta WASAPI de forma continua: Groove Agent y otros
+            // instrumentos basados en streaming deben prepararse en tiempo real.
+            ProcessMode = (int)ProcessMode.Realtime,
             SymbolicSampleSize = (int)SymbolicSampleSize.Sample32,
             MaxSamplesPerBlock = MaxBlockSize,
             SampleRate = SampleRate,
@@ -1381,7 +1383,7 @@ public sealed unsafe class Vst3Plugin : IDisposable
 
         var data = new ProcessData
         {
-            ProcessMode = (int)ProcessMode.Offline,
+            ProcessMode = (int)ProcessMode.Realtime,
             SymbolicSampleSize = (int)SymbolicSampleSize.Sample32,
             NumSamples = numSamples,
             NumInputs = _inputBusCount,
@@ -2298,4 +2300,3 @@ public sealed unsafe class Vst3Plugin : IDisposable
         buffers = null;
     }
 }
-

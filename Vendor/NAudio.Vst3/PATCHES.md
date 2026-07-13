@@ -12,6 +12,9 @@ Cambio local:
   versión publicada reservaba 48 bytes para la unión y producía una estructura
   de 72 bytes, capaz de sobrescribir memoria cuando un VST3 leía la primera
   nota MIDI.
+- `Vst3Plugin.cs`: usa `kRealtime` en `setupProcessing` y en cada bloque de
+  audio. Drumless alimenta una salida WASAPI en directo y los instrumentos de
+  muestras no deben recibir el modo de renderizado offline.
 
 Origen: https://github.com/naudio/NAudio
 
