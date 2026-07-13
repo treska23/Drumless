@@ -1,4 +1,5 @@
 using NAudio.CoreAudioApi;
+using DrumPracticeStudio.Models;
 using NAudio.Wave;
 
 namespace DrumPracticeStudio.Audio;
@@ -8,7 +9,9 @@ internal sealed class AudioOutputSession : IDisposable
     private readonly MMDeviceEnumerator? _enumerator;
     private readonly MMDevice? _device;
     private readonly WasapiPlayer? _wasapiPlayer;
-    private readonly AsioOut? _asioPlayer;
+    private readonly AsioDevice? _asioDevice;
+    private readonly AsioDuplexRenderer? _asioDuplexRenderer;
+    private readonly IReadOnlyList<AudioInputChannelItem> _inputChannels = [];
     private readonly bool _rawModeActive;
     private readonly int _latencyMilliseconds;
     private bool _disposed;
@@ -28,33 +31,56 @@ internal sealed class AudioOutputSession : IDisposable
         DeviceName = device.FriendlyName;
     }
 
-    private AudioOutputSession(AsioOut player, string driverName, int sampleRate)
+    private AudioOutputSession(
+        AsioDevice device,
+        string driverName,
+        int sampleRate,
+        IReadOnlyList<AudioInputChannelItem> inputChannels,
+        AsioDuplexRenderer? duplexRenderer,
+        int? inputChannelIndex)
     {
-        _asioPlayer = player;
+        _asioDevice = device;
+        _asioDuplexRenderer = duplexRenderer;
+        _inputChannels = inputChannels;
         _latencyMilliseconds = Math.Max(
             1,
-            (int)Math.Ceiling(player.PlaybackLatency * 1_000d / sampleRate));
+            (int)Math.Ceiling(device.OutputLatencySamples * 1_000d / sampleRate));
         DeviceId = AudioOutputDeviceId.ForAsio(driverName);
         DeviceName = driverName;
-        BufferFrames = player.FramesPerBuffer;
+        BufferFrames = device.FramesPerBuffer;
+        InputChannelIndex = inputChannelIndex;
+        if (inputChannelIndex is not null)
+        {
+            InputLatencyMilliseconds = Math.Max(
+                1,
+                (int)Math.Ceiling(device.InputLatencySamples * 1_000d / sampleRate));
+        }
     }
 
     public string DeviceId { get; }
     public string DeviceName { get; }
-    public bool IsAsio => _asioPlayer is not null;
+    public bool IsAsio => _asioDevice is not null;
     public bool IsLowLatencyActive => IsAsio || _wasapiPlayer?.LowLatencyActive == true;
     public bool IsRawModeActive => _rawModeActive;
     public int LatencyMilliseconds => _latencyMilliseconds;
     public int? BufferFrames { get; }
+    public int? InputChannelIndex { get; }
+    public int? InputLatencyMilliseconds { get; }
+    public bool IsInputMonitoringActive => InputChannelIndex is not null;
+    public IReadOnlyList<AudioInputChannelItem> InputChannels => _inputChannels;
     public string? LowLatencyUnavailableReason => _wasapiPlayer?.LowLatencyUnavailableReason;
 
-    public static AudioOutputSession Open(ISampleProvider provider, string? deviceId)
+    public static AudioOutputSession Open(
+        ISampleProvider provider,
+        string? deviceId,
+        int? inputChannelIndex = null,
+        float inputGain = 0.8f)
     {
         ArgumentNullException.ThrowIfNull(provider);
 
         if (AudioOutputDeviceId.TryGetAsioDriverName(deviceId, out var asioDriverName))
         {
-            return OpenAsio(provider, asioDriverName);
+            return OpenAsio(provider, asioDriverName, inputChannelIndex, inputGain);
         }
 
         var enumerator = new MMDeviceEnumerator();
@@ -92,24 +118,85 @@ internal sealed class AudioOutputSession : IDisposable
         }
     }
 
-    private static AudioOutputSession OpenAsio(ISampleProvider provider, string driverName)
+    private static AudioOutputSession OpenAsio(
+        ISampleProvider provider,
+        string driverName,
+        int? inputChannelIndex,
+        float inputGain)
     {
-        AsioOut? player = null;
+        AsioDevice? device = null;
         try
         {
-            player = new AsioOut(driverName);
-            if (!player.IsSampleRateSupported(provider.WaveFormat.SampleRate))
+            device = AsioDevice.Open(driverName);
+            if (provider.WaveFormat.Channels != 2)
+            {
+                throw new NotSupportedException(
+                    "La monitorización ASIO directa necesita una mezcla principal estéreo.");
+            }
+            if (!device.IsSampleRateSupported(provider.WaveFormat.SampleRate))
             {
                 throw new NotSupportedException(
                     $"{driverName} no admite {provider.WaveFormat.SampleRate / 1_000d:0.#} kHz.");
             }
+            if (device.Capabilities.NbOutputChannels < provider.WaveFormat.Channels)
+            {
+                throw new NotSupportedException(
+                    $"{driverName} no ofrece las {provider.WaveFormat.Channels} salidas necesarias.");
+            }
 
-            player.Init(provider.ToWaveProvider());
-            return new AudioOutputSession(player, driverName, provider.WaveFormat.SampleRate);
+            var inputChannels = Enumerable.Range(0, device.Capabilities.NbInputChannels)
+                .Select(index => new AudioInputChannelItem(
+                    index,
+                    string.IsNullOrWhiteSpace(device.Capabilities.InputChannelInfos[index].name)
+                        ? $"Canal {index + 1}"
+                        : device.Capabilities.InputChannelInfos[index].name))
+                .ToArray();
+
+            AsioDuplexRenderer? renderer = null;
+            if (inputChannelIndex is { } channel)
+            {
+                if (channel < 0 || channel >= inputChannels.Length)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(inputChannelIndex),
+                        $"La entrada ASIO {channel + 1} no existe en {driverName}.");
+                }
+
+                renderer = new AsioDuplexRenderer(
+                    provider,
+                    Math.Max(
+                        device.Capabilities.BufferMaxSize,
+                        device.Capabilities.BufferPreferredSize),
+                    inputGain);
+                device.InitDuplex(new AsioDuplexOptions
+                {
+                    InputChannels = [channel],
+                    OutputChannels = [0, 1],
+                    SampleRate = provider.WaveFormat.SampleRate,
+                    Processor = renderer.Process
+                });
+            }
+            else
+            {
+                device.InitPlayback(new AsioPlaybackOptions
+                {
+                    Source = provider.ToWaveProvider(),
+                    OutputChannels = [0, 1],
+                    AutoStopOnEndOfStream = false
+                });
+            }
+
+            return new AudioOutputSession(
+                device,
+                driverName,
+                provider.WaveFormat.SampleRate,
+                inputChannels,
+                renderer,
+                inputChannelIndex);
         }
         catch
         {
-            player?.Dispose();
+            device?.Dispose();
             throw;
         }
     }
@@ -146,9 +233,9 @@ internal sealed class AudioOutputSession : IDisposable
 
     public void Play()
     {
-        if (_asioPlayer is not null)
+        if (_asioDevice is not null)
         {
-            _asioPlayer.Play();
+            _asioDevice.Start();
             return;
         }
 
@@ -159,9 +246,9 @@ internal sealed class AudioOutputSession : IDisposable
     {
         try
         {
-            if (_asioPlayer is not null)
+            if (_asioDevice is not null)
             {
-                _asioPlayer.Stop();
+                _asioDevice.Stop();
             }
             else
             {
@@ -174,6 +261,9 @@ internal sealed class AudioOutputSession : IDisposable
         }
     }
 
+    public void SetInputGain(float gain) =>
+        _asioDuplexRenderer?.SetGain(gain);
+
     public void Dispose()
     {
         if (_disposed)
@@ -183,9 +273,54 @@ internal sealed class AudioOutputSession : IDisposable
 
         _disposed = true;
         Stop();
-        _asioPlayer?.Dispose();
+        _asioDevice?.Dispose();
         _wasapiPlayer?.Dispose();
         _device?.Dispose();
         _enumerator?.Dispose();
+    }
+
+    private sealed class AsioDuplexRenderer
+    {
+        private readonly ISampleProvider _provider;
+        private readonly float[] _interleavedOutput;
+        private float _gain;
+
+        public AsioDuplexRenderer(ISampleProvider provider, int maximumFrames, float gain)
+        {
+            _provider = provider;
+            _interleavedOutput = new float[
+                Math.Max(1, maximumFrames) * provider.WaveFormat.Channels];
+            SetGain(gain);
+        }
+
+        public void SetGain(float gain) =>
+            Volatile.Write(ref _gain, Math.Clamp(gain, 0f, 2f));
+
+        public void Process(in AsioProcessBuffers buffers)
+        {
+            var requiredSamples = buffers.Frames * 2;
+            var read = _provider.Read(_interleavedOutput.AsSpan(0, requiredSamples));
+            if (read < requiredSamples)
+            {
+                Array.Clear(_interleavedOutput, read, requiredSamples - read);
+            }
+
+            var input = buffers.GetInput(0);
+            var outputLeft = buffers.GetOutput(0);
+            var outputRight = buffers.GetOutput(1);
+            var gain = Volatile.Read(ref _gain);
+            for (var frame = 0; frame < buffers.Frames; frame++)
+            {
+                var monitored = input[frame] * gain;
+                outputLeft[frame] = Math.Clamp(
+                    _interleavedOutput[frame * 2] + monitored,
+                    -1f,
+                    1f);
+                outputRight[frame] = Math.Clamp(
+                    _interleavedOutput[(frame * 2) + 1] + monitored,
+                    -1f,
+                    1f);
+            }
+        }
     }
 }

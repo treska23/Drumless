@@ -14,6 +14,9 @@ public sealed class StudioState
 {
     public string OutputFolder { get; set; } = string.Empty;
     public string? AudioOutputDeviceId { get; set; }
+    public string? AudioInputOutputDeviceId { get; set; }
+    public int? AudioInputChannelIndex { get; set; }
+    public double AudioInputGain { get; set; } = 0.8d;
     public string? MidiDeviceName { get; set; }
     public int? MidiDeviceIndex { get; set; }
     public bool AutoConnectMidi { get; set; } = true;

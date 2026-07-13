@@ -21,6 +21,9 @@ public sealed class StudioStateStoreTests
             SelectedPlaylistId = "playlist-practice",
             PlaybackMode = PlaybackMode.Shuffle,
             AudioOutputDeviceId = "asio:Focusrite USB ASIO",
+            AudioInputOutputDeviceId = "asio:Focusrite USB ASIO",
+            AudioInputChannelIndex = 1,
+            AudioInputGain = 0.73d,
             MidiDeviceName = "MPK mini 3",
             MidiDeviceIndex = 2,
             AutoConnectMidi = true,
@@ -62,6 +65,9 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual("playlist-practice", loaded.SelectedPlaylistId);
         Assert.AreEqual(PlaybackMode.Shuffle, loaded.PlaybackMode);
         Assert.AreEqual("asio:Focusrite USB ASIO", loaded.AudioOutputDeviceId);
+        Assert.AreEqual("asio:Focusrite USB ASIO", loaded.AudioInputOutputDeviceId);
+        Assert.AreEqual(1, loaded.AudioInputChannelIndex);
+        Assert.AreEqual(0.73d, loaded.AudioInputGain);
         Assert.AreEqual("MPK mini 3", loaded.MidiDeviceName);
         Assert.AreEqual(2, loaded.MidiDeviceIndex.GetValueOrDefault());
         Assert.IsTrue(loaded.AutoConnectMidi);
@@ -106,6 +112,7 @@ public sealed class StudioStateStoreTests
         Assert.IsTrue(loaded.AutoConnectMidi);
         Assert.AreEqual(72d, loaded.MidiVelocitySensitivity);
         Assert.AreEqual(0.8d, loaded.TrackVolume);
+        Assert.AreEqual(0.8d, loaded.AudioInputGain);
     }
 
     [TestMethod]
@@ -130,6 +137,8 @@ public sealed class StudioStateStoreTests
         Assert.IsTrue(loaded.AutoConnectMidi);
         Assert.AreEqual(72d, loaded.MidiVelocitySensitivity);
         Assert.AreEqual(0.8d, loaded.TrackVolume);
+        Assert.AreEqual(0.8d, loaded.AudioInputGain);
+        Assert.IsNull(loaded.AudioInputChannelIndex);
         Assert.IsFalse(loaded.AutoLoadVst);
     }
 }
