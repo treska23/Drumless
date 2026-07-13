@@ -299,7 +299,7 @@ internal sealed class AudioOutputSession : IDisposable
         public void Process(in AsioProcessBuffers buffers)
         {
             var requiredSamples = buffers.Frames * 2;
-            var read = _provider.Read(_interleavedOutput, 0, requiredSamples);
+            var read = _provider.Read(_interleavedOutput.AsSpan(0, requiredSamples));
             if (read < requiredSamples)
             {
                 Array.Clear(_interleavedOutput, read, requiredSamples - read);
