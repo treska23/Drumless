@@ -32,6 +32,8 @@ internal sealed class Vst3InstrumentHost : IDisposable
     }
 
     public string? DisplayName { get; private set; }
+    public IReadOnlyList<string> Programs { get; private set; } = Array.Empty<string>();
+    public int CurrentProgram { get; private set; } = -1;
 
     public async Task LoadAsync(
         Vst3InstrumentItem instrument,
@@ -133,6 +135,8 @@ internal sealed class Vst3InstrumentHost : IDisposable
             {
                 _writer = commandWriter;
                 _hasEditor = response.HasEditor;
+                Programs = response.Programs ?? Array.Empty<string>();
+                CurrentProgram = response.CurrentProgram;
             }
             commandWriter = null;
             TryDeleteConfiguration();
@@ -183,6 +187,23 @@ internal sealed class Vst3InstrumentHost : IDisposable
     public void SetOutputDevice(string? deviceId) =>
         Send(new Vst3RuntimeCommand("SetOutput", Text: deviceId));
 
+    public void SelectProgram(int programIndex)
+    {
+        if (programIndex < 0 || programIndex >= Programs.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(programIndex));
+        }
+
+        CurrentProgram = programIndex;
+        Send(new Vst3RuntimeCommand("ProgramChange", programIndex));
+    }
+
+    public void LoadPreset(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Send(new Vst3RuntimeCommand("LoadPreset", Text: path));
+    }
+
     public bool OpenEditor()
     {
         lock (_sync)
@@ -213,6 +234,8 @@ internal sealed class Vst3InstrumentHost : IDisposable
             _writer = null;
             _hasEditor = false;
             DisplayName = null;
+            Programs = Array.Empty<string>();
+            CurrentProgram = -1;
         }
 
         try
@@ -300,7 +323,6 @@ internal sealed class Vst3InstrumentHost : IDisposable
                 _pipe = null;
                 _process = null;
                 _hasEditor = false;
-                DisplayName = null;
                 notify = true;
             }
         }
@@ -311,7 +333,8 @@ internal sealed class Vst3InstrumentHost : IDisposable
         {
             Exited?.Invoke(
                 this,
-                "El instrumento VST3 se cerró por un fallo interno. Drumless continúa usando el motor interno.");
+                "El instrumento VST3 se cerró por un fallo interno. La batería queda silenciada; " +
+                "Drumless no cambiará al kit interno sin que tú lo pidas.");
         }
     }
 
