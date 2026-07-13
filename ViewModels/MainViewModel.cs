@@ -51,6 +51,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string _removalStatus = "Selecciona una pista original para crear una copia sin batería.";
     private string _removalEngineStatus = "Motor local no instalado";
     private Vst3InstrumentItem? _selectedVstInstrument;
+    private Vst3ProgramItem? _selectedVstProgram;
     private string _vstStatus = "Pulsa «Buscar instrumentos» para localizar Addictive Drums y Groove Agent de forma aislada.";
     private bool _isScanningVst;
     private string _audioOutputStatus = "Buscando salidas de audio…";
@@ -68,6 +69,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         AudioOutputDevices = [];
         MappingRows = [];
         Vst3Instruments = [];
+        Vst3Programs = [];
         Tracks = _trackLibrary.Tracks;
         Playlists = [];
         PlaylistTracks = [];
@@ -118,6 +120,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ApplyAudioOutputCommand = new RelayCommand(ApplyAudioOutputDevice);
         ScanVstInstrumentsCommand = new RelayCommand(() => _ = ScanVstInstrumentsAsync(force: true));
         LoadVstInstrumentCommand = new RelayCommand(() => _ = LoadSelectedVstInstrumentAsync());
+        SelectVstProgramCommand = new RelayCommand(SelectVstProgram);
+        LoadVstPresetCommand = new RelayCommand(LoadVstPreset);
         UseInternalDrumsCommand = new RelayCommand(UseInternalDrums);
         OpenVstEditorCommand = new RelayCommand(OpenVstEditor);
         PanicVstCommand = new RelayCommand(() => _audio.PanicVstInstrument());
@@ -155,6 +159,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<AudioOutputDeviceItem> AudioOutputDevices { get; }
     public ObservableCollection<MidiMappingRow> MappingRows { get; }
     public ObservableCollection<Vst3InstrumentItem> Vst3Instruments { get; }
+    public ObservableCollection<Vst3ProgramItem> Vst3Programs { get; }
     public ObservableCollection<LocalTrack> Tracks { get; }
 
     public RelayCommand<string> NavigateCommand { get; }
@@ -175,6 +180,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public RelayCommand ApplyAudioOutputCommand { get; }
     public RelayCommand ScanVstInstrumentsCommand { get; }
     public RelayCommand LoadVstInstrumentCommand { get; }
+    public RelayCommand SelectVstProgramCommand { get; }
+    public RelayCommand LoadVstPresetCommand { get; }
     public RelayCommand UseInternalDrumsCommand { get; }
     public RelayCommand OpenVstEditorCommand { get; }
     public RelayCommand PanicVstCommand { get; }
@@ -378,6 +385,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         set => SetProperty(ref _selectedVstInstrument, value);
     }
 
+    public Vst3ProgramItem? SelectedVstProgram
+    {
+        get => _selectedVstProgram;
+        set => SetProperty(ref _selectedVstProgram, value);
+    }
+
     public string VstStatus
     {
         get => _vstStatus;
@@ -391,8 +404,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     public bool IsVstInstrumentLoaded => _audio.IsVstInstrumentLoaded;
+    public bool HasVstPrograms => Vst3Programs.Count > 0;
     public string ActiveDrumEngineLabel => _audio.IsVstInstrumentLoaded
         ? $"VST3 · {_audio.VstInstrumentName}"
+        : _audio.IsExternalInstrumentSelected
+            ? $"VST3 detenido · {_audio.VstInstrumentName ?? "sin instrumento"} · kit interno bloqueado"
         : "Motor interno · kits WAV";
 
     public bool IsPracticePage => CurrentPage == "Practice";
@@ -972,7 +988,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void OnMidiNoteReceived(object? sender, MidiNoteMessage message)
     {
         var hasMapping = _midiProfile.TryResolve(message.Note, out var articulation);
-        if (!hasMapping && !_audio.IsVstInstrumentLoaded)
+        if (!hasMapping && !_audio.IsExternalInstrumentSelected)
         {
             return;
         }
@@ -1054,10 +1070,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             await _audio.LoadVstInstrumentAsync(instrument, cancellation.Token);
             OnPropertyChanged(nameof(IsVstInstrumentLoaded));
             OnPropertyChanged(nameof(ActiveDrumEngineLabel));
-            var editorOpened = _audio.OpenVstEditor();
-            VstStatus = editorOpened
-                ? $"Activo: {instrument.DisplayName} · editor abierto; elige el kit dentro del instrumento"
-                : $"Activo: {instrument.DisplayName} · este instrumento no ofrece editor";
+            Vst3Programs.Clear();
+            for (var index = 0; index < _audio.VstPrograms.Count; index++)
+            {
+                Vst3Programs.Add(new Vst3ProgramItem(index, _audio.VstPrograms[index]));
+            }
+
+            SelectedVstProgram = Vst3Programs.FirstOrDefault(program =>
+                                     program.Index == _audio.CurrentVstProgram)
+                                 ?? Vst3Programs.FirstOrDefault();
+            OnPropertyChanged(nameof(HasVstPrograms));
+            VstStatus = Vst3Programs.Count > 0
+                ? $"Activo: {instrument.DisplayName} · {Vst3Programs.Count} programas expuestos por VST3"
+                : $"Activo: {instrument.DisplayName} · no expone su catálogo de kits al host; " +
+                  "puedes cargar un .vstpreset o abrir el editor avanzado";
             StatusMessage = $"Los pads están conectados a {instrument.DisplayName}";
         }
         catch (OperationCanceledException)
@@ -1074,6 +1100,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
             VstStatus = $"No se pudo cargar el instrumento: {exception.Message}";
+            OnPropertyChanged(nameof(IsVstInstrumentLoaded));
+            OnPropertyChanged(nameof(ActiveDrumEngineLabel));
             MessageBox.Show(
                 exception.Message,
                 "Instrumento VST3",
@@ -1097,10 +1125,63 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         loading?.Cancel();
         loading?.Dispose();
         _audio.UnloadVstInstrument();
+        Vst3Programs.Clear();
+        SelectedVstProgram = null;
+        OnPropertyChanged(nameof(HasVstPrograms));
         OnPropertyChanged(nameof(IsVstInstrumentLoaded));
         OnPropertyChanged(nameof(ActiveDrumEngineLabel));
         VstStatus = "Motor interno activo.";
         StatusMessage = "Motor de batería interno activo";
+    }
+
+    private void SelectVstProgram()
+    {
+        if (!_audio.IsVstInstrumentLoaded || SelectedVstProgram is not { } program)
+        {
+            VstStatus = "El instrumento no ofrece un programa seleccionable.";
+            return;
+        }
+
+        try
+        {
+            _audio.SelectVstProgram(program.Index);
+            VstStatus = $"Activo: {_audio.VstInstrumentName} · kit/programa: {program.DisplayName}";
+        }
+        catch (Exception exception)
+        {
+            VstStatus = $"No se pudo seleccionar el programa: {exception.Message}";
+        }
+    }
+
+    private void LoadVstPreset()
+    {
+        if (!_audio.IsVstInstrumentLoaded)
+        {
+            VstStatus = "Carga primero Groove Agent u otro instrumento VST3.";
+            return;
+        }
+
+        var dialog = new OpenFileDialog
+        {
+            Title = "Cargar preset del instrumento VST3",
+            Filter = "Preset VST3 (*.vstpreset)|*.vstpreset",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            _audio.LoadVstPreset(dialog.FileName);
+            VstStatus = $"Preset enviado a {_audio.VstInstrumentName}: {Path.GetFileName(dialog.FileName)}";
+        }
+        catch (Exception exception)
+        {
+            VstStatus = $"No se pudo cargar el preset: {exception.Message}";
+        }
     }
 
     private void OpenVstEditor()
@@ -1124,7 +1205,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(IsVstInstrumentLoaded));
             OnPropertyChanged(nameof(ActiveDrumEngineLabel));
             VstStatus = message;
-            StatusMessage = "Motor de batería interno activo";
+            StatusMessage = "VST3 detenido · la batería está silenciada; el kit interno no se ha activado";
         });
     }
 
