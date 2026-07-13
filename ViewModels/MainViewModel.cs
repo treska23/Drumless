@@ -16,6 +16,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly UserKitStore _userKitStore = new();
     private readonly DrumLibraryImportService _libraryImport = new();
     private readonly Vst3InstrumentScanner _vstScanner = new();
+    private readonly Vst3PresetDiscoveryService _vstPresetDiscovery = new();
     private readonly AudioOutputDeviceService _audioOutputDevices = new();
     private readonly DrumRemovalService _drumRemoval = new();
     private readonly AudioEngine _audio = new();
@@ -135,7 +136,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CreateDrumlessCommand = new RelayCommand(() => _ = CreateDrumlessAsync());
         CancelDrumRemovalCommand = new RelayCommand(CancelDrumRemoval);
         RefreshMidiCommand = new RelayCommand(RefreshMidiDevices);
-        ConnectMidiCommand = new RelayCommand(ToggleMidiConnection);
         RefreshAudioOutputsCommand = new RelayCommand(RefreshAudioOutputDevices);
         ScanVstInstrumentsCommand = new RelayCommand(() => _ = ScanVstInstrumentsAsync(force: true));
         LoadVstPresetCommand = new RelayCommand(LoadVstPreset);
@@ -149,6 +149,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _midi.ControlChangeReceived += OnMidiControlChangeReceived;
         _midi.Error += (_, message) => PostStatus($"MIDI: {message}");
         _audio.VstInstrumentExited += OnVstInstrumentExited;
+        _audio.VstEditorClosed += OnVstEditorClosed;
 
         _transportTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _transportTimer.Tick += (_, _) => RefreshTransport();
@@ -200,7 +201,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public RelayCommand CreateDrumlessCommand { get; }
     public RelayCommand CancelDrumRemovalCommand { get; }
     public RelayCommand RefreshMidiCommand { get; }
-    public RelayCommand ConnectMidiCommand { get; }
     public RelayCommand RefreshAudioOutputsCommand { get; }
     public RelayCommand ScanVstInstrumentsCommand { get; }
     public RelayCommand LoadVstPresetCommand { get; }
@@ -273,23 +273,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            if (!TryApplyAudioOutputDevice(value, showDialog: true, remember: true))
-            {
-                var active = AudioOutputDevices.FirstOrDefault(device =>
-                    string.Equals(device.Id, _audio.OutputDeviceId, StringComparison.Ordinal));
-                if (active is not null)
-                {
-                    _isRefreshingAudioDevices = true;
-                    try
-                    {
-                        SelectedAudioOutputDevice = active;
-                    }
-                    finally
-                    {
-                        _isRefreshingAudioDevices = false;
-                    }
-                }
-            }
+            _ = ApplyAudioOutputSelectionAsync(value, showDialog: true, remember: true);
         }
     }
 
@@ -357,13 +341,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public string MidiStatus
     {
         get => _midiStatus;
-        private set
-        {
-            if (SetProperty(ref _midiStatus, value))
-            {
-                OnPropertyChanged(nameof(MidiButtonLabel));
-            }
-        }
+        private set => SetProperty(ref _midiStatus, value);
     }
 
     public string PlayButtonLabel
@@ -541,8 +519,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         : CurrentTrack.IsMissing
             ? $"Archivo no encontrado · {CurrentTrack.Path}"
             : CurrentTrack.VariantLabel;
-    public string MidiButtonLabel => _midi.IsConnected ? "Desconectar" : "Conectar";
-
     public void Dispose()
     {
         _transportTimer.Stop();
@@ -558,6 +534,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SaveActiveVstState(silent: true);
         SaveTrackWorkspace(silent: true);
         _audio.VstInstrumentExited -= OnVstInstrumentExited;
+        _audio.VstEditorClosed -= OnVstEditorClosed;
         _midi.NoteReceived -= OnMidiNoteReceived;
         _midi.NoteOffReceived -= OnMidiNoteOffReceived;
         _midi.ControlChangeReceived -= OnMidiControlChangeReceived;
@@ -1042,13 +1019,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!_midi.IsConnected && _autoConnectMidi && SelectedMidiDevice is not null)
+        if (SelectedMidiDevice is not null)
         {
             ConnectSelectedMidiDevice();
-        }
-        else if (!_midi.IsConnected)
-        {
-            MidiStatus = "Listo para conectar";
         }
     }
 
@@ -1159,19 +1132,77 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void ToggleMidiConnection()
+    private async Task ApplyAudioOutputSelectionAsync(
+        AudioOutputDeviceItem selected,
+        bool showDialog,
+        bool remember)
     {
-        if (_midi.IsConnected)
+        var reloadVst = AudioOutputTransitionPolicy.RequiresVstReload(
+            selected.IsAsio,
+            _audio.IsVstInstrumentLoaded,
+            _audio.IsDirectVstInstrumentLoaded);
+        var instrumentToReload = reloadVst
+            ? SelectedVstInstrument ?? Vst3Instruments.FirstOrDefault(instrument =>
+                string.Equals(
+                    instrument.PluginClass.ClassId,
+                    _activeVstClassId,
+                    StringComparison.OrdinalIgnoreCase))
+            : null;
+        if (reloadVst && instrumentToReload is null)
         {
-            _midi.Disconnect();
-            _autoConnectMidi = false;
-            MidiStatus = "No conectado";
-            OnPropertyChanged(nameof(MidiButtonLabel));
-            ScheduleSettingsSave();
+            AudioOutputStatus = "No se pudo identificar el VST3 activo para reiniciarlo con ASIO.";
+            return;
+        }
+        if (reloadVst)
+        {
+            SaveActiveVstState(silent: true);
+            _audio.UnloadVstInstrument();
+            OnPropertyChanged(nameof(IsVstInstrumentLoaded));
+            OnPropertyChanged(nameof(ActiveDrumEngineLabel));
+            OnPropertyChanged(nameof(VstAudioStatus));
+            VstStatus = $"Cambiando a {selected.Name} y reiniciando el instrumento…";
+        }
+
+        var applied = TryApplyAudioOutputDevice(selected, showDialog, remember);
+        if (!applied)
+        {
+            RestoreActiveAudioOutputSelection();
+        }
+
+        if (instrumentToReload is not null)
+        {
+            _isSynchronizingVstInstrumentSelection = true;
+            try
+            {
+                SelectedVstInstrument = instrumentToReload;
+            }
+            finally
+            {
+                _isSynchronizingVstInstrumentSelection = false;
+            }
+
+            await LoadSelectedVstInstrumentAsync(showMessage: showDialog);
+        }
+    }
+
+    private void RestoreActiveAudioOutputSelection()
+    {
+        var active = AudioOutputDevices.FirstOrDefault(device =>
+            string.Equals(device.Id, _audio.OutputDeviceId, StringComparison.Ordinal));
+        if (active is null)
+        {
             return;
         }
 
-        ConnectSelectedMidiDevice();
+        _isRefreshingAudioDevices = true;
+        try
+        {
+            SelectedAudioOutputDevice = active;
+        }
+        finally
+        {
+            _isRefreshingAudioDevices = false;
+        }
     }
 
     private void ConnectSelectedMidiDevice()
@@ -1189,7 +1220,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _autoConnectMidi = true;
             MidiStatus = $"Conectado a {selected.Name}";
             StatusMessage = "MIDI conectado · toca un pad para probar el kit activo";
-            OnPropertyChanged(nameof(MidiButtonLabel));
             ScheduleSettingsSave();
         }
         catch (Exception exception)
@@ -1325,7 +1355,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _preferredVstModulePath = instrument.Module.Path;
             _preferredVstClassId = instrument.PluginClass.ClassId;
             _autoLoadVst = true;
-            TryRestoreSavedVstState(instrument.PluginClass.ClassId);
+            var restoredVstState = TryRestoreVstState(instrument);
             ScheduleSettingsSave();
             OnPropertyChanged(nameof(IsVstInstrumentLoaded));
             OnPropertyChanged(nameof(ActiveDrumEngineLabel));
@@ -1356,6 +1386,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                   $"{(_audio.IsDirectVstInstrumentLoaded ? "ASIO directo" : "motor aislado")} · " +
                   "no expone su catálogo de kits al host; " +
                   "puedes cargar un .vstpreset o abrir el editor avanzado";
+            if (!string.IsNullOrWhiteSpace(restoredVstState))
+            {
+                VstStatus += $" · {restoredVstState}";
+            }
+            else if (instrument.DisplayName.Contains("Groove Agent", StringComparison.OrdinalIgnoreCase))
+            {
+                VstStatus += " · no se encontró un kit compatible guardado; " +
+                             "elige uno en el editor y ciérralo para recordarlo";
+            }
             AudioOutputStatus = _audio.Status;
             StatusMessage = $"Los pads están conectados a {instrument.DisplayName}";
         }
@@ -1405,6 +1444,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _audio.UnloadVstInstrument();
         Vst3Programs.Clear();
         SelectedVstProgram = null;
+        _isSynchronizingVstInstrumentSelection = true;
+        try
+        {
+            SelectedVstInstrument = null;
+        }
+        finally
+        {
+            _isSynchronizingVstInstrumentSelection = false;
+        }
         OnPropertyChanged(nameof(HasVstPrograms));
         OnPropertyChanged(nameof(IsVstInstrumentLoaded));
         OnPropertyChanged(nameof(ActiveDrumEngineLabel));
@@ -1494,6 +1542,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
+    private void OnVstEditorClosed(object? sender, EventArgs e)
+    {
+        Application.Current.Dispatcher.BeginInvoke(() =>
+        {
+            SaveActiveVstState(silent: false);
+            if (_audio.IsVstInstrumentLoaded)
+            {
+                VstStatus = $"Kit de {_audio.VstInstrumentName ?? "Groove Agent"} guardado; " +
+                            "se restaurará en la próxima apertura.";
+            }
+        });
+    }
+
     private async Task RestoreVstConfigurationAsync()
     {
         if (!_autoLoadVst ||
@@ -1570,11 +1631,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             _audio.SaveVstPreset(GetAutomaticVstStatePath(_activeVstClassId));
         }
-        catch (Exception exception) when (exception is
-            IOException or
-            UnauthorizedAccessException or
-            InvalidOperationException or
-            NotSupportedException)
+        catch (Exception exception)
         {
             if (!silent)
             {
@@ -1583,17 +1640,38 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void TryRestoreSavedVstState(string classId)
+    private string? TryRestoreVstState(Vst3InstrumentItem instrument)
     {
-        var path = GetAutomaticVstStatePath(classId);
-        if (!File.Exists(path))
+        var automaticPath = GetAutomaticVstStatePath(instrument.PluginClass.ClassId);
+        if (File.Exists(automaticPath))
         {
-            return;
+            try
+            {
+                _audio.LoadVstPreset(automaticPath);
+                return "kit anterior restaurado";
+            }
+            catch (Exception exception) when (exception is
+                IOException or
+                UnauthorizedAccessException or
+                InvalidDataException or
+                InvalidOperationException or
+                NotSupportedException)
+            {
+                VstStatus = $"El estado anterior no era válido: {exception.Message}";
+            }
+        }
+
+        var discoveredPath = _vstPresetDiscovery.FindCompatiblePreset(instrument);
+        if (discoveredPath is null)
+        {
+            return null;
         }
 
         try
         {
-            _audio.LoadVstPreset(path);
+            _audio.LoadVstPreset(discoveredPath);
+            SaveActiveVstState(silent: true);
+            return $"kit inicial: {Path.GetFileNameWithoutExtension(discoveredPath)}";
         }
         catch (Exception exception) when (exception is
             IOException or
@@ -1602,7 +1680,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             InvalidOperationException or
             NotSupportedException)
         {
-            VstStatus = $"Instrumento cargado, pero su estado anterior no se pudo restaurar: {exception.Message}";
+            VstStatus = $"No se pudo cargar el preset inicial encontrado: {exception.Message}";
+            return null;
         }
     }
 

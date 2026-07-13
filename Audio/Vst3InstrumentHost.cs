@@ -13,6 +13,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
     private readonly object _sync = new();
     private Process? _process;
     private NamedPipeServerStream? _pipe;
+    private StreamReader? _reader;
     private StreamWriter? _writer;
     private string? _configurationPath;
     private string? _diagnosticPath;
@@ -20,6 +21,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
     private bool _hasEditor;
 
     public event EventHandler<string>? Exited;
+    public event EventHandler? EditorClosed;
 
     public bool IsLoaded
     {
@@ -137,7 +139,6 @@ internal sealed class Vst3InstrumentHost : IDisposable
             var response = responseLine is null
                 ? null
                 : JsonSerializer.Deserialize<Vst3RuntimeResponse>(responseLine);
-            reader.Dispose();
             if (response is null || !response.Ready)
             {
                 throw new InvalidOperationException(
@@ -147,12 +148,14 @@ internal sealed class Vst3InstrumentHost : IDisposable
 
             lock (_sync)
             {
+                _reader = reader;
                 _writer = commandWriter;
                 _hasEditor = response.HasEditor;
                 Programs = response.Programs ?? Array.Empty<string>();
                 CurrentProgram = response.CurrentProgram;
                 AudioStatus = response.AudioStatus ?? "Audio VST3 preparado";
             }
+            _ = ListenForNotificationsAsync(reader);
             commandWriter = null;
             TryDeleteConfiguration();
         }
@@ -243,15 +246,18 @@ internal sealed class Vst3InstrumentHost : IDisposable
     {
         Process? process;
         NamedPipeServerStream? pipe;
+        StreamReader? reader;
         StreamWriter? writer;
         lock (_sync)
         {
             _stopping = true;
             process = _process;
             pipe = _pipe;
+            reader = _reader;
             writer = _writer;
             _process = null;
             _pipe = null;
+            _reader = null;
             _writer = null;
             _diagnosticPath = null;
             _hasEditor = false;
@@ -270,6 +276,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
             // El motor puede haberse cerrado antes de recibir Stop.
         }
         writer?.Dispose();
+        reader?.Dispose();
         pipe?.Dispose();
 
         if (process is not null)
@@ -297,6 +304,36 @@ internal sealed class Vst3InstrumentHost : IDisposable
     }
 
     public void Dispose() => Unload();
+
+    private async Task ListenForNotificationsAsync(StreamReader reader)
+    {
+        try
+        {
+            while (await reader.ReadLineAsync() is { } line)
+            {
+                Vst3RuntimeNotification? notification;
+                try
+                {
+                    notification = JsonSerializer.Deserialize<Vst3RuntimeNotification>(line);
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+
+                if (string.Equals(notification?.Type, "EditorClosed", StringComparison.Ordinal))
+                {
+                    EditorClosed?.Invoke(this, EventArgs.Empty);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            ObjectDisposedException)
+        {
+            // La lectura termina normalmente al descargar el motor aislado.
+        }
+    }
 
     private void Send(Vst3RuntimeCommand command)
     {
@@ -337,6 +374,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
                 try
                 {
                     _writer?.Dispose();
+                    _reader?.Dispose();
                     _pipe?.Dispose();
                 }
                 catch
@@ -355,6 +393,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
                     // El código puede no estar disponible durante una carrera de cierre.
                 }
                 _writer = null;
+                _reader = null;
                 _pipe = null;
                 _process = null;
                 _hasEditor = false;

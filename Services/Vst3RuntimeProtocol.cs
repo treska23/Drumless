@@ -39,6 +39,8 @@ internal sealed record Vst3RuntimeCommand(
     int Value3 = 0,
     string? Text = null);
 
+internal sealed record Vst3RuntimeNotification(string Type);
+
 internal static class Vst3RuntimeProtocol
 {
     public const string Argument = "--vst3-runtime";
@@ -84,6 +86,8 @@ internal static class Vst3RuntimeProtocol
             Vst3RuntimeDiagnostics.Info($"Cargando {configuration.Name} · {configuration.ModulePath}");
             runtime = await Application.Current.Dispatcher.InvokeAsync(
                 () => Vst3Runtime.Load(configuration));
+            runtime.EditorClosed += (_, _) =>
+                TrySendNotification(writer!, new Vst3RuntimeNotification("EditorClosed"));
             Vst3RuntimeDiagnostics.Info("Instrumento preparado y salida de audio iniciada");
             Vst3RuntimeDiagnostics.Info(runtime.AudioStatus);
             await writer.WriteLineAsync(JsonSerializer.Serialize(
@@ -244,6 +248,23 @@ internal static class Vst3RuntimeProtocol
     private static int ClampVstChannel(int vstChannel) =>
         Math.Clamp(vstChannel, 0, 15);
 
+    private static void TrySendNotification(
+        StreamWriter writer,
+        Vst3RuntimeNotification notification)
+    {
+        try
+        {
+            lock (writer)
+            {
+                writer.WriteLine(JsonSerializer.Serialize(notification));
+            }
+        }
+        catch
+        {
+            // El proceso principal puede estar cerrando la tubería.
+        }
+    }
+
     private static void TryDelete(string path)
     {
         try
@@ -282,6 +303,7 @@ internal static class Vst3RuntimeProtocol
 
         public Vst3Plugin Plugin { get; }
         public string DisplayName { get; }
+        public event EventHandler? EditorClosed;
         public bool HasEditor => _view is not null;
         public IReadOnlyList<string> Programs =>
             Plugin.ActiveProgramList?.Programs ?? Array.Empty<string>();
@@ -383,7 +405,11 @@ internal static class Vst3RuntimeProtocol
             {
                 ShowInTaskbar = true
             };
-            _editor.ClosedByUser += (_, _) => _editor = null;
+            _editor.ClosedByUser += (_, _) =>
+            {
+                _editor = null;
+                EditorClosed?.Invoke(this, EventArgs.Empty);
+            };
             _editor.Show();
             _editor.Activate();
         }

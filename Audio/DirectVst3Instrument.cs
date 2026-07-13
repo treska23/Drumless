@@ -29,6 +29,7 @@ internal sealed class DirectVst3Instrument : IDisposable
     public Vst3Plugin Plugin { get; }
     public ISampleProvider Provider { get; }
     public string DisplayName { get; }
+    public event EventHandler? EditorClosed;
     public IReadOnlyList<string> Programs =>
         Plugin.ActiveProgramList?.Programs ?? Array.Empty<string>();
     public int CurrentProgram => Plugin.CurrentProgram;
@@ -145,7 +146,11 @@ internal sealed class DirectVst3Instrument : IDisposable
         {
             ShowInTaskbar = true
         };
-        _editor.ClosedByUser += (_, _) => _editor = null;
+        _editor.ClosedByUser += (_, _) =>
+        {
+            _editor = null;
+            EditorClosed?.Invoke(this, EventArgs.Empty);
+        };
         _editor.Show();
         _editor.Activate();
         return true;

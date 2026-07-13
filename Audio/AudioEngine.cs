@@ -24,6 +24,7 @@ public sealed class AudioEngine : IDisposable
         _track = new TrackTransportProvider(format);
         _mixer = new MixingSampleProvider([_track, _drums]) { ReadFully = true };
         _vstInstrument.Exited += (_, message) => VstInstrumentExited?.Invoke(this, message);
+        _vstInstrument.EditorClosed += (_, _) => VstEditorClosed?.Invoke(this, EventArgs.Empty);
 
         try
         {
@@ -36,6 +37,7 @@ public sealed class AudioEngine : IDisposable
     }
 
     public event EventHandler<string>? VstInstrumentExited;
+    public event EventHandler? VstEditorClosed;
 
     public bool IsAvailable { get; private set; }
     public string Status { get; private set; } = "Audio no inicializado";
@@ -190,6 +192,7 @@ public sealed class AudioEngine : IDisposable
             {
                 direct = DirectVst3Instrument.Load(instrument, SampleRate);
                 cancellationToken.ThrowIfCancellationRequested();
+                direct.EditorClosed += OnDirectVstEditorClosed;
                 _output.Stop();
                 _mixer.AddMixerInput(direct.Provider);
                 _directVstInstrument = direct;
@@ -202,6 +205,7 @@ public sealed class AudioEngine : IDisposable
                 _directVstInstrument = null;
                 if (direct is not null)
                 {
+                    direct.EditorClosed -= OnDirectVstEditorClosed;
                     _mixer.RemoveMixerInput(direct.Provider);
                     direct.Dispose();
                 }
@@ -264,6 +268,7 @@ public sealed class AudioEngine : IDisposable
         if (_directVstInstrument is { } direct)
         {
             _directVstInstrument = null;
+            direct.EditorClosed -= OnDirectVstEditorClosed;
             _output?.Stop();
             _mixer.RemoveMixerInput(direct.Provider);
             direct.Dispose();
@@ -288,6 +293,9 @@ public sealed class AudioEngine : IDisposable
         _output?.Dispose();
         _track.Dispose();
     }
+
+    private void OnDirectVstEditorClosed(object? sender, EventArgs e) =>
+        VstEditorClosed?.Invoke(this, EventArgs.Empty);
 
     private static string DescribeOutput(AudioOutputSession output, string engine)
     {
