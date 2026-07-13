@@ -13,6 +13,7 @@ public sealed class AudioEngine : IDisposable
     private readonly MixingSampleProvider _mixer;
     private readonly Vst3InstrumentHost _vstInstrument = new();
     private AudioOutputSession? _output;
+    private bool _externalInstrumentSelected;
 
     public AudioEngine()
     {
@@ -43,7 +44,10 @@ public sealed class AudioEngine : IDisposable
     public TimeSpan TrackPosition => _track.Position;
     public TimeSpan TrackDuration => _track.Duration;
     public bool IsVstInstrumentLoaded => _vstInstrument.IsLoaded;
+    public bool IsExternalInstrumentSelected => _externalInstrumentSelected;
     public string? VstInstrumentName => _vstInstrument.DisplayName;
+    public IReadOnlyList<string> VstPrograms => _vstInstrument.Programs;
+    public int CurrentVstProgram => _vstInstrument.CurrentProgram;
 
     public async Task LoadKitAsync(DrumKit kit, CancellationToken cancellationToken = default)
     {
@@ -54,9 +58,12 @@ public sealed class AudioEngine : IDisposable
 
     public void Trigger(string articulation, int velocity, int midiNote, int midiChannel = 1)
     {
-        if (_vstInstrument.IsLoaded)
+        if (_externalInstrumentSelected)
         {
-            _vstInstrument.SendNoteOn(midiNote, velocity, midiChannel);
+            if (_vstInstrument.IsLoaded)
+            {
+                _vstInstrument.SendNoteOn(midiNote, velocity, midiChannel);
+            }
             return;
         }
 
@@ -96,15 +103,30 @@ public sealed class AudioEngine : IDisposable
         previous?.Dispose();
     }
 
-    public Task LoadVstInstrumentAsync(
+    public async Task LoadVstInstrumentAsync(
         Vst3InstrumentItem instrument,
-        CancellationToken cancellationToken = default) =>
-        _vstInstrument.LoadAsync(instrument, SampleRate, OutputDeviceId, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        _externalInstrumentSelected = true;
+        _drums.StopAll();
+        await _vstInstrument.LoadAsync(
+            instrument,
+            SampleRate,
+            OutputDeviceId,
+            cancellationToken);
+    }
+
+    public void SelectVstProgram(int programIndex) =>
+        _vstInstrument.SelectProgram(programIndex);
+
+    public void LoadVstPreset(string path) =>
+        _vstInstrument.LoadPreset(path);
 
     public bool OpenVstEditor() => _vstInstrument.OpenEditor();
 
     public void UnloadVstInstrument()
     {
+        _externalInstrumentSelected = false;
         _vstInstrument.Unload();
     }
     public void Choke(string group) => _drums.Choke(group);
