@@ -89,11 +89,15 @@
         </Style>
 
         <Style TargetType="ComboBox">
-            <Setter Property="Background" Value="#202633" />
-            <!-- El control nativo puede conservar un fondo claro; este color mantiene
-                 legible la selección tanto con el tema de Windows como en el desplegable. -->
+            <Setter Property="Background" Value="#F4F6FA" />
             <Setter Property="Foreground" Value="#151820" />
             <Setter Property="BorderBrush" Value="{StaticResource Stroke}" />
+            <Setter Property="Padding" Value="9,7" />
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="#F4F6FA" />
+            <Setter Property="Foreground" Value="#151820" />
             <Setter Property="Padding" Value="9,7" />
         </Style>
 
