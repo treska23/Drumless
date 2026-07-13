@@ -262,7 +262,10 @@ internal static class Vst3RuntimeProtocol
                     configuration.Version,
                     configuration.SdkVersion,
                     configuration.SubCategories);
-                plugin = module.CreatePlugin(pluginClass, configuration.SampleRate, 2_048);
+                plugin = module.CreatePlugin(
+                    pluginClass,
+                    configuration.SampleRate,
+                    AudioLatencySettings.VstMaxBlockSize);
                 if (!plugin.IsInstrument)
                 {
                     throw new InvalidOperationException(

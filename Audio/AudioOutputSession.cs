@@ -7,13 +7,13 @@ internal sealed class AudioOutputSession : IDisposable
 {
     private readonly MMDeviceEnumerator _enumerator;
     private readonly MMDevice _device;
-    private readonly IWavePlayer _player;
+    private readonly WasapiPlayer _player;
     private bool _disposed;
 
     private AudioOutputSession(
         MMDeviceEnumerator enumerator,
         MMDevice device,
-        IWavePlayer player)
+        WasapiPlayer player)
     {
         _enumerator = enumerator;
         _device = device;
@@ -24,6 +24,7 @@ internal sealed class AudioOutputSession : IDisposable
 
     public string DeviceId { get; }
     public string DeviceName { get; }
+    public bool IsLowLatencyActive => _player.LowLatencyActive;
 
     public static AudioOutputSession Open(ISampleProvider provider, string? deviceId)
     {
@@ -31,7 +32,7 @@ internal sealed class AudioOutputSession : IDisposable
 
         var enumerator = new MMDeviceEnumerator();
         MMDevice? device = null;
-        IWavePlayer? player = null;
+        WasapiPlayer? player = null;
         try
         {
             device = string.IsNullOrWhiteSpace(deviceId)
@@ -41,7 +42,9 @@ internal sealed class AudioOutputSession : IDisposable
                 .WithDevice(device)
                 .WithSharedMode()
                 .WithEventSync()
-                .WithLatency(20)
+                .WithLatency(AudioLatencySettings.RequestedLatencyMilliseconds)
+                .WithLowLatency()
+                .WithMmcssThreadPriority("Pro Audio")
                 .Build();
             player.Init(provider.ToWaveProvider());
             return new AudioOutputSession(enumerator, device, player);

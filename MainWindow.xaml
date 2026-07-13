@@ -657,7 +657,7 @@
                         </Border>
 
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,18">
-                            <StackPanel>
+                            <StackPanel x:Name="VstInstrumentPanel">
                                 <TextBlock Text="INSTRUMENTO VST3" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
                                 <TextBlock Text="{Binding ActiveDrumEngineLabel}" FontSize="19" FontWeight="SemiBold" Margin="0,6,0,3" />
                                 <TextBlock Text="Usa Addictive Drums 2, Groove Agent u otro instrumento VST3 instalado sin extraer sus librerías protegidas."
@@ -721,6 +721,9 @@
                                             Margin="0,0,8,8" Command="{Binding UseInternalDrumsCommand}" />
                                 </WrapPanel>
                                 <ProgressBar Height="5" Margin="0,6,0,8" IsIndeterminate="True"
+                                             Width="{Binding ActualWidth, ElementName=VstInstrumentPanel}"
+                                             MaxWidth="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"
+                                             HorizontalAlignment="Left" ClipToBounds="True"
                                              Visibility="{Binding IsScanningVst, Converter={StaticResource BoolToVisibility}}" />
                                 <TextBlock Text="{Binding VstStatus}" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" />
                             </StackPanel>

@@ -103,7 +103,10 @@ public sealed class AudioEngine : IDisposable
         _output = replacement;
         OutputDeviceId = replacement.DeviceId;
         OutputDeviceName = replacement.DeviceName;
-        Status = $"Audio WASAPI · {replacement.DeviceName} · 48 kHz";
+        var latencyLabel = replacement.IsLowLatencyActive
+            ? $"baja latencia activa · {AudioLatencySettings.RequestedLatencyMilliseconds} ms solicitados"
+            : "WASAPI compartido · periodo administrado por Windows";
+        Status = $"Audio · {replacement.DeviceName} · 48 kHz · {latencyLabel}";
         IsAvailable = true;
         _vstInstrument.SetOutputDevice(replacement.DeviceId);
         previous?.Dispose();

@@ -920,7 +920,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                                         ?? AudioOutputDevices.FirstOrDefault();
             AudioOutputStatus = AudioOutputDevices.Count == 0
                 ? "No se encontraron salidas de audio activas."
-                : $"Salida activa: {_audio.OutputDeviceName ?? "predeterminada de Windows"}";
+                : _audio.Status;
         }
         catch (Exception exception)
         {
@@ -939,7 +939,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             _audio.SelectOutputDevice(selected.Id);
-            AudioOutputStatus = $"Salida activa: {selected.Name}";
+            AudioOutputStatus = _audio.Status;
             StatusMessage = $"El programa y el VST3 suenan por {selected.Name}";
             if (_audio.IsVstInstrumentLoaded)
             {
