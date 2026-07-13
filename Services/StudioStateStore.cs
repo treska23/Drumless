@@ -127,6 +127,13 @@ public sealed class StudioStateStore
             AudioOutputDeviceId = string.IsNullOrWhiteSpace(document.AudioOutputDeviceId)
                 ? null
                 : document.AudioOutputDeviceId,
+            AudioInputOutputDeviceId = string.IsNullOrWhiteSpace(document.AudioInputOutputDeviceId)
+                ? null
+                : document.AudioInputOutputDeviceId,
+            AudioInputChannelIndex = document.AudioInputChannelIndex is >= 0
+                ? document.AudioInputChannelIndex
+                : null,
+            AudioInputGain = Math.Clamp(document.AudioInputGain ?? 0.8d, 0d, 1.5d),
             MidiDeviceName = string.IsNullOrWhiteSpace(document.MidiDeviceName)
                 ? null
                 : document.MidiDeviceName,
@@ -206,6 +213,9 @@ public sealed class StudioStateStore
             : state.OutputFolder,
         SelectedPlaylistId = state.SelectedPlaylistId,
         AudioOutputDeviceId = state.AudioOutputDeviceId,
+        AudioInputOutputDeviceId = state.AudioInputOutputDeviceId,
+        AudioInputChannelIndex = state.AudioInputChannelIndex,
+        AudioInputGain = Math.Clamp(state.AudioInputGain, 0d, 1.5d),
         MidiDeviceName = state.MidiDeviceName,
         MidiDeviceIndex = state.MidiDeviceIndex,
         AutoConnectMidi = state.AutoConnectMidi,
@@ -243,6 +253,9 @@ public sealed class StudioStateStore
         public int SchemaVersion { get; set; }
         public string? OutputFolder { get; set; }
         public string? AudioOutputDeviceId { get; set; }
+        public string? AudioInputOutputDeviceId { get; set; }
+        public int? AudioInputChannelIndex { get; set; }
+        public double? AudioInputGain { get; set; }
         public string? MidiDeviceName { get; set; }
         public int? MidiDeviceIndex { get; set; }
         public bool? AutoConnectMidi { get; set; }

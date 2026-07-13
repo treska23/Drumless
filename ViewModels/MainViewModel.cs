@@ -37,6 +37,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private DrumKit? _activeKit;
     private MidiDeviceItem? _selectedMidiDevice;
     private AudioOutputDeviceItem? _selectedAudioOutputDevice;
+    private AudioInputChannelItem? _selectedAudioInputChannel;
     private LocalTrack? _currentTrack;
     private string _statusMessage = "Preparando el estudio…";
     private string _midiStatus = "No conectado";
@@ -57,9 +58,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string _vstStatus = "Pulsa «Buscar instrumentos» para localizar Addictive Drums y Groove Agent de forma aislada.";
     private bool _isScanningVst;
     private string _audioOutputStatus = "Buscando salidas de audio…";
+    private string _audioInputStatus = "Selecciona una salida ASIO para usar la entrada de audio.";
+    private double _audioInputGain = 0.8d;
     private double _midiVelocitySensitivity = MidiVelocityCurve.DefaultSensitivity;
     private string _midiVelocityMonitor = "Toca un pad para comprobar la velocidad recibida.";
     private string? _preferredAudioOutputDeviceId;
+    private string? _preferredAudioInputOutputDeviceId;
+    private int? _preferredAudioInputChannelIndex;
     private string? _preferredMidiDeviceName;
     private int? _preferredMidiDeviceIndex;
     private bool _autoConnectMidi = true;
@@ -73,6 +78,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _hasInitializedMidiDevices;
     private bool _isRefreshingMidiDevices;
     private bool _isRefreshingAudioDevices;
+    private bool _isRefreshingAudioInputChannels;
     private bool _isSynchronizingVstInstrumentSelection;
     private bool _isRefreshingVstPrograms;
 
@@ -87,6 +93,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ActivePads = [];
         MidiDevices = [];
         AudioOutputDevices = [];
+        AudioInputChannels = [];
         MappingRows = [];
         Vst3Instruments = [];
         Vst3Programs = [];
@@ -183,6 +190,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<PadViewModel> ActivePads { get; }
     public ObservableCollection<MidiDeviceItem> MidiDevices { get; }
     public ObservableCollection<AudioOutputDeviceItem> AudioOutputDevices { get; }
+    public ObservableCollection<AudioInputChannelItem> AudioInputChannels { get; }
     public ObservableCollection<MidiMappingRow> MappingRows { get; }
     public ObservableCollection<Vst3InstrumentItem> Vst3Instruments { get; }
     public ObservableCollection<Vst3ProgramItem> Vst3Programs { get; }
@@ -282,6 +290,50 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         get => _audioOutputStatus;
         private set => SetProperty(ref _audioOutputStatus, value);
     }
+
+    public AudioInputChannelItem? SelectedAudioInputChannel
+    {
+        get => _selectedAudioInputChannel;
+        set
+        {
+            if (!SetProperty(ref _selectedAudioInputChannel, value) ||
+                value is null ||
+                _isRefreshingAudioInputChannels)
+            {
+                return;
+            }
+
+            ApplyAudioInputSelection(value);
+        }
+    }
+
+    public string AudioInputStatus
+    {
+        get => _audioInputStatus;
+        private set => SetProperty(ref _audioInputStatus, value);
+    }
+
+    public double AudioInputGain
+    {
+        get => _audioInputGain;
+        set
+        {
+            var bounded = Math.Clamp(value, 0d, 1.5d);
+            if (!SetProperty(ref _audioInputGain, bounded))
+            {
+                return;
+            }
+
+            _audio.SetAudioInputGain((float)bounded);
+            OnPropertyChanged(nameof(AudioInputGainLabel));
+            ScheduleSettingsSave();
+        }
+    }
+
+    public string AudioInputGainLabel => $"{AudioInputGain * 100:0}%";
+
+    public bool IsAudioInputAvailable =>
+        SelectedAudioOutputDevice?.IsAsio == true && AudioInputChannels.Count > 1;
 
     public double MidiVelocitySensitivity
     {
@@ -1100,7 +1152,30 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         try
         {
-            _audio.SelectOutputDevice(selected.Id);
+            var rememberedInput = selected.IsAsio &&
+                                  string.Equals(
+                                      selected.Id,
+                                      _preferredAudioInputOutputDeviceId,
+                                      StringComparison.Ordinal)
+                ? _preferredAudioInputChannelIndex
+                : null;
+            try
+            {
+                _audio.SelectOutputDevice(
+                    selected.Id,
+                    rememberedInput,
+                    (float)AudioInputGain);
+            }
+            catch when (rememberedInput is not null)
+            {
+                _audio.SelectOutputDevice(
+                    selected.Id,
+                    inputChannelIndex: null,
+                    inputGain: (float)AudioInputGain);
+                _preferredAudioInputChannelIndex = null;
+                AudioInputStatus = "La entrada guardada ya no existe; la monitorización quedó desactivada.";
+            }
+            RefreshAudioInputChannels();
             AudioOutputStatus = _audio.Status;
             StatusMessage = $"El programa y el VST3 suenan por {selected.Name}";
             if (_audio.IsVstInstrumentLoaded)
@@ -1129,6 +1204,73 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     MessageBoxImage.Warning);
             }
             return false;
+        }
+    }
+
+    private void RefreshAudioInputChannels()
+    {
+        _isRefreshingAudioInputChannels = true;
+        try
+        {
+            AudioInputChannels.Clear();
+            AudioInputChannels.Add(new AudioInputChannelItem(null, "Desactivada"));
+            foreach (var channel in _audio.AudioInputChannels)
+            {
+                AudioInputChannels.Add(channel);
+            }
+
+            SelectedAudioInputChannel = AudioInputChannels.FirstOrDefault(channel =>
+                                            channel.ChannelIndex == _audio.AudioInputChannelIndex)
+                                        ?? AudioInputChannels[0];
+        }
+        finally
+        {
+            _isRefreshingAudioInputChannels = false;
+        }
+
+        OnPropertyChanged(nameof(IsAudioInputAvailable));
+        AudioInputStatus = !_audio.AudioInputChannels.Any()
+            ? "La entrada de audio directa está disponible al elegir una salida ASIO."
+            : _audio.IsAudioInputMonitoringActive
+                ? $"Monitorización directa activa · {_audio.Status}"
+                : "Elige el jack donde has conectado la salida del módulo de batería.";
+    }
+
+    private void ApplyAudioInputSelection(AudioInputChannelItem selected)
+    {
+        try
+        {
+            _audio.SelectAudioInputChannel(selected.ChannelIndex, (float)AudioInputGain);
+            _preferredAudioInputOutputDeviceId = SelectedAudioOutputDevice?.Id;
+            _preferredAudioInputChannelIndex = selected.ChannelIndex;
+            AudioOutputStatus = _audio.Status;
+            AudioInputStatus = selected.IsDisabled
+                ? "Monitorización de entrada desactivada."
+                : $"Monitorizando {selected.DisplayName} por el mismo callback ASIO.";
+            ScheduleSettingsSave();
+            OnPropertyChanged(nameof(VstAudioStatus));
+        }
+        catch (Exception exception)
+        {
+            AudioInputStatus = $"No se pudo abrir {selected.DisplayName}: {exception.Message}";
+            _isRefreshingAudioInputChannels = true;
+            try
+            {
+                SelectedAudioInputChannel = AudioInputChannels.FirstOrDefault(channel =>
+                                                channel.ChannelIndex == _audio.AudioInputChannelIndex)
+                                            ?? AudioInputChannels.FirstOrDefault();
+            }
+            finally
+            {
+                _isRefreshingAudioInputChannels = false;
+            }
+
+            MessageBox.Show(
+                $"No se pudo monitorizar «{selected.DisplayName}».\n\n{exception.Message}\n\n" +
+                "La configuración anterior sigue activa.",
+                "Entrada de audio",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
     }
 

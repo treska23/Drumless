@@ -43,6 +43,10 @@ public sealed class AudioEngine : IDisposable
     public string Status { get; private set; } = "Audio no inicializado";
     public string? OutputDeviceId { get; private set; }
     public string? OutputDeviceName { get; private set; }
+    public int? AudioInputChannelIndex => _output?.InputChannelIndex;
+    public bool IsAudioInputMonitoringActive => _output?.IsInputMonitoringActive == true;
+    public IReadOnlyList<AudioInputChannelItem> AudioInputChannels =>
+        _output?.InputChannels ?? [];
     public bool IsTrackPlaying => _track.IsPlaying;
     public TrackPlaybackState PlaybackState => _track.PlaybackState;
     public TimeSpan TrackPosition => _track.Position;
@@ -124,7 +128,10 @@ public sealed class AudioEngine : IDisposable
         }
     }
 
-    public void SelectOutputDevice(string? deviceId)
+    public void SelectOutputDevice(
+        string? deviceId,
+        int? inputChannelIndex = null,
+        float inputGain = 0.8f)
     {
         if (AudioOutputDeviceId.TryGetAsioDriverName(deviceId, out _) &&
             _vstInstrument.IsLoaded)
@@ -146,7 +153,11 @@ public sealed class AudioEngine : IDisposable
         AudioOutputSession? replacement = null;
         try
         {
-            replacement = AudioOutputSession.Open(_mixer, deviceId);
+            replacement = AudioOutputSession.Open(
+                _mixer,
+                deviceId,
+                inputChannelIndex,
+                inputGain);
             if (!exclusiveTransition)
             {
                 previous?.Stop();
@@ -175,6 +186,67 @@ public sealed class AudioEngine : IDisposable
         }
         previous?.Dispose();
     }
+
+    public void SelectAudioInputChannel(int? channelIndex, float gain)
+    {
+        if (_output is not { IsAsio: true } previous ||
+            string.IsNullOrWhiteSpace(OutputDeviceId))
+        {
+            if (channelIndex is null)
+            {
+                return;
+            }
+            throw new InvalidOperationException(
+                "La monitorización directa necesita una salida ASIO seleccionada.");
+        }
+
+        var previousChannel = previous.InputChannelIndex;
+        if (previousChannel == channelIndex)
+        {
+            previous.SetInputGain(gain);
+            return;
+        }
+
+        var deviceId = OutputDeviceId;
+        previous.Stop();
+        previous.Dispose();
+        _output = null;
+        AudioOutputSession? replacement = null;
+        try
+        {
+            replacement = AudioOutputSession.Open(_mixer, deviceId, channelIndex, gain);
+            replacement.Play();
+        }
+        catch
+        {
+            replacement?.Dispose();
+            try
+            {
+                replacement = AudioOutputSession.Open(_mixer, deviceId, previousChannel, gain);
+                replacement.Play();
+                _output = replacement;
+                Status = DescribeOutput(
+                    replacement,
+                    _directVstInstrument is null ? "motor interno" : "VST3 directo");
+            }
+            catch
+            {
+                replacement?.Dispose();
+                IsAvailable = false;
+                Status = "Audio ASIO no disponible";
+            }
+            throw;
+        }
+
+        _output = replacement;
+        Status = DescribeOutput(
+            replacement,
+            _directVstInstrument is null ? "motor interno" : "VST3 directo");
+        IsAvailable = true;
+    }
+
+    public void SetAudioInputGain(float gain) =>
+        _output?.SetInputGain(gain);
 
     public async Task LoadVstInstrumentAsync(
         Vst3InstrumentItem instrument,
@@ -304,8 +376,14 @@ public sealed class AudioEngine : IDisposable
             var buffer = output.BufferFrames is { } frames
                 ? $" · búfer {frames} muestras"
                 : string.Empty;
+            var input = output.InputChannelIndex is { } channel
+                ? $" · entrada {channel + 1} monitorizada" +
+                  (output.InputLatencyMilliseconds is { } inputLatency
+                      ? $" · {inputLatency + output.LatencyMilliseconds} ms ida y vuelta"
+                      : string.Empty)
+                : " · entrada de audio desactivada";
             return $"Audio · {output.DeviceName} · 48 kHz · {engine} · " +
-                   $"ASIO directo{buffer} · {output.LatencyMilliseconds} ms de salida";
+                   $"ASIO directo{buffer} · {output.LatencyMilliseconds} ms de salida{input}";
         }
 
         var latencyLabel = output.IsLowLatencyActive

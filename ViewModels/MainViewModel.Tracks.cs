@@ -125,6 +125,9 @@ public sealed partial class MainViewModel
             var state = _studioStateStore.Load();
             _trackWorkspaceWarning = _studioStateStore.LastLoadWarning;
             _preferredAudioOutputDeviceId = state.AudioOutputDeviceId;
+            _preferredAudioInputOutputDeviceId = state.AudioInputOutputDeviceId;
+            _preferredAudioInputChannelIndex = state.AudioInputChannelIndex;
+            _audioInputGain = Math.Clamp(state.AudioInputGain, 0d, 1.5d);
             _preferredMidiDeviceName = state.MidiDeviceName;
             _preferredMidiDeviceIndex = state.MidiDeviceIndex;
             _autoConnectMidi = state.AutoConnectMidi;
@@ -581,6 +584,9 @@ public sealed partial class MainViewModel
                 SelectedPlaylistId = SelectedPlaylist?.Id,
                 PlaybackMode = SelectedPlaybackMode?.Mode ?? PlaybackMode.Sequential,
                 AudioOutputDeviceId = _preferredAudioOutputDeviceId,
+                AudioInputOutputDeviceId = _preferredAudioInputOutputDeviceId,
+                AudioInputChannelIndex = _preferredAudioInputChannelIndex,
+                AudioInputGain = AudioInputGain,
                 MidiDeviceName = _preferredMidiDeviceName,
                 MidiDeviceIndex = _preferredMidiDeviceIndex,
                 AutoConnectMidi = _autoConnectMidi,
