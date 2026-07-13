@@ -677,10 +677,37 @@
                                     <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Buscar instrumentos"
                                             Margin="10,0,0,0" Command="{Binding ScanVstInstrumentsCommand}" />
                                 </Grid>
+                                <TextBlock Text="KIT / PROGRAMA EXPUESTO POR EL VST3"
+                                           Foreground="{StaticResource TextSecondary}" FontSize="10" FontWeight="Bold"
+                                           Margin="0,14,0,6" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox ItemsSource="{Binding Vst3Programs}"
+                                              SelectedItem="{Binding SelectedVstProgram}"
+                                              IsEnabled="{Binding HasVstPrograms}"
+                                              MinWidth="430"
+                                              AutomationProperties.AutomationId="Vst3ProgramCombo">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding DisplayName}" Foreground="#151820" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <Button Grid.Column="1" Style="{StaticResource SecondaryButton}"
+                                            Content="Usar kit/programa" Margin="10,0,0,0"
+                                            IsEnabled="{Binding HasVstPrograms}"
+                                            Command="{Binding SelectVstProgramCommand}" />
+                                </Grid>
                                 <WrapPanel Margin="0,12,0,0">
                                     <Button Style="{StaticResource PrimaryButton}" Content="Cargar instrumento"
                                             Margin="0,0,8,8" Command="{Binding LoadVstInstrumentCommand}" />
-                                    <Button Style="{StaticResource SecondaryButton}" Content="Abrir editor"
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Cargar preset .vstpreset"
+                                            Margin="0,0,8,8" Command="{Binding LoadVstPresetCommand}"
+                                            IsEnabled="{Binding IsVstInstrumentLoaded}" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Abrir editor avanzado"
                                             Margin="0,0,8,8" Command="{Binding OpenVstEditorCommand}"
                                             IsEnabled="{Binding IsVstInstrumentLoaded}" />
                                     <Button Style="{StaticResource SecondaryButton}" Content="Pánico MIDI"
