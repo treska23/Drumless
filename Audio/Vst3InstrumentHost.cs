@@ -36,6 +36,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
     public async Task LoadAsync(
         Vst3InstrumentItem instrument,
         int sampleRate,
+        string? outputDeviceId,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(instrument);
@@ -61,7 +62,8 @@ internal sealed class Vst3InstrumentHost : IDisposable
             instrument.PluginClass.Version,
             instrument.PluginClass.SdkVersion,
             instrument.PluginClass.SubCategories,
-            sampleRate);
+            sampleRate,
+            outputDeviceId);
         await File.WriteAllTextAsync(
             configurationPath,
             JsonSerializer.Serialize(configuration),
@@ -177,6 +179,9 @@ internal sealed class Vst3InstrumentHost : IDisposable
             Math.Clamp(value, 0, 127)));
 
     public void Panic() => Send(new Vst3RuntimeCommand("Panic"));
+
+    public void SetOutputDevice(string? deviceId) =>
+        Send(new Vst3RuntimeCommand("SetOutput", Text: deviceId));
 
     public bool OpenEditor()
     {
