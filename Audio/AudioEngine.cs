@@ -13,6 +13,7 @@ public sealed class AudioEngine : IDisposable
     private readonly TrackTransportProvider _track;
     private readonly MixingSampleProvider _mixer;
     private readonly Vst3InstrumentHost _vstInstrument = new();
+    private DirectVst3Instrument? _directVstInstrument;
     private AudioOutputSession? _output;
     private bool _externalInstrumentSelected;
 
@@ -44,12 +45,18 @@ public sealed class AudioEngine : IDisposable
     public TrackPlaybackState PlaybackState => _track.PlaybackState;
     public TimeSpan TrackPosition => _track.Position;
     public TimeSpan TrackDuration => _track.Duration;
-    public bool IsVstInstrumentLoaded => _vstInstrument.IsLoaded;
+    public bool IsVstInstrumentLoaded => _directVstInstrument is not null || _vstInstrument.IsLoaded;
+    public bool IsDirectVstInstrumentLoaded => _directVstInstrument is not null;
     public bool IsExternalInstrumentSelected => _externalInstrumentSelected;
-    public string? VstInstrumentName => _vstInstrument.DisplayName;
-    public string VstAudioStatus => _vstInstrument.AudioStatus;
-    public IReadOnlyList<string> VstPrograms => _vstInstrument.Programs;
-    public int CurrentVstProgram => _vstInstrument.CurrentProgram;
+    public string? VstInstrumentName =>
+        _directVstInstrument?.DisplayName ?? _vstInstrument.DisplayName;
+    public string VstAudioStatus => _directVstInstrument is { } direct && _output is { } output
+        ? DescribeVstOutput(output, direct.LatencySamples)
+        : _vstInstrument.AudioStatus;
+    public IReadOnlyList<string> VstPrograms =>
+        _directVstInstrument?.Programs ?? _vstInstrument.Programs;
+    public int CurrentVstProgram =>
+        _directVstInstrument?.CurrentProgram ?? _vstInstrument.CurrentProgram;
 
     public async Task LoadKitAsync(DrumKit kit, CancellationToken cancellationToken = default)
     {
@@ -62,7 +69,11 @@ public sealed class AudioEngine : IDisposable
     {
         if (_externalInstrumentSelected)
         {
-            if (_vstInstrument.IsLoaded)
+            if (_directVstInstrument is not null)
+            {
+                _directVstInstrument.SendNoteOn(midiNote, velocity, midiChannel);
+            }
+            else if (_vstInstrument.IsLoaded)
             {
                 _vstInstrument.SendNoteOn(midiNote, velocity, midiChannel);
             }
@@ -72,41 +83,94 @@ public sealed class AudioEngine : IDisposable
         _drums.Trigger(articulation, velocity);
     }
 
-    public void SendNoteOff(int midiNote, int velocity, int midiChannel = 1) =>
-        _vstInstrument.SendNoteOff(midiNote, velocity, midiChannel);
+    public void SendNoteOff(int midiNote, int velocity, int midiChannel = 1)
+    {
+        if (_directVstInstrument is not null)
+        {
+            _directVstInstrument.SendNoteOff(midiNote, velocity, midiChannel);
+        }
+        else
+        {
+            _vstInstrument.SendNoteOff(midiNote, velocity, midiChannel);
+        }
+    }
 
     public void SendControlChange(int controller, int value)
     {
         if (Vst3MidiControllerPolicy.ShouldForward(controller))
         {
-            _vstInstrument.SendControlChange(controller, value);
+            if (_directVstInstrument is not null)
+            {
+                _directVstInstrument.SendControlChange(controller, value);
+            }
+            else
+            {
+                _vstInstrument.SendControlChange(controller, value);
+            }
         }
     }
 
-    public void PanicVstInstrument() => _vstInstrument.Panic();
+    public void PanicVstInstrument()
+    {
+        if (_directVstInstrument is not null)
+        {
+            _directVstInstrument.Panic();
+        }
+        else
+        {
+            _vstInstrument.Panic();
+        }
+    }
 
     public void SelectOutputDevice(string? deviceId)
     {
-        var replacement = AudioOutputSession.Open(_mixer, deviceId);
+        if (AudioOutputDeviceId.TryGetAsioDriverName(deviceId, out _) &&
+            _vstInstrument.IsLoaded)
+        {
+            throw new InvalidOperationException(
+                "Para activar ASIO directo con un VST3 que ya está aislado, pulsa primero " +
+                "«Usar motor interno», selecciona ASIO y vuelve a cargar el instrumento.");
+        }
+
         var previous = _output;
-        previous?.Stop();
+        var exclusiveTransition =
+            AudioOutputDeviceId.TryGetAsioDriverName(deviceId, out _) ||
+            previous?.IsAsio == true;
+        if (exclusiveTransition)
+        {
+            previous?.Stop();
+        }
+
+        AudioOutputSession? replacement = null;
         try
         {
+            replacement = AudioOutputSession.Open(_mixer, deviceId);
+            if (!exclusiveTransition)
+            {
+                previous?.Stop();
+            }
             replacement.Play();
         }
         catch
         {
-            replacement.Dispose();
+            replacement?.Dispose();
             previous?.Play();
             throw;
         }
 
-        _output = replacement;
-        OutputDeviceId = replacement.DeviceId;
-        OutputDeviceName = replacement.DeviceName;
-        Status = DescribeOutput(replacement, "motor interno");
+        var activeOutput = replacement ??
+                           throw new InvalidOperationException("La salida de audio no se inicializó.");
+        _output = activeOutput;
+        OutputDeviceId = activeOutput.DeviceId;
+        OutputDeviceName = activeOutput.DeviceName;
+        Status = DescribeOutput(
+            activeOutput,
+            _directVstInstrument is null ? "motor interno" : "VST3 directo");
         IsAvailable = true;
-        _vstInstrument.SetOutputDevice(replacement.DeviceId);
+        if (_vstInstrument.IsLoaded)
+        {
+            _vstInstrument.SetOutputDevice(activeOutput.DeviceId);
+        }
         previous?.Dispose();
     }
 
@@ -114,8 +178,39 @@ public sealed class AudioEngine : IDisposable
         Vst3InstrumentItem instrument,
         CancellationToken cancellationToken = default)
     {
+        UnloadVstInstrument();
         _externalInstrumentSelected = true;
         _drums.StopAll();
+
+        if (_output?.IsAsio == true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            DirectVst3Instrument? direct = null;
+            try
+            {
+                direct = DirectVst3Instrument.Load(instrument, SampleRate);
+                cancellationToken.ThrowIfCancellationRequested();
+                _output.Stop();
+                _mixer.AddMixerInput(direct.Provider);
+                _directVstInstrument = direct;
+                _output.Play();
+                Status = DescribeOutput(_output, "VST3 directo");
+                return;
+            }
+            catch
+            {
+                _directVstInstrument = null;
+                if (direct is not null)
+                {
+                    _mixer.RemoveMixerInput(direct.Provider);
+                    direct.Dispose();
+                }
+                _output.Play();
+                _externalInstrumentSelected = false;
+                throw;
+            }
+        }
+
         await _vstInstrument.LoadAsync(
             instrument,
             SampleRate,
@@ -124,17 +219,44 @@ public sealed class AudioEngine : IDisposable
         Status = _vstInstrument.AudioStatus;
     }
 
-    public void SelectVstProgram(int programIndex) =>
-        _vstInstrument.SelectProgram(programIndex);
+    public void SelectVstProgram(int programIndex)
+    {
+        if (_directVstInstrument is not null)
+        {
+            _directVstInstrument.SelectProgram(programIndex);
+        }
+        else
+        {
+            _vstInstrument.SelectProgram(programIndex);
+        }
+    }
 
-    public void LoadVstPreset(string path) =>
-        _vstInstrument.LoadPreset(path);
+    public void LoadVstPreset(string path)
+    {
+        if (_directVstInstrument is not null)
+        {
+            _directVstInstrument.LoadPreset(path);
+        }
+        else
+        {
+            _vstInstrument.LoadPreset(path);
+        }
+    }
 
-    public bool OpenVstEditor() => _vstInstrument.OpenEditor();
+    public bool OpenVstEditor() =>
+        _directVstInstrument?.OpenEditor() ?? _vstInstrument.OpenEditor();
 
     public void UnloadVstInstrument()
     {
         _externalInstrumentSelected = false;
+        if (_directVstInstrument is { } direct)
+        {
+            _directVstInstrument = null;
+            _output?.Stop();
+            _mixer.RemoveMixerInput(direct.Provider);
+            direct.Dispose();
+            _output?.Play();
+        }
         _vstInstrument.Unload();
     }
     public void Choke(string group) => _drums.Choke(group);
@@ -157,6 +279,15 @@ public sealed class AudioEngine : IDisposable
 
     private static string DescribeOutput(AudioOutputSession output, string engine)
     {
+        if (output.IsAsio)
+        {
+            var buffer = output.BufferFrames is { } frames
+                ? $" · búfer {frames} muestras"
+                : string.Empty;
+            return $"Audio · {output.DeviceName} · 48 kHz · {engine} · " +
+                   $"ASIO directo{buffer} · {output.LatencyMilliseconds} ms de salida";
+        }
+
         var latencyLabel = output.IsLowLatencyActive
             ? $"{output.LatencyMilliseconds} ms reales · baja latencia"
             : $"{output.LatencyMilliseconds} ms · WASAPI estándar";
@@ -165,5 +296,21 @@ public sealed class AudioEngine : IDisposable
             ? string.Empty
             : $" · {output.LowLatencyUnavailableReason}";
         return $"Audio · {output.DeviceName} · 48 kHz · {engine} · {latencyLabel}{rawLabel}{reason}";
+    }
+
+    private static string DescribeVstOutput(AudioOutputSession output, uint pluginLatencySamples)
+    {
+        var plugin = $"plugin {pluginLatencySamples} muestras";
+        if (output.IsAsio)
+        {
+            var buffer = output.BufferFrames is { } frames
+                ? $" · búfer {frames} muestras"
+                : string.Empty;
+            return $"Audio VST3 · {output.DeviceName} · ASIO directo{buffer} · " +
+                   $"{output.LatencyMilliseconds} ms de salida · {plugin}";
+        }
+
+        return $"Audio VST3 · {output.DeviceName} · WASAPI · " +
+               $"{output.LatencyMilliseconds} ms · {plugin}";
     }
 }

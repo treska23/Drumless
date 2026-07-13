@@ -185,7 +185,7 @@ internal static class Vst3RuntimeProtocol
         command.Type is "NoteOn" or "NoteOff" or "ControlChange" or "Panic";
 
     internal static bool RequiresUiThread(Vst3RuntimeCommand command) =>
-        command.Type is "OpenEditor" or "CloseEditor" or "LoadPreset";
+        command.Type is "OpenEditor" or "CloseEditor" or "LoadPreset" or "SetOutput";
 
     private static void ExecuteCommand(Vst3Runtime runtime, Vst3RuntimeCommand command)
     {
@@ -287,6 +287,16 @@ internal static class Vst3RuntimeProtocol
         {
             get
             {
+                if (_output.IsAsio)
+                {
+                    var buffer = _output.BufferFrames is { } frames
+                        ? $" · búfer {frames} muestras"
+                        : string.Empty;
+                    return $"Audio VST3 · {_output.DeviceName} · ASIO directo{buffer} · " +
+                           $"{_output.LatencyMilliseconds} ms de salida · " +
+                           $"plugin {Plugin.LatencySamples} muestras";
+                }
+
                 var mode = _output.IsLowLatencyActive
                     ? $"{_output.LatencyMilliseconds} ms reales · baja latencia"
                     : $"{_output.LatencyMilliseconds} ms · WASAPI estándar";

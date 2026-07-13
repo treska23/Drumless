@@ -624,7 +624,7 @@
                                 </WrapPanel>
                                 <TextBlock Text="{Binding AudioOutputStatus}" Foreground="{StaticResource TextSecondary}"
                                            TextWrapping="Wrap" Margin="0,8,0,0" />
-                                <TextBlock Text="El búfer de Focusrite Control solo gobierna ASIO; este motor usa el periodo WASAPI real indicado arriba."
+                                <TextBlock Text="Para la mínima latencia elige Focusrite USB ASIO · directo. En ese modo la pista y el VST3 salen juntos al driver, sin el mezclador de Windows."
                                            Foreground="{StaticResource TextSecondary}" FontSize="11"
                                            TextWrapping="Wrap" Margin="0,5,0,0" />
                             </StackPanel>

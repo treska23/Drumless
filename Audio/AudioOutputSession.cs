@@ -5,10 +5,12 @@ namespace DrumPracticeStudio.Audio;
 
 internal sealed class AudioOutputSession : IDisposable
 {
-    private readonly MMDeviceEnumerator _enumerator;
-    private readonly MMDevice _device;
-    private readonly WasapiPlayer _player;
+    private readonly MMDeviceEnumerator? _enumerator;
+    private readonly MMDevice? _device;
+    private readonly WasapiPlayer? _wasapiPlayer;
+    private readonly AsioOut? _asioPlayer;
     private readonly bool _rawModeActive;
+    private readonly int _latencyMilliseconds;
     private bool _disposed;
 
     private AudioOutputSession(
@@ -19,22 +21,41 @@ internal sealed class AudioOutputSession : IDisposable
     {
         _enumerator = enumerator;
         _device = device;
-        _player = player;
+        _wasapiPlayer = player;
         _rawModeActive = rawModeActive;
+        _latencyMilliseconds = player.LatencyMilliseconds;
         DeviceId = device.ID;
         DeviceName = device.FriendlyName;
     }
 
+    private AudioOutputSession(AsioOut player, string driverName, int sampleRate)
+    {
+        _asioPlayer = player;
+        _latencyMilliseconds = Math.Max(
+            1,
+            (int)Math.Ceiling(player.PlaybackLatency * 1_000d / sampleRate));
+        DeviceId = AudioOutputDeviceId.ForAsio(driverName);
+        DeviceName = driverName;
+        BufferFrames = player.FramesPerBuffer;
+    }
+
     public string DeviceId { get; }
     public string DeviceName { get; }
-    public bool IsLowLatencyActive => _player.LowLatencyActive;
+    public bool IsAsio => _asioPlayer is not null;
+    public bool IsLowLatencyActive => IsAsio || _wasapiPlayer?.LowLatencyActive == true;
     public bool IsRawModeActive => _rawModeActive;
-    public int LatencyMilliseconds => _player.LatencyMilliseconds;
-    public string? LowLatencyUnavailableReason => _player.LowLatencyUnavailableReason;
+    public int LatencyMilliseconds => _latencyMilliseconds;
+    public int? BufferFrames { get; }
+    public string? LowLatencyUnavailableReason => _wasapiPlayer?.LowLatencyUnavailableReason;
 
     public static AudioOutputSession Open(ISampleProvider provider, string? deviceId)
     {
         ArgumentNullException.ThrowIfNull(provider);
+
+        if (AudioOutputDeviceId.TryGetAsioDriverName(deviceId, out var asioDriverName))
+        {
+            return OpenAsio(provider, asioDriverName);
+        }
 
         var enumerator = new MMDeviceEnumerator();
         MMDevice? device = null;
@@ -71,6 +92,28 @@ internal sealed class AudioOutputSession : IDisposable
         }
     }
 
+    private static AudioOutputSession OpenAsio(ISampleProvider provider, string driverName)
+    {
+        AsioOut? player = null;
+        try
+        {
+            player = new AsioOut(driverName);
+            if (!player.IsSampleRateSupported(provider.WaveFormat.SampleRate))
+            {
+                throw new NotSupportedException(
+                    $"{driverName} no admite {provider.WaveFormat.SampleRate / 1_000d:0.#} kHz.");
+            }
+
+            player.Init(provider.ToWaveProvider());
+            return new AudioOutputSession(player, driverName, provider.WaveFormat.SampleRate);
+        }
+        catch
+        {
+            player?.Dispose();
+            throw;
+        }
+    }
+
     private static WasapiPlayer BuildPlayer(
         MMDevice device,
         ISampleProvider provider,
@@ -101,13 +144,29 @@ internal sealed class AudioOutputSession : IDisposable
         }
     }
 
-    public void Play() => _player.Play();
+    public void Play()
+    {
+        if (_asioPlayer is not null)
+        {
+            _asioPlayer.Play();
+            return;
+        }
+
+        _wasapiPlayer!.Play();
+    }
 
     public void Stop()
     {
         try
         {
-            _player.Stop();
+            if (_asioPlayer is not null)
+            {
+                _asioPlayer.Stop();
+            }
+            else
+            {
+                _wasapiPlayer?.Stop();
+            }
         }
         catch
         {
@@ -124,8 +183,9 @@ internal sealed class AudioOutputSession : IDisposable
 
         _disposed = true;
         Stop();
-        _player.Dispose();
-        _device.Dispose();
-        _enumerator.Dispose();
+        _asioPlayer?.Dispose();
+        _wasapiPlayer?.Dispose();
+        _device?.Dispose();
+        _enumerator?.Dispose();
     }
 }

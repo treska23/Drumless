@@ -436,7 +436,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public string VstAudioStatus => _audio.VstAudioStatus;
     public bool HasVstPrograms => Vst3Programs.Count > 0;
     public string ActiveDrumEngineLabel => _audio.IsVstInstrumentLoaded
-        ? $"VST3 · {_audio.VstInstrumentName}"
+        ? _audio.IsDirectVstInstrumentLoaded
+            ? $"VST3 directo · {_audio.VstInstrumentName}"
+            : $"VST3 aislado · {_audio.VstInstrumentName}"
         : _audio.IsExternalInstrumentSelected
             ? $"VST3 detenido · {_audio.VstInstrumentName ?? "sin instrumento"} · kit interno bloqueado"
         : "Motor interno · kits WAV";
@@ -974,6 +976,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (_audio.IsVstInstrumentLoaded)
             {
                 VstStatus = $"Activo: {_audio.VstInstrumentName} · salida {selected.Name}";
+                OnPropertyChanged(nameof(VstAudioStatus));
+                OnPropertyChanged(nameof(ActiveDrumEngineLabel));
             }
         }
         catch (Exception exception)
@@ -1117,8 +1121,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                                  ?? Vst3Programs.FirstOrDefault();
             OnPropertyChanged(nameof(HasVstPrograms));
             VstStatus = Vst3Programs.Count > 0
-                ? $"Activo: {instrument.DisplayName} · {Vst3Programs.Count} programas expuestos por VST3"
-                : $"Activo: {instrument.DisplayName} · no expone su catálogo de kits al host; " +
+                ? $"Activo: {instrument.DisplayName} · " +
+                  $"{(_audio.IsDirectVstInstrumentLoaded ? "ASIO directo" : "motor aislado")} · " +
+                  $"{Vst3Programs.Count} programas expuestos por VST3"
+                : $"Activo: {instrument.DisplayName} · " +
+                  $"{(_audio.IsDirectVstInstrumentLoaded ? "ASIO directo" : "motor aislado")} · " +
+                  "no expone su catálogo de kits al host; " +
                   "puedes cargar un .vstpreset o abrir el editor avanzado";
             AudioOutputStatus = _audio.Status;
             StatusMessage = $"Los pads están conectados a {instrument.DisplayName}";

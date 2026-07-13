@@ -1,5 +1,7 @@
 using DrumPracticeStudio.Models;
+using DrumPracticeStudio.Audio;
 using NAudio.CoreAudioApi;
+using NAudio.Wave;
 
 namespace DrumPracticeStudio.Services;
 
@@ -23,8 +25,25 @@ public sealed class AudioOutputDeviceService
             }
         }
 
+        try
+        {
+            foreach (var driverName in AsioOut.GetDriverNames())
+            {
+                devices.Add(new AudioOutputDeviceItem(
+                    AudioOutputDeviceId.ForAsio(driverName),
+                    driverName,
+                    false,
+                    AudioOutputBackend.Asio));
+            }
+        }
+        catch
+        {
+            // Un registro ASIO dañado no debe ocultar las salidas WASAPI disponibles.
+        }
+
         return devices
             .OrderByDescending(device => device.IsDefault)
+            .ThenByDescending(device => device.IsAsio)
             .ThenBy(device => device.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
     }
