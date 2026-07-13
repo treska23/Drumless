@@ -117,6 +117,17 @@ internal sealed class DirectVst3Instrument : IDisposable
         Plugin.LoadPreset(path);
     }
 
+    public void SavePreset(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+        Plugin.SavePreset(path);
+    }
+
     public bool OpenEditor()
     {
         if (_view is null)

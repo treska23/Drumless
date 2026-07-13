@@ -243,6 +243,18 @@ public sealed class AudioEngine : IDisposable
         }
     }
 
+    public void SaveVstPreset(string path)
+    {
+        if (_directVstInstrument is not null)
+        {
+            _directVstInstrument.SavePreset(path);
+        }
+        else if (_vstInstrument.IsLoaded)
+        {
+            _vstInstrument.SavePreset(path);
+        }
+    }
+
     public bool OpenVstEditor() =>
         _directVstInstrument?.OpenEditor() ?? _vstInstrument.OpenEditor();
 

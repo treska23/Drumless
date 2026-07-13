@@ -13,6 +13,17 @@ public enum PlaybackMode
 public sealed class StudioState
 {
     public string OutputFolder { get; set; } = string.Empty;
+    public string? AudioOutputDeviceId { get; set; }
+    public string? MidiDeviceName { get; set; }
+    public int? MidiDeviceIndex { get; set; }
+    public bool AutoConnectMidi { get; set; } = true;
+    public double MidiVelocitySensitivity { get; set; } = 72d;
+    public string? ActiveLibraryId { get; set; }
+    public string? ActiveKitId { get; set; }
+    public double TrackVolume { get; set; } = 0.8d;
+    public string? VstModulePath { get; set; }
+    public string? VstClassId { get; set; }
+    public bool AutoLoadVst { get; set; }
     public List<TrackRecord> Tracks { get; set; } = [];
     public List<Playlist> Playlists { get; set; } = [];
     public string? SelectedPlaylistId { get; set; }

@@ -219,6 +219,12 @@ internal sealed class Vst3InstrumentHost : IDisposable
         Send(new Vst3RuntimeCommand("LoadPreset", Text: path));
     }
 
+    public void SavePreset(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Send(new Vst3RuntimeCommand("SavePreset", Text: path));
+    }
+
     public bool OpenEditor()
     {
         lock (_sync)

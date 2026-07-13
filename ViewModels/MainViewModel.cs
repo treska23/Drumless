@@ -22,6 +22,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly MidiInputService _midi = new();
     private readonly MidiProfile _midiProfile;
     private readonly DispatcherTimer _transportTimer;
+    private readonly DispatcherTimer _settingsSaveTimer;
     private CancellationTokenSource? _kitLoadCancellation;
     private CancellationTokenSource? _drumRemovalCancellation;
     private CancellationTokenSource? _vstLoadCancellation;
@@ -57,6 +58,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string _audioOutputStatus = "Buscando salidas de audio…";
     private double _midiVelocitySensitivity = MidiVelocityCurve.DefaultSensitivity;
     private string _midiVelocityMonitor = "Toca un pad para comprobar la velocidad recibida.";
+    private string? _preferredAudioOutputDeviceId;
+    private string? _preferredMidiDeviceName;
+    private int? _preferredMidiDeviceIndex;
+    private bool _autoConnectMidi = true;
+    private string? _preferredInternalLibraryId;
+    private string? _preferredInternalKitId;
+    private string? _preferredVstModulePath;
+    private string? _preferredVstClassId;
+    private bool _autoLoadVst;
+    private string? _activeVstClassId;
+    private bool _hasInitializedAudioDevices;
+    private bool _hasInitializedMidiDevices;
+    private bool _isRefreshingMidiDevices;
 
     public MainViewModel()
     {
@@ -82,6 +96,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             new PlaybackModeOption(PlaybackMode.Shuffle, "Aleatorio · sin repeticiones")
         ];
         InitializeTrackWorkspace();
+        _audio.SetTrackVolume((float)_trackVolume);
 
         _midiProfile = CreateGeneralDrumProfile();
         BuildMappingRows();
@@ -139,9 +154,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _transportTimer.Tick += (_, _) => RefreshTransport();
         _transportTimer.Start();
 
+        _settingsSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+        _settingsSaveTimer.Tick += (_, _) =>
+        {
+            _settingsSaveTimer.Stop();
+            SaveTrackWorkspace(silent: true);
+        };
+
         RefreshMidiDevices();
         RefreshAudioOutputDevices();
-        SelectedLibrary = Libraries.FirstOrDefault(library => library.Kits.Count > 0);
+        RestoreInternalKitConfiguration();
+        _ = RestoreVstConfigurationAsync();
 
         StatusMessage = _audio.IsAvailable
             ? $"Listo · {_audio.Status}"
@@ -228,7 +251,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public MidiDeviceItem? SelectedMidiDevice
     {
         get => _selectedMidiDevice;
-        set => SetProperty(ref _selectedMidiDevice, value);
+        set
+        {
+            if (!SetProperty(ref _selectedMidiDevice, value) || value is null || _isRefreshingMidiDevices)
+            {
+                return;
+            }
+
+            RememberMidiDevice(value);
+            ScheduleSettingsSave();
+            if (_midi.IsConnected || _autoConnectMidi)
+            {
+                ConnectSelectedMidiDevice();
+            }
+        }
     }
 
     public AudioOutputDeviceItem? SelectedAudioOutputDevice
@@ -252,6 +288,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _midiVelocitySensitivity, bounded))
             {
                 OnPropertyChanged(nameof(MidiVelocitySensitivityLabel));
+                ScheduleSettingsSave();
             }
         }
     }
@@ -362,6 +399,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _trackVolume, value))
             {
                 _audio.SetTrackVolume((float)value);
+                ScheduleSettingsSave();
             }
         }
     }
@@ -468,6 +506,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _transportTimer.Stop();
+        _settingsSaveTimer.Stop();
         _kitLoadCancellation?.Cancel();
         _kitLoadCancellation?.Dispose();
         _drumRemovalCancellation?.Cancel();
@@ -476,6 +515,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _vstLoadCancellation?.Dispose();
         _trackLoadCancellation?.Cancel();
         _trackLoadCancellation?.Dispose();
+        SaveActiveVstState(silent: true);
         SaveTrackWorkspace(silent: true);
         _audio.VstInstrumentExited -= OnVstInstrumentExited;
         _midi.NoteReceived -= OnMidiNoteReceived;
@@ -522,6 +562,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 _isSynchronizingKitSelection = false;
             }
             StatusMessage = $"Kit activo: {kit.Name} · el perfil MIDI no ha cambiado";
+            _preferredInternalLibraryId = kit.LibraryId;
+            _preferredInternalKitId = kit.Id;
+            ScheduleSettingsSave();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -925,34 +968,92 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void RefreshMidiDevices()
     {
-        MidiDevices.Clear();
-        foreach (var device in _midi.GetDevices())
+        var initialSetup = !_hasInitializedMidiDevices;
+        var rememberedName = initialSetup
+            ? _preferredMidiDeviceName
+            : SelectedMidiDevice?.Name ?? _preferredMidiDeviceName;
+        var rememberedIndex = initialSetup
+            ? _preferredMidiDeviceIndex
+            : SelectedMidiDevice?.Index ?? _preferredMidiDeviceIndex;
+
+        _isRefreshingMidiDevices = true;
+        try
         {
-            MidiDevices.Add(device);
+            MidiDevices.Clear();
+            foreach (var device in _midi.GetDevices())
+            {
+                MidiDevices.Add(device);
+            }
+
+            SelectedMidiDevice = DeviceAutoConfiguration.SelectMidiInput(
+                MidiDevices,
+                rememberedName,
+                rememberedIndex);
+        }
+        finally
+        {
+            _isRefreshingMidiDevices = false;
         }
 
-        SelectedMidiDevice = MidiDevices.FirstOrDefault();
-        MidiStatus = MidiDevices.Count == 0 ? "No se encontraron entradas MIDI" : "Listo para conectar";
+        _hasInitializedMidiDevices = true;
+        if (MidiDevices.Count == 0)
+        {
+            MidiStatus = "No se encontraron entradas MIDI";
+            return;
+        }
+
+        if (!_midi.IsConnected && _autoConnectMidi && SelectedMidiDevice is not null)
+        {
+            ConnectSelectedMidiDevice();
+        }
+        else if (!_midi.IsConnected)
+        {
+            MidiStatus = "Listo para conectar";
+        }
     }
 
     private void RefreshAudioOutputDevices()
     {
         try
         {
-            var selectedId = SelectedAudioOutputDevice?.Id ?? _audio.OutputDeviceId;
+            var initialSetup = !_hasInitializedAudioDevices;
+            var selectedId = initialSetup
+                ? _preferredAudioOutputDeviceId
+                : SelectedAudioOutputDevice?.Id ?? _preferredAudioOutputDeviceId;
             AudioOutputDevices.Clear();
             foreach (var device in _audioOutputDevices.GetDevices())
             {
                 AudioOutputDevices.Add(device);
             }
 
-            SelectedAudioOutputDevice = AudioOutputDevices.FirstOrDefault(device =>
-                                            string.Equals(device.Id, selectedId, StringComparison.Ordinal))
-                                        ?? AudioOutputDevices.FirstOrDefault(device => device.IsDefault)
-                                        ?? AudioOutputDevices.FirstOrDefault();
+            SelectedAudioOutputDevice = DeviceAutoConfiguration.SelectAudioOutput(
+                AudioOutputDevices,
+                selectedId);
+            _hasInitializedAudioDevices = true;
             AudioOutputStatus = AudioOutputDevices.Count == 0
                 ? "No se encontraron salidas de audio activas."
                 : _audio.Status;
+
+            if (initialSetup && SelectedAudioOutputDevice is { } selected)
+            {
+                var applied = TryApplyAudioOutputDevice(selected, showDialog: false, remember: false);
+                if (applied && string.IsNullOrWhiteSpace(_preferredAudioOutputDeviceId))
+                {
+                    _preferredAudioOutputDeviceId = selected.Id;
+                    ScheduleSettingsSave();
+                }
+                else if (!applied && selected.IsAsio)
+                {
+                    var fallback = AudioOutputDevices.FirstOrDefault(device => device.IsDefault) ??
+                                   AudioOutputDevices.FirstOrDefault(device => !device.IsAsio);
+                    if (fallback is not null)
+                    {
+                        SelectedAudioOutputDevice = fallback;
+                        TryApplyAudioOutputDevice(fallback, showDialog: false, remember: false);
+                        AudioOutputStatus += $" · {selected.Name} no estaba disponible; se usó WASAPI temporalmente";
+                    }
+                }
+            }
         }
         catch (Exception exception)
         {
@@ -968,6 +1069,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        TryApplyAudioOutputDevice(selected, showDialog: true, remember: true);
+    }
+
+    private bool TryApplyAudioOutputDevice(
+        AudioOutputDeviceItem selected,
+        bool showDialog,
+        bool remember)
+    {
         try
         {
             _audio.SelectOutputDevice(selected.Id);
@@ -979,16 +1088,26 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(VstAudioStatus));
                 OnPropertyChanged(nameof(ActiveDrumEngineLabel));
             }
+            if (remember)
+            {
+                _preferredAudioOutputDeviceId = selected.Id;
+                ScheduleSettingsSave();
+            }
+            return true;
         }
         catch (Exception exception)
         {
             AudioOutputStatus = $"No se pudo usar {selected.Name}: {exception.Message}";
-            MessageBox.Show(
-                $"No se pudo abrir la salida «{selected.Name}».\n\n{exception.Message}\n\n" +
-                "La salida anterior sigue activa.",
-                "Salida de audio",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            if (showDialog)
+            {
+                MessageBox.Show(
+                    $"No se pudo abrir la salida «{selected.Name}».\n\n{exception.Message}\n\n" +
+                    "La salida anterior sigue activa.",
+                    "Salida de audio",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            return false;
         }
     }
 
@@ -997,11 +1116,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_midi.IsConnected)
         {
             _midi.Disconnect();
+            _autoConnectMidi = false;
             MidiStatus = "No conectado";
+            OnPropertyChanged(nameof(MidiButtonLabel));
+            ScheduleSettingsSave();
             return;
         }
 
-        if (SelectedMidiDevice is null)
+        ConnectSelectedMidiDevice();
+    }
+
+    private void ConnectSelectedMidiDevice()
+    {
+        if (SelectedMidiDevice is not { } selected)
         {
             MidiStatus = "Selecciona una entrada MIDI";
             return;
@@ -1009,14 +1136,30 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            _midi.Connect(SelectedMidiDevice.Index);
-            MidiStatus = $"Conectado a {SelectedMidiDevice.Name}";
+            _midi.Connect(selected.Index);
+            RememberMidiDevice(selected);
+            _autoConnectMidi = true;
+            MidiStatus = $"Conectado a {selected.Name}";
             StatusMessage = "MIDI conectado · toca un pad para probar el kit activo";
+            OnPropertyChanged(nameof(MidiButtonLabel));
+            ScheduleSettingsSave();
         }
         catch (Exception exception)
         {
             MidiStatus = $"Error: {exception.Message}";
         }
+    }
+
+    private void RememberMidiDevice(MidiDeviceItem device)
+    {
+        _preferredMidiDeviceName = device.Name;
+        _preferredMidiDeviceIndex = device.Index;
+    }
+
+    private void ScheduleSettingsSave()
+    {
+        _settingsSaveTimer.Stop();
+        _settingsSaveTimer.Start();
     }
 
     private void OnMidiNoteReceived(object? sender, MidiNoteMessage message)
@@ -1074,7 +1217,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
 
             _hasScannedVstInstruments = true;
-            SelectedVstInstrument = Vst3Instruments.FirstOrDefault(instrument => instrument.IsPreferredDrumInstrument)
+            SelectedVstInstrument = Vst3Instruments.FirstOrDefault(instrument =>
+                                        string.Equals(
+                                            instrument.Module.Path,
+                                            _preferredVstModulePath,
+                                            StringComparison.OrdinalIgnoreCase) &&
+                                        string.Equals(
+                                            instrument.PluginClass.ClassId,
+                                            _preferredVstClassId,
+                                            StringComparison.OrdinalIgnoreCase))
+                                    ?? Vst3Instruments.FirstOrDefault(instrument => instrument.IsPreferredDrumInstrument)
                                     ?? Vst3Instruments.FirstOrDefault();
             VstStatus = Vst3Instruments.Count == 0
                 ? "No se encontraron instrumentos VST3 de 64 bits."
@@ -1091,7 +1243,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task LoadSelectedVstInstrumentAsync()
+    private async Task LoadSelectedVstInstrumentAsync(bool showMessage = true)
     {
         if (SelectedVstInstrument is not { } instrument)
         {
@@ -1105,8 +1257,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         previous?.Dispose();
         try
         {
+            SaveActiveVstState(silent: true);
             VstStatus = $"Cargando {instrument.DisplayName}…";
             await _audio.LoadVstInstrumentAsync(instrument, cancellation.Token);
+            _activeVstClassId = instrument.PluginClass.ClassId;
+            _preferredVstModulePath = instrument.Module.Path;
+            _preferredVstClassId = instrument.PluginClass.ClassId;
+            _autoLoadVst = true;
+            TryRestoreSavedVstState(instrument.PluginClass.ClassId);
+            ScheduleSettingsSave();
             OnPropertyChanged(nameof(IsVstInstrumentLoaded));
             OnPropertyChanged(nameof(ActiveDrumEngineLabel));
             OnPropertyChanged(nameof(VstAudioStatus));
@@ -1148,11 +1307,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(IsVstInstrumentLoaded));
             OnPropertyChanged(nameof(ActiveDrumEngineLabel));
             OnPropertyChanged(nameof(VstAudioStatus));
-            MessageBox.Show(
-                exception.Message,
-                "Instrumento VST3",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            if (showMessage)
+            {
+                MessageBox.Show(
+                    exception.Message,
+                    "Instrumento VST3",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
         }
         finally
         {
@@ -1167,6 +1329,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void UseInternalDrums()
     {
+        SaveActiveVstState(silent: true);
         var loading = Interlocked.Exchange(ref _vstLoadCancellation, null);
         loading?.Cancel();
         loading?.Dispose();
@@ -1177,6 +1340,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsVstInstrumentLoaded));
         OnPropertyChanged(nameof(ActiveDrumEngineLabel));
         OnPropertyChanged(nameof(VstAudioStatus));
+        _activeVstClassId = null;
+        _autoLoadVst = false;
+        ScheduleSettingsSave();
         VstStatus = "Motor interno activo.";
         StatusMessage = "Motor de batería interno activo";
     }
@@ -1193,6 +1359,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             _audio.SelectVstProgram(program.Index);
             VstStatus = $"Activo: {_audio.VstInstrumentName} · kit/programa: {program.DisplayName}";
+            SaveActiveVstState(silent: true);
         }
         catch (Exception exception)
         {
@@ -1224,6 +1391,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             _audio.LoadVstPreset(dialog.FileName);
             VstStatus = $"Preset enviado a {_audio.VstInstrumentName}: {Path.GetFileName(dialog.FileName)}";
+            SaveActiveVstState(silent: true);
         }
         catch (Exception exception)
         {
@@ -1256,6 +1424,113 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             StatusMessage = "VST3 detenido · la batería está silenciada; el kit interno no se ha activado";
         });
     }
+
+    private async Task RestoreVstConfigurationAsync()
+    {
+        if (!_autoLoadVst ||
+            string.IsNullOrWhiteSpace(_preferredVstModulePath) ||
+            string.IsNullOrWhiteSpace(_preferredVstClassId))
+        {
+            return;
+        }
+
+        await ScanVstInstrumentsAsync(force: false);
+        var remembered = Vst3Instruments.FirstOrDefault(instrument =>
+            string.Equals(instrument.Module.Path, _preferredVstModulePath, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(instrument.PluginClass.ClassId, _preferredVstClassId, StringComparison.OrdinalIgnoreCase));
+        if (remembered is null)
+        {
+            VstStatus = "El instrumento VST3 guardado no está disponible; usa «Buscar instrumentos».";
+            return;
+        }
+
+        SelectedVstInstrument = remembered;
+        await LoadSelectedVstInstrumentAsync(showMessage: false);
+    }
+
+    private void RestoreInternalKitConfiguration()
+    {
+        var rememberedKit = Libraries
+            .Where(library => string.IsNullOrWhiteSpace(_preferredInternalLibraryId) ||
+                              string.Equals(
+                                  library.Id,
+                                  _preferredInternalLibraryId,
+                                  StringComparison.OrdinalIgnoreCase))
+            .SelectMany(library => library.Kits)
+            .FirstOrDefault(kit => string.Equals(
+                kit.Id,
+                _preferredInternalKitId,
+                StringComparison.OrdinalIgnoreCase));
+        var startupKit = rememberedKit ?? Libraries.SelectMany(library => library.Kits).FirstOrDefault();
+        if (startupKit is null)
+        {
+            return;
+        }
+
+        _isSynchronizingKitSelection = true;
+        try
+        {
+            SelectedLibrary = Libraries.FirstOrDefault(library =>
+                string.Equals(library.Id, startupKit.LibraryId, StringComparison.OrdinalIgnoreCase));
+            SelectedKit = startupKit;
+        }
+        finally
+        {
+            _isSynchronizingKitSelection = false;
+        }
+
+        _ = ActivateKitAsync(startupKit);
+    }
+
+    private void SaveActiveVstState(bool silent)
+    {
+        if (!_audio.IsVstInstrumentLoaded || string.IsNullOrWhiteSpace(_activeVstClassId))
+        {
+            return;
+        }
+
+        try
+        {
+            _audio.SaveVstPreset(GetAutomaticVstStatePath(_activeVstClassId));
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            InvalidOperationException or
+            NotSupportedException)
+        {
+            if (!silent)
+            {
+                VstStatus = $"No se pudo guardar el estado del VST3: {exception.Message}";
+            }
+        }
+    }
+
+    private void TryRestoreSavedVstState(string classId)
+    {
+        var path = GetAutomaticVstStatePath(classId);
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            _audio.LoadVstPreset(path);
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            InvalidDataException or
+            InvalidOperationException or
+            NotSupportedException)
+        {
+            VstStatus = $"Instrumento cargado, pero su estado anterior no se pudo restaurar: {exception.Message}";
+        }
+    }
+
+    private static string GetAutomaticVstStatePath(string classId) =>
+        Path.Combine(AppPaths.VstStates, $"{classId}.vstpreset");
 
     private void Navigate(string page)
     {

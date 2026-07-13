@@ -21,6 +21,7 @@ public sealed class Vst3RuntimeCommandTests
     [DataRow("OpenEditor")]
     [DataRow("CloseEditor")]
     [DataRow("LoadPreset")]
+    [DataRow("SavePreset")]
     [TestMethod]
     public void EditorAndPresetCommands_StayOnTheUiThread(string type)
     {

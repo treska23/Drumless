@@ -124,6 +124,34 @@ public sealed class StudioStateStore
             SelectedPlaylistId = string.IsNullOrWhiteSpace(document.SelectedPlaylistId)
                 ? null
                 : document.SelectedPlaylistId,
+            AudioOutputDeviceId = string.IsNullOrWhiteSpace(document.AudioOutputDeviceId)
+                ? null
+                : document.AudioOutputDeviceId,
+            MidiDeviceName = string.IsNullOrWhiteSpace(document.MidiDeviceName)
+                ? null
+                : document.MidiDeviceName,
+            MidiDeviceIndex = document.MidiDeviceIndex is >= 0
+                ? document.MidiDeviceIndex
+                : null,
+            AutoConnectMidi = document.AutoConnectMidi ?? true,
+            MidiVelocitySensitivity = Math.Clamp(
+                document.MidiVelocitySensitivity ?? 72d,
+                0d,
+                100d),
+            ActiveLibraryId = string.IsNullOrWhiteSpace(document.ActiveLibraryId)
+                ? null
+                : document.ActiveLibraryId,
+            ActiveKitId = string.IsNullOrWhiteSpace(document.ActiveKitId)
+                ? null
+                : document.ActiveKitId,
+            TrackVolume = Math.Clamp(document.TrackVolume ?? 0.8d, 0d, 1d),
+            VstModulePath = string.IsNullOrWhiteSpace(document.VstModulePath)
+                ? null
+                : document.VstModulePath,
+            VstClassId = string.IsNullOrWhiteSpace(document.VstClassId)
+                ? null
+                : document.VstClassId,
+            AutoLoadVst = document.AutoLoadVst ?? false,
             PlaybackMode = Enum.IsDefined(document.PlaybackMode)
                 ? document.PlaybackMode
                 : PlaybackMode.Sequential
@@ -177,6 +205,17 @@ public sealed class StudioStateStore
             ? AppPaths.DerivedTracks
             : state.OutputFolder,
         SelectedPlaylistId = state.SelectedPlaylistId,
+        AudioOutputDeviceId = state.AudioOutputDeviceId,
+        MidiDeviceName = state.MidiDeviceName,
+        MidiDeviceIndex = state.MidiDeviceIndex,
+        AutoConnectMidi = state.AutoConnectMidi,
+        MidiVelocitySensitivity = Math.Clamp(state.MidiVelocitySensitivity, 0d, 100d),
+        ActiveLibraryId = state.ActiveLibraryId,
+        ActiveKitId = state.ActiveKitId,
+        TrackVolume = Math.Clamp(state.TrackVolume, 0d, 1d),
+        VstModulePath = state.VstModulePath,
+        VstClassId = state.VstClassId,
+        AutoLoadVst = state.AutoLoadVst,
         PlaybackMode = state.PlaybackMode,
         Tracks = state.Tracks.Select(track => new TrackDto
         {
@@ -203,6 +242,17 @@ public sealed class StudioStateStore
     {
         public int SchemaVersion { get; set; }
         public string? OutputFolder { get; set; }
+        public string? AudioOutputDeviceId { get; set; }
+        public string? MidiDeviceName { get; set; }
+        public int? MidiDeviceIndex { get; set; }
+        public bool? AutoConnectMidi { get; set; }
+        public double? MidiVelocitySensitivity { get; set; }
+        public string? ActiveLibraryId { get; set; }
+        public string? ActiveKitId { get; set; }
+        public double? TrackVolume { get; set; }
+        public string? VstModulePath { get; set; }
+        public string? VstClassId { get; set; }
+        public bool? AutoLoadVst { get; set; }
         public List<TrackDto>? Tracks { get; set; }
         public List<PlaylistDto>? Playlists { get; set; }
         public string? SelectedPlaylistId { get; set; }

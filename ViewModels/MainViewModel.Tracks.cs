@@ -124,6 +124,17 @@ public sealed partial class MainViewModel
         {
             var state = _studioStateStore.Load();
             _trackWorkspaceWarning = _studioStateStore.LastLoadWarning;
+            _preferredAudioOutputDeviceId = state.AudioOutputDeviceId;
+            _preferredMidiDeviceName = state.MidiDeviceName;
+            _preferredMidiDeviceIndex = state.MidiDeviceIndex;
+            _autoConnectMidi = state.AutoConnectMidi;
+            _midiVelocitySensitivity = Math.Clamp(state.MidiVelocitySensitivity, 0d, 100d);
+            _preferredInternalLibraryId = state.ActiveLibraryId;
+            _preferredInternalKitId = state.ActiveKitId;
+            _trackVolume = Math.Clamp(state.TrackVolume, 0d, 1d);
+            _preferredVstModulePath = state.VstModulePath;
+            _preferredVstClassId = state.VstClassId;
+            _autoLoadVst = state.AutoLoadVst;
             _trackLibrary.Load(state.Tracks);
 
             foreach (var playlist in state.Playlists)
@@ -568,7 +579,18 @@ public sealed partial class MainViewModel
             {
                 OutputFolder = OutputFolderPath,
                 SelectedPlaylistId = SelectedPlaylist?.Id,
-                PlaybackMode = SelectedPlaybackMode?.Mode ?? PlaybackMode.Sequential
+                PlaybackMode = SelectedPlaybackMode?.Mode ?? PlaybackMode.Sequential,
+                AudioOutputDeviceId = _preferredAudioOutputDeviceId,
+                MidiDeviceName = _preferredMidiDeviceName,
+                MidiDeviceIndex = _preferredMidiDeviceIndex,
+                AutoConnectMidi = _autoConnectMidi,
+                MidiVelocitySensitivity = MidiVelocitySensitivity,
+                ActiveLibraryId = _preferredInternalLibraryId,
+                ActiveKitId = _preferredInternalKitId,
+                TrackVolume = TrackVolume,
+                VstModulePath = _preferredVstModulePath,
+                VstClassId = _preferredVstClassId,
+                AutoLoadVst = _autoLoadVst
             };
             state.Tracks.AddRange(_trackLibrary.Snapshot());
             state.Playlists.AddRange(Playlists);

@@ -14,6 +14,7 @@ public static class AppPaths
     public static string SeparationPython { get; } = Path.Combine(SeparationRuntime, ".venv", "Scripts", "python.exe");
     public static string SeparationModels { get; } = Path.Combine(Root, "Models", "Torch");
     public static string SeparationWork { get; } = Path.Combine(Root, "Work", "Separation");
+    public static string VstStates { get; } = Path.Combine(Root, "VstStates");
 
     public static void EnsureCreated()
     {
@@ -24,6 +25,7 @@ public static class AppPaths
         Directory.CreateDirectory(SeparationRuntime);
         Directory.CreateDirectory(SeparationModels);
         Directory.CreateDirectory(SeparationWork);
+        Directory.CreateDirectory(VstStates);
     }
 
     private static string ResolveRoot()

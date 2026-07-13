@@ -185,7 +185,7 @@ internal static class Vst3RuntimeProtocol
         command.Type is "NoteOn" or "NoteOff" or "ControlChange" or "Panic";
 
     internal static bool RequiresUiThread(Vst3RuntimeCommand command) =>
-        command.Type is "OpenEditor" or "CloseEditor" or "LoadPreset" or "SetOutput";
+        command.Type is "OpenEditor" or "CloseEditor" or "LoadPreset" or "SavePreset" or "SetOutput";
 
     private static void ExecuteCommand(Vst3Runtime runtime, Vst3RuntimeCommand command)
     {
@@ -223,6 +223,9 @@ internal static class Vst3RuntimeProtocol
                 break;
             case "LoadPreset":
                 runtime.LoadPreset(command.Text);
+                break;
+            case "SavePreset":
+                runtime.SavePreset(command.Text);
                 break;
         }
     }
@@ -441,6 +444,21 @@ internal static class Vst3RuntimeProtocol
             }
 
             Plugin.LoadPreset(path);
+        }
+
+        public void SavePreset(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("La ruta de estado VST3 está vacía.", nameof(path));
+            }
+
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+            Plugin.SavePreset(path);
         }
 
         public void Dispose()
