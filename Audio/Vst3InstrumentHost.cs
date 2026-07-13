@@ -35,6 +35,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
     public string? DisplayName { get; private set; }
     public IReadOnlyList<string> Programs { get; private set; } = Array.Empty<string>();
     public int CurrentProgram { get; private set; } = -1;
+    public string AudioStatus { get; private set; } = "Audio VST3 no inicializado";
 
     public async Task LoadAsync(
         Vst3InstrumentItem instrument,
@@ -96,6 +97,14 @@ internal sealed class Vst3InstrumentHost : IDisposable
         {
             process = Process.Start(startInfo)
                       ?? throw new InvalidOperationException("No se pudo iniciar el motor VST3 aislado.");
+            try
+            {
+                process.PriorityClass = ProcessPriorityClass.AboveNormal;
+            }
+            catch
+            {
+                // Windows puede denegar el cambio de prioridad; el hilo de audio aún usa MMCSS.
+            }
             process.EnableRaisingEvents = true;
             process.Exited += OnProcessExited;
 
@@ -142,6 +151,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
                 _hasEditor = response.HasEditor;
                 Programs = response.Programs ?? Array.Empty<string>();
                 CurrentProgram = response.CurrentProgram;
+                AudioStatus = response.AudioStatus ?? "Audio VST3 preparado";
             }
             commandWriter = null;
             TryDeleteConfiguration();
@@ -242,6 +252,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
             DisplayName = null;
             Programs = Array.Empty<string>();
             CurrentProgram = -1;
+            AudioStatus = "Audio VST3 no inicializado";
         }
 
         try

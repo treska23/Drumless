@@ -103,10 +103,7 @@ public sealed class AudioEngine : IDisposable
         _output = replacement;
         OutputDeviceId = replacement.DeviceId;
         OutputDeviceName = replacement.DeviceName;
-        var latencyLabel = replacement.IsLowLatencyActive
-            ? $"baja latencia activa · {AudioLatencySettings.RequestedLatencyMilliseconds} ms solicitados"
-            : "WASAPI compartido · periodo administrado por Windows";
-        Status = $"Audio · {replacement.DeviceName} · 48 kHz · {latencyLabel}";
+        Status = DescribeOutput(replacement, "motor interno");
         IsAvailable = true;
         _vstInstrument.SetOutputDevice(replacement.DeviceId);
         previous?.Dispose();
@@ -123,6 +120,7 @@ public sealed class AudioEngine : IDisposable
             SampleRate,
             OutputDeviceId,
             cancellationToken);
+        Status = _vstInstrument.AudioStatus;
     }
 
     public void SelectVstProgram(int programIndex) =>
@@ -154,5 +152,17 @@ public sealed class AudioEngine : IDisposable
         UnloadVstInstrument();
         _output?.Dispose();
         _track.Dispose();
+    }
+
+    private static string DescribeOutput(AudioOutputSession output, string engine)
+    {
+        var latencyLabel = output.IsLowLatencyActive
+            ? $"{output.LatencyMilliseconds} ms reales · baja latencia"
+            : $"{output.LatencyMilliseconds} ms · WASAPI estándar";
+        var rawLabel = output.IsRawModeActive ? " · RAW" : string.Empty;
+        var reason = output.IsLowLatencyActive || string.IsNullOrWhiteSpace(output.LowLatencyUnavailableReason)
+            ? string.Empty
+            : $" · {output.LowLatencyUnavailableReason}";
+        return $"Audio · {output.DeviceName} · 48 kHz · {engine} · {latencyLabel}{rawLabel}{reason}";
     }
 }

@@ -1084,6 +1084,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 ? $"Activo: {instrument.DisplayName} · {Vst3Programs.Count} programas expuestos por VST3"
                 : $"Activo: {instrument.DisplayName} · no expone su catálogo de kits al host; " +
                   "puedes cargar un .vstpreset o abrir el editor avanzado";
+            AudioOutputStatus = _audio.Status;
             StatusMessage = $"Los pads están conectados a {instrument.DisplayName}";
         }
         catch (OperationCanceledException)

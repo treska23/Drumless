@@ -29,7 +29,8 @@ internal sealed record Vst3RuntimeResponse(
     string Message,
     string[]? Programs = null,
     int CurrentProgram = -1,
-    string? Detail = null);
+    string? Detail = null,
+    string? AudioStatus = null);
 
 internal sealed record Vst3RuntimeCommand(
     string Type,
@@ -84,33 +85,17 @@ internal static class Vst3RuntimeProtocol
             runtime = await Application.Current.Dispatcher.InvokeAsync(
                 () => Vst3Runtime.Load(configuration));
             Vst3RuntimeDiagnostics.Info("Instrumento preparado y salida de audio iniciada");
+            Vst3RuntimeDiagnostics.Info(runtime.AudioStatus);
             await writer.WriteLineAsync(JsonSerializer.Serialize(
                 new Vst3RuntimeResponse(
                     true,
                     runtime.HasEditor,
                     "Instrumento preparado",
                     runtime.Programs.ToArray(),
-                    runtime.CurrentProgram)));
+                    runtime.CurrentProgram,
+                    AudioStatus: runtime.AudioStatus)));
 
-            while (await reader.ReadLineAsync() is { } line)
-            {
-                var command = JsonSerializer.Deserialize<Vst3RuntimeCommand>(line);
-                if (command is null)
-                {
-                    continue;
-                }
-
-                if (string.Equals(command.Type, "Stop", StringComparison.Ordinal))
-                {
-                    break;
-                }
-
-                var activeRuntime = runtime
-                                    ?? throw new InvalidOperationException("El motor VST3 no está preparado.");
-                Vst3RuntimeDiagnostics.Info(DescribeCommand(command));
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                    ExecuteCommand(activeRuntime, command));
-            }
+            await RunCommandLoopAsync(reader, runtime).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -145,14 +130,68 @@ internal static class Vst3RuntimeProtocol
         }
     }
 
+    private static Task RunCommandLoopAsync(StreamReader reader, Vst3Runtime runtime)
+    {
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                while (reader.ReadLine() is { } line)
+                {
+                    var command = JsonSerializer.Deserialize<Vst3RuntimeCommand>(line);
+                    if (command is null)
+                    {
+                        continue;
+                    }
+
+                    if (string.Equals(command.Type, "Stop", StringComparison.Ordinal))
+                    {
+                        break;
+                    }
+
+                    if (RequiresUiThread(command))
+                    {
+                        Application.Current.Dispatcher.Invoke(() => ExecuteCommand(runtime, command));
+                    }
+                    else
+                    {
+                        ExecuteCommand(runtime, command);
+                    }
+
+                    if (!IsRealtimeMidi(command))
+                    {
+                        Vst3RuntimeDiagnostics.Info(DescribeCommand(command));
+                    }
+                }
+                completion.SetResult(true);
+            }
+            catch (Exception exception)
+            {
+                completion.SetException(exception);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "Drumless VST3 MIDI",
+            Priority = ThreadPriority.AboveNormal
+        };
+        thread.Start();
+        return completion.Task;
+    }
+
+    internal static bool IsRealtimeMidi(Vst3RuntimeCommand command) =>
+        command.Type is "NoteOn" or "NoteOff" or "ControlChange" or "Panic";
+
+    internal static bool RequiresUiThread(Vst3RuntimeCommand command) =>
+        command.Type is "OpenEditor" or "CloseEditor" or "LoadPreset";
+
     private static void ExecuteCommand(Vst3Runtime runtime, Vst3RuntimeCommand command)
     {
         switch (command.Type)
         {
             case "NoteOn":
-                // La orden ya llega serializada por la tubería. Enviarla al inicio del
-                // siguiente bloque conserva el orden de note-on/note-off y evita proyectar
-                // el reloj del proceso principal sobre el reloj de audio del proceso VST3.
                 runtime.Plugin.EnqueueNoteOn(
                     command.Value1,
                     command.Value2 / 127f,
@@ -244,6 +283,24 @@ internal static class Vst3RuntimeProtocol
         public IReadOnlyList<string> Programs =>
             Plugin.ActiveProgramList?.Programs ?? Array.Empty<string>();
         public int CurrentProgram => Plugin.CurrentProgram;
+        public string AudioStatus
+        {
+            get
+            {
+                var mode = _output.IsLowLatencyActive
+                    ? $"{_output.LatencyMilliseconds} ms reales · baja latencia"
+                    : $"{_output.LatencyMilliseconds} ms · WASAPI estándar";
+                var raw = _output.IsRawModeActive ? " · RAW" : string.Empty;
+                var plugin = Plugin.LatencySamples > 0
+                    ? $" · plugin {Plugin.LatencySamples} muestras"
+                    : " · plugin 0 muestras";
+                var reason = _output.IsLowLatencyActive ||
+                             string.IsNullOrWhiteSpace(_output.LowLatencyUnavailableReason)
+                    ? string.Empty
+                    : $" · {_output.LowLatencyUnavailableReason}";
+                return $"Audio VST3 · {_output.DeviceName} · {mode}{raw}{plugin}{reason}";
+            }
+        }
 
         public static Vst3Runtime Load(Vst3RuntimeConfiguration configuration)
         {

@@ -14,6 +14,6 @@ public sealed class AudioLatencySettingsTests
     [TestMethod]
     public void VstBlockSize_RemainsSmallEnoughForLivePads()
     {
-        Assert.IsTrue(AudioLatencySettings.VstMaxBlockSize <= 256);
+        Assert.IsTrue(AudioLatencySettings.VstMaxBlockSize <= 64);
     }
 }
