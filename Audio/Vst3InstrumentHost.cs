@@ -15,6 +15,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
     private NamedPipeServerStream? _pipe;
     private StreamWriter? _writer;
     private string? _configurationPath;
+    private string? _diagnosticPath;
     private bool _stopping;
     private bool _hasEditor;
 
@@ -54,6 +55,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
         var configurationPath = Path.Combine(
             Path.GetTempPath(),
             $"DrumPracticeStudio.Vst3.{Guid.NewGuid():N}.json");
+        var diagnosticPath = CreateDiagnosticPath();
         var configuration = new Vst3RuntimeConfiguration(
             instrument.Module.Path,
             instrument.Module.Name,
@@ -65,7 +67,8 @@ internal sealed class Vst3InstrumentHost : IDisposable
             instrument.PluginClass.SdkVersion,
             instrument.PluginClass.SubCategories,
             sampleRate,
-            outputDeviceId);
+            outputDeviceId,
+            diagnosticPath);
         await File.WriteAllTextAsync(
             configurationPath,
             JsonSerializer.Serialize(configuration),
@@ -101,6 +104,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
                 _process = process;
                 _pipe = pipe;
                 _configurationPath = configurationPath;
+                _diagnosticPath = diagnosticPath;
                 _stopping = false;
                 DisplayName = instrument.DisplayName;
             }
@@ -128,7 +132,8 @@ internal sealed class Vst3InstrumentHost : IDisposable
             if (response is null || !response.Ready)
             {
                 throw new InvalidOperationException(
-                    response?.Message ?? "El motor VST3 se cerró durante la carga.");
+                    (response?.Message ?? "El motor VST3 se cerró durante la carga.") +
+                    $" Registro: {diagnosticPath}");
             }
 
             lock (_sync)
@@ -232,6 +237,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
             _process = null;
             _pipe = null;
             _writer = null;
+            _diagnosticPath = null;
             _hasEditor = false;
             DisplayName = null;
             Programs = Array.Empty<string>();
@@ -305,6 +311,8 @@ internal sealed class Vst3InstrumentHost : IDisposable
     {
         var notify = false;
         Process? exitedProcess = null;
+        string? diagnosticPath = null;
+        int? exitCode = null;
         lock (_sync)
         {
             if (ReferenceEquals(sender, _process) && !_stopping)
@@ -319,6 +327,16 @@ internal sealed class Vst3InstrumentHost : IDisposable
                     // La tubería ya está rota cuando el proceso nativo termina abruptamente.
                 }
                 exitedProcess = _process;
+                diagnosticPath = _diagnosticPath;
+                _diagnosticPath = null;
+                try
+                {
+                    exitCode = exitedProcess?.ExitCode;
+                }
+                catch
+                {
+                    // El código puede no estar disponible durante una carrera de cierre.
+                }
                 _writer = null;
                 _pipe = null;
                 _process = null;
@@ -331,10 +349,61 @@ internal sealed class Vst3InstrumentHost : IDisposable
         TryDeleteConfiguration();
         if (notify)
         {
+            var diagnostic = ReadDiagnosticSummary(diagnosticPath);
+            var exitLabel = exitCode is null ? string.Empty : $" (código {exitCode})";
+            var detail = string.IsNullOrWhiteSpace(diagnostic)
+                ? string.Empty
+                : $" Detalle: {diagnostic}";
+            var logLocation = string.IsNullOrWhiteSpace(diagnosticPath)
+                ? string.Empty
+                : $" Registro: {diagnosticPath}";
             Exited?.Invoke(
                 this,
-                "El instrumento VST3 se cerró por un fallo interno. La batería queda silenciada; " +
-                "Drumless no cambiará al kit interno sin que tú lo pidas.");
+                $"El instrumento VST3 se cerró por un fallo interno{exitLabel}." + detail + logLocation +
+                " La batería queda silenciada; Drumless no cambiará al kit interno sin que tú lo pidas.");
+        }
+    }
+
+    private static string CreateDiagnosticPath()
+    {
+        var directory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DrumPracticeStudio",
+            "Vst3Logs");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            foreach (var oldLog in Directory.GetFiles(directory, "vst3-*.log")
+                         .OrderByDescending(File.GetLastWriteTimeUtc)
+                         .Skip(20))
+            {
+                TryDelete(oldLog);
+            }
+        }
+        catch
+        {
+            // La rotación de diagnósticos no debe impedir cargar el instrumento.
+        }
+        return Path.Combine(
+            directory,
+            $"vst3-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
+    }
+
+    private static string? ReadDiagnosticSummary(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return File.ReadLines(path)
+                .LastOrDefault(line => line.Contains("[ERROR]", StringComparison.Ordinal));
+        }
+        catch
+        {
+            return null;
         }
     }
 

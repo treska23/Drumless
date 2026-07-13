@@ -1,0 +1,28 @@
+name: Compilar Drumless
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v4
+
+      - name: Instalar .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restaurar
+        run: dotnet restore DrumPracticeStudio.sln
+
+      - name: Compilar
+        run: dotnet build DrumPracticeStudio.sln --configuration Release --no-restore
+
+      - name: Pruebas
+        run: dotnet test tests/DrumPracticeStudio.Tests/DrumPracticeStudio.Tests.csproj --configuration Release --no-build

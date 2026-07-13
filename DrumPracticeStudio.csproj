@@ -16,7 +16,10 @@
     <PackageReference Include="NAudio" Version="3.0.0-preview.16" />
     <PackageReference Include="NAudio.Wasapi" Version="3.0.0-preview.16" />
     <PackageReference Include="NAudio.WinMM" Version="3.0.0-preview.16" />
-    <PackageReference Include="NAudio.Vst3" Version="3.0.0-preview.16" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="Vendor\NAudio.Vst3\NAudio.Vst3.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -25,6 +28,7 @@
 
   <ItemGroup>
     <Compile Remove="tests\**\*.cs" />
+    <Compile Remove="Vendor\**\*.cs" />
   </ItemGroup>
 
 </Project>

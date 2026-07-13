@@ -20,14 +20,16 @@ internal sealed record Vst3RuntimeConfiguration(
     string SdkVersion,
     string SubCategories,
     int SampleRate,
-    string? OutputDeviceId);
+    string? OutputDeviceId,
+    string DiagnosticPath);
 
 internal sealed record Vst3RuntimeResponse(
     bool Ready,
     bool HasEditor,
     string Message,
     string[]? Programs = null,
-    int CurrentProgram = -1);
+    int CurrentProgram = -1,
+    string? Detail = null);
 
 internal sealed record Vst3RuntimeCommand(
     string Type,
@@ -71,10 +73,17 @@ internal static class Vst3RuntimeProtocol
             var json = await File.ReadAllTextAsync(configurationPath);
             var configuration = JsonSerializer.Deserialize<Vst3RuntimeConfiguration>(json)
                                 ?? throw new InvalidOperationException("La configuración VST3 está vacía.");
+            Vst3RuntimeDiagnostics.Initialize(configuration.DiagnosticPath);
+            AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+                Vst3RuntimeDiagnostics.Error(
+                    "Excepción no controlada en el proceso VST3",
+                    args.ExceptionObject as Exception);
             TryDelete(configurationPath);
 
+            Vst3RuntimeDiagnostics.Info($"Cargando {configuration.Name} · {configuration.ModulePath}");
             runtime = await Application.Current.Dispatcher.InvokeAsync(
                 () => Vst3Runtime.Load(configuration));
+            Vst3RuntimeDiagnostics.Info("Instrumento preparado y salida de audio iniciada");
             await writer.WriteLineAsync(JsonSerializer.Serialize(
                 new Vst3RuntimeResponse(
                     true,
@@ -98,18 +107,24 @@ internal static class Vst3RuntimeProtocol
 
                 var activeRuntime = runtime
                                     ?? throw new InvalidOperationException("El motor VST3 no está preparado.");
+                Vst3RuntimeDiagnostics.Info($"Orden recibida: {command.Type}");
                 await Application.Current.Dispatcher.InvokeAsync(() =>
                     ExecuteCommand(activeRuntime, command));
             }
         }
         catch (Exception exception)
         {
+            Vst3RuntimeDiagnostics.Error("El motor VST3 se detuvo", exception);
             if (writer is not null)
             {
                 try
                 {
                     await writer.WriteLineAsync(JsonSerializer.Serialize(
-                        new Vst3RuntimeResponse(false, false, exception.Message)));
+                        new Vst3RuntimeResponse(
+                            false,
+                            false,
+                            $"{exception.GetType().Name}: {exception.Message}",
+                            Detail: exception.ToString())));
                 }
                 catch
                 {
@@ -138,13 +153,13 @@ internal static class Vst3RuntimeProtocol
                 runtime.Plugin.SendNoteOn(
                     command.Value1,
                     command.Value2 / 127f,
-                    ToVstChannel(command.Value3));
+                    ClampVstChannel(command.Value3));
                 break;
             case "NoteOff":
                 runtime.Plugin.SendNoteOff(
                     command.Value1,
                     command.Value2 / 127f,
-                    ToVstChannel(command.Value3));
+                    ClampVstChannel(command.Value3));
                 break;
             case "ControlChange":
                 runtime.Plugin.SendControlChange(command.Value1, command.Value2 / 127d);
@@ -170,8 +185,8 @@ internal static class Vst3RuntimeProtocol
         }
     }
 
-    private static int ToVstChannel(int midiChannel) =>
-        Math.Clamp(midiChannel - 1, 0, 15);
+    private static int ClampVstChannel(int vstChannel) =>
+        Math.Clamp(vstChannel, 0, 15);
 
     private static void TryDelete(string path)
     {
@@ -240,7 +255,8 @@ internal static class Vst3RuntimeProtocol
                         $"{configuration.Name} no se identificó como instrumento VST3.");
                 }
 
-                var provider = new Vst3InstrumentSampleProvider(plugin);
+                var provider = new DiagnosticSampleProvider(
+                    new Vst3InstrumentSampleProvider(plugin));
                 if (provider.WaveFormat.Channels != 2)
                 {
                     throw new NotSupportedException(
@@ -360,5 +376,70 @@ internal static class Vst3RuntimeProtocol
             _module.Dispose();
         }
 
+    }
+
+    private sealed class DiagnosticSampleProvider(ISampleProvider source) : ISampleProvider
+    {
+        public WaveFormat WaveFormat => source.WaveFormat;
+
+        public int Read(Span<float> buffer)
+        {
+            try
+            {
+                return source.Read(buffer);
+            }
+            catch (Exception exception)
+            {
+                Vst3RuntimeDiagnostics.Error("Fallo durante IAudioProcessor.Process", exception);
+                throw;
+            }
+        }
+    }
+
+    private static class Vst3RuntimeDiagnostics
+    {
+        private static readonly object Sync = new();
+        private static string? _path;
+
+        public static void Initialize(string path)
+        {
+            _path = path;
+            Info($"Proceso VST3 iniciado · .NET {Environment.Version} · {Environment.OSVersion}");
+        }
+
+        public static void Info(string message) => Write("INFO", message, null);
+
+        public static void Error(string message, Exception? exception) =>
+            Write("ERROR", message, exception);
+
+        private static void Write(string level, string message, Exception? exception)
+        {
+            var path = _path;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            try
+            {
+                var summary = exception is null
+                    ? message
+                    : $"{message} · {exception.GetType().FullName}: {exception.Message}";
+                var entry = $"{DateTimeOffset.Now:O} [{level}] {summary}{Environment.NewLine}";
+                if (exception is not null)
+                {
+                    entry += exception + Environment.NewLine;
+                }
+
+                lock (Sync)
+                {
+                    File.AppendAllText(path, entry, Encoding.UTF8);
+                }
+            }
+            catch
+            {
+                // El diagnóstico nunca debe provocar otro fallo en el hilo de audio.
+            }
+        }
     }
 }
