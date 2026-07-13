@@ -30,7 +30,6 @@ internal sealed class AudioOutputSession : IDisposable
     public bool IsLowLatencyActive => _player.LowLatencyActive;
     public bool IsRawModeActive => _rawModeActive;
     public int LatencyMilliseconds => _player.LatencyMilliseconds;
-    public double CurrentLatencyMilliseconds => _player.CurrentLatency.TotalMilliseconds;
     public string? LowLatencyUnavailableReason => _player.LowLatencyUnavailableReason;
 
     public static AudioOutputSession Open(ISampleProvider provider, string? deviceId)
