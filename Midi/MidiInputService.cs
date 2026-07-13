@@ -60,24 +60,34 @@ public sealed class MidiInputService : IDisposable
 
     public void Disconnect()
     {
-        if (_input is null)
+        var input = Interlocked.Exchange(ref _input, null);
+        if (input is null)
         {
             return;
         }
 
-        _input.MessageReceived -= OnMessageReceived;
-        _input.ErrorReceived -= OnErrorReceived;
+        input.MessageReceived -= OnMessageReceived;
+        input.ErrorReceived -= OnErrorReceived;
         try
         {
-            _input.Stop();
+            input.Stop();
         }
         catch
         {
             // El dispositivo puede haberse desconectado físicamente.
         }
 
-        _input.Dispose();
-        _input = null;
+        try
+        {
+            input.Dispose();
+        }
+        catch
+        {
+            // MidiIn.Dispose llama a midiInReset. Windows devuelve NoDriver si el
+            // controlador desapareció mientras se cambiaba a otro dispositivo.
+            // La instancia ya está desacoplada y ese error de limpieza no debe
+            // cerrar la aplicación ni impedir abrir la nueva entrada MIDI.
+        }
     }
 
     public void Dispose() => Disconnect();
