@@ -41,6 +41,36 @@ Estado guardado el 16 de julio de 2026 para continuar a partir del día 23.
   pendiente, solicitar autoplay en la URL y ejecutar `video.play()` al completar navegación;
   comprobar el mensaje `video-state` antes de anunciar que reproduce.
 
+### Enrutar el audio de YouTube por la salida elegida en la aplicación
+
+- Causa confirmada por el usuario: WebView2 envía actualmente el audio al dispositivo de
+  salida predeterminado de Windows, no a `SelectedAudioOutputDevice` ni al motor de Drum
+  Practice Studio. Por eso el vídeo puede estar reproduciéndose correctamente y no oírse en
+  la interfaz ASIO/WASAPI seleccionada dentro del programa.
+- No basta con cambiar el volumen o con mantener oculto el WebView. El audio se genera en un
+  proceso de WebView2 separado y debe capturarse/enrutarse hacia el mezclador de la aplicación.
+- Criterio de aceptación:
+  1. YouTube suena por la misma salida WASAPI o ASIO seleccionada en Drum Practice Studio.
+  2. Cambiar la salida dentro de la aplicación redirige también YouTube sin cambiar el
+     dispositivo predeterminado de Windows.
+  3. Pista local, YouTube, VST/batería y entradas monitorizadas conservan niveles separados.
+  4. Pausa, parada, anterior, siguiente y cambio rápido de vídeo no dejan audio huérfano ni
+     dos vídeos sonando a la vez.
+  5. El estado visible sólo indica `Reproduciendo` cuando el audio está realmente activo.
+  6. Si YouTube entra en el mezclador local, la grabación de la salida debe poder incluirlo
+     de forma explícita y sin crear una toma silenciosa.
+  7. Se debe medir y compensar la latencia adicional para no desincronizar claqueta, mapa de
+     tempo ni puntuación de batería.
+- Implementación a investigar al retomar:
+  - Preferencia: captura de audio del proceso/árbol de procesos WebView2 mediante loopback por
+    proceso, conversión al formato flotante del motor e inyección en `AudioOutputSession`.
+  - Para salida ASIO, el flujo capturado debe entrar en el mezclador ASIO de la aplicación;
+    no debe reproducirse simultáneamente por Windows para evitar eco o duplicado.
+  - Alternativa sólo si la captura por proceso no es viable: política de enrutamiento por
+    sesión de audio de Windows, verificando que funcione con los procesos secundarios de
+    WebView2 y sobreviva a sus reinicios.
+  - No descargar, extraer ni volver a servir el contenido de YouTube como solución implícita.
+
 ## Interfaz de playlists
 
 - Fallo confirmado mediante captura: la última fila de la playlist central no siempre es
@@ -87,6 +117,7 @@ Estado guardado el 16 de julio de 2026 para continuar a partir del día 23.
 
 - Compilación Debug y Release con .NET 10: cero errores y cero advertencias.
 - Pruebas de persistencia, importación masiva, duplicados, scroll, reproducción oculta,
-  final natural, mapas de tempo, cambio de sección y búsqueda sin Ollama.
+  enrutamiento WASAPI/ASIO, ausencia de audio duplicado, final natural, mapas de tempo,
+  cambio de sección y búsqueda sin Ollama.
 - Prueba real de interfaz con una playlist larga local, una playlist larga de YouTube y
   reproducción de un vídeo permaneciendo en `Pistas locales`.
