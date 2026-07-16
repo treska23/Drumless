@@ -80,6 +80,8 @@ $requiredTrackControls = @(
     "NewPlaylistButton",
     "RenamePlaylistButton",
     "DeletePlaylistButton",
+    "PlaylistMixList",
+    "ClearPlaylistMixButton",
     "PlaybackModeCombo"
 )
 foreach ($automationId in $requiredTrackControls) {

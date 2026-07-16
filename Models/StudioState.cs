@@ -45,6 +45,7 @@ public sealed class TrackRecord
 public sealed class Playlist : ObservableObject
 {
     private string _name = string.Empty;
+    private bool _isIncludedInMix;
 
     public required string Id { get; init; }
 
@@ -52,6 +53,12 @@ public sealed class Playlist : ObservableObject
     {
         get => _name;
         set => SetProperty(ref _name, value);
+    }
+
+    public bool IsIncludedInMix
+    {
+        get => _isIncludedInMix;
+        set => SetProperty(ref _isIncludedInMix, value);
     }
 
     public ObservableCollection<string> TrackIds { get; } = [];

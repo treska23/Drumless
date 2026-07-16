@@ -190,7 +190,12 @@ public sealed class StudioStateStore
                 continue;
             }
 
-            var model = new Playlist { Id = playlist.Id, Name = playlist.Name };
+            var model = new Playlist
+            {
+                Id = playlist.Id,
+                Name = playlist.Name,
+                IsIncludedInMix = playlist.IsIncludedInMix ?? false
+            };
             foreach (var trackId in playlist.TrackIds ?? [])
             {
                 if (!string.IsNullOrWhiteSpace(trackId))
@@ -238,6 +243,7 @@ public sealed class StudioStateStore
         {
             Id = playlist.Id,
             Name = playlist.Name,
+            IsIncludedInMix = playlist.IsIncludedInMix,
             TrackIds = playlist.TrackIds.ToList()
         }).ToList()
     };
@@ -284,6 +290,7 @@ public sealed class StudioStateStore
     {
         public string? Id { get; set; }
         public string? Name { get; set; }
+        public bool? IsIncludedInMix { get; set; }
         public List<string>? TrackIds { get; set; }
     }
 }

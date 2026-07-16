@@ -99,4 +99,23 @@ public sealed class TrackLibraryServiceTests
         Assert.IsTrue(File.Exists(oldPath), "Cambiar la carpeta no debe mover ni borrar el audio anterior.");
         Assert.IsTrue(File.Exists(newPath));
     }
+
+    [TestMethod]
+    public void RegisterGenerated_AddsDemucsResultImmediatelyAndPersistsIt()
+    {
+        using var temporary = new TemporaryDirectory();
+        var drumlessPath = temporary.Combine("song-no-drums.wav");
+        File.WriteAllBytes(drumlessPath, [1, 2, 3]);
+        var library = new TrackLibraryService();
+
+        var generated = library.RegisterGenerated(drumlessPath, "Song · sin batería");
+
+        Assert.AreSame(generated, library.Tracks.Single());
+        Assert.AreEqual(TrackVariant.GeneratedDrumless, generated.Variant);
+        Assert.IsTrue(generated.IsAvailable);
+        var restored = new TrackLibraryService(library.Snapshot());
+        Assert.AreEqual(1, restored.Tracks.Count);
+        Assert.AreEqual(generated.Id, restored.Tracks[0].Id);
+        Assert.IsTrue(restored.Tracks[0].IsAvailable);
+    }
 }

@@ -52,7 +52,12 @@ public sealed class StudioStateStoreTests
                 }
             ]
         };
-        var playlist = new Playlist { Id = "playlist-practice", Name = "Práctica diaria" };
+        var playlist = new Playlist
+        {
+            Id = "playlist-practice",
+            Name = "Práctica diaria",
+            IsIncludedInMix = true
+        };
         playlist.TrackIds.Add("track-drumless");
         playlist.TrackIds.Add("track-original");
         state.Playlists.Add(playlist);
@@ -88,6 +93,7 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(TrackVariant.GeneratedDrumless, loaded.Tracks[1].Variant);
         Assert.AreEqual(1, loaded.Playlists.Count);
         Assert.AreEqual("Práctica diaria", loaded.Playlists[0].Name);
+        Assert.IsTrue(loaded.Playlists[0].IsIncludedInMix);
         CollectionAssert.AreEqual(
             new[] { "track-drumless", "track-original" },
             loaded.Playlists[0].TrackIds.ToArray());
@@ -140,5 +146,37 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(0.8d, loaded.AudioInputGain);
         Assert.IsNull(loaded.AudioInputChannelIndex);
         Assert.IsFalse(loaded.AutoLoadVst);
+        Assert.IsFalse(loaded.Playlists.Any(playlist => playlist.IsIncludedInMix));
+    }
+
+    [TestMethod]
+    public void Load_OlderPlaylistWithoutMixFlag_DefaultsToNotIncluded()
+    {
+        using var temporary = new TemporaryDirectory();
+        var statePath = temporary.Combine("studio-state.json");
+        File.WriteAllText(
+            statePath,
+            """
+            {
+              "schemaVersion": 1,
+              "outputFolder": "C:\\Audio",
+              "playlists": [
+                {
+                  "id": "legacy-playlist",
+                  "name": "Legacy",
+                  "trackIds": ["track-a"]
+                }
+              ],
+              "playbackMode": "sequential"
+            }
+            """);
+        var store = new StudioStateStore(statePath);
+
+        var loaded = store.Load();
+
+        Assert.IsNull(store.LastLoadWarning);
+        Assert.AreEqual(1, loaded.Playlists.Count);
+        Assert.IsFalse(loaded.Playlists[0].IsIncludedInMix);
+        CollectionAssert.AreEqual(new[] { "track-a" }, loaded.Playlists[0].TrackIds.ToArray());
     }
 }

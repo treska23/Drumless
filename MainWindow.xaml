@@ -495,6 +495,31 @@
                                                 AutomationProperties.AutomationId="DeletePlaylistButton" />
                                     </WrapPanel>
 
+                                    <TextBlock Text="MEZCLA DE PLAYLISTS" Foreground="{StaticResource TextSecondary}"
+                                               FontSize="10" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding MixedPlaylistSummary}" Foreground="{StaticResource TextSecondary}"
+                                               FontSize="11" TextWrapping="Wrap" Margin="0,5,0,7" />
+                                    <Border BorderBrush="{StaticResource Stroke}" BorderThickness="1" CornerRadius="6"
+                                            Padding="7,4" Margin="0,0,0,7">
+                                        <ScrollViewer MaxHeight="105" VerticalScrollBarVisibility="Auto">
+                                            <ItemsControl ItemsSource="{Binding Playlists}"
+                                                          AutomationProperties.AutomationId="PlaylistMixList">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <CheckBox IsChecked="{Binding IsIncludedInMix, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                  Margin="0,4" AutomationProperties.Name="{Binding Name}">
+                                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                        </CheckBox>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </Border>
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Limpiar mezcla"
+                                            Padding="10,6" Margin="0,0,0,12" HorizontalAlignment="Left"
+                                            Command="{Binding ClearPlaylistMixCommand}"
+                                            AutomationProperties.AutomationId="ClearPlaylistMixButton" />
+
                                     <TextBlock Text="MODO DE REPRODUCCIÓN" Foreground="{StaticResource TextSecondary}" FontSize="10" FontWeight="Bold" />
                                     <ComboBox ItemsSource="{Binding PlaybackModeOptions}" SelectedItem="{Binding SelectedPlaybackMode}"
                                               Margin="0,7,0,12"

@@ -14,8 +14,8 @@ Prototipo Windows de una aplicación de práctica para batería electrónica y t
   Groove Agent, MIDI dinámico y apertura de la interfaz nativa del instrumento.
 - Biblioteca persistente de pistas locales, con detección de archivos desaparecidos.
 - Carpeta configurable para las pistas generadas y escaneo automático al iniciar.
-- Varias playlists persistentes, edición de orden y modos de reproducción individual,
-  secuencial y aleatorio sin repeticiones.
+- Varias playlists persistentes, mezcla de varias playlists en una sola cola, edición
+  de orden y modos de reproducción individual, secuencial y aleatorio sin repeticiones.
 - Transporte con anterior, siguiente y avance automático al final natural de una pista.
 - Separación local opcional con Demucs; nunca modifica ni mueve el archivo original.
 - Módulo separado para YouTube.

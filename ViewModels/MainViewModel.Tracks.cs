@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using DrumPracticeStudio.Audio;
 using DrumPracticeStudio.Infrastructure;
 using DrumPracticeStudio.Models;
@@ -19,6 +20,7 @@ public sealed partial class MainViewModel
     private bool _desiredTrackPlaying;
     private bool _isTrackLoading;
     private bool _isInitializingTrackWorkspace;
+    private bool _isUpdatingPlaylistMix;
     private string? _trackWorkspaceWarning;
 
     private string _outputFolderPath = AppPaths.DerivedTracks;
@@ -38,6 +40,7 @@ public sealed partial class MainViewModel
     public RelayCommand CreatePlaylistCommand { get; private set; } = null!;
     public RelayCommand RenamePlaylistCommand { get; private set; } = null!;
     public RelayCommand DeletePlaylistCommand { get; private set; } = null!;
+    public RelayCommand ClearPlaylistMixCommand { get; private set; } = null!;
     public RelayCommand<LocalTrack> AddTrackToPlaylistCommand { get; private set; } = null!;
     public RelayCommand<LocalTrack> RemovePlaylistTrackCommand { get; private set; } = null!;
     public RelayCommand<LocalTrack> MovePlaylistTrackUpCommand { get; private set; } = null!;
@@ -69,7 +72,8 @@ public sealed partial class MainViewModel
 
             PlaylistNameDraft = value?.Name ?? string.Empty;
             RebuildPlaylistTracks();
-            ResetPlaybackQueue(value?.TrackIds, CurrentTrack?.Id);
+            ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
+            OnPropertyChanged(nameof(MixedPlaylistSummary));
             if (!_isInitializingTrackWorkspace)
             {
                 SaveTrackWorkspace();
@@ -117,6 +121,29 @@ public sealed partial class MainViewModel
         }
     }
 
+    public string MixedPlaylistSummary
+    {
+        get
+        {
+            var included = Playlists.Where(playlist => playlist.IsIncludedInMix).ToArray();
+            if (included.Length == 0)
+            {
+                return SelectedPlaylist is null
+                    ? "Sin mezcla · se reproduce la biblioteca completa"
+                    : $"Sin mezcla · se reproduce {SelectedPlaylist.Name}";
+            }
+
+            var trackCount = PlaylistMixService.BuildQueue(Playlists, SelectedPlaylist)
+                .Count(trackId =>
+                    _trackLibrary.TryGetById(trackId, out var track) && track.IsAvailable);
+            var playlistLabel = included.Length == 1
+                ? included[0].Name
+                : $"{included.Length} playlists";
+            var trackLabel = trackCount == 1 ? "1 pista" : $"{trackCount} pistas";
+            return $"{playlistLabel} · {trackLabel} en la cola";
+        }
+    }
+
     private void InitializeTrackWorkspace()
     {
         _isInitializingTrackWorkspace = true;
@@ -142,6 +169,7 @@ public sealed partial class MainViewModel
 
             foreach (var playlist in state.Playlists)
             {
+                AttachPlaylist(playlist);
                 Playlists.Add(playlist);
             }
 
@@ -183,7 +211,7 @@ public sealed partial class MainViewModel
         }
 
         RefreshLibraryPresentation();
-        ResetPlaybackQueue(SelectedPlaylist?.TrackIds, currentTrackId: null);
+        ResetPlaylistPlaybackQueue(currentTrackId: null);
         SaveTrackWorkspace(silent: true);
     }
 
@@ -201,6 +229,7 @@ public sealed partial class MainViewModel
         CreatePlaylistCommand = new RelayCommand(CreatePlaylist);
         RenamePlaylistCommand = new RelayCommand(RenamePlaylist);
         DeletePlaylistCommand = new RelayCommand(DeletePlaylist);
+        ClearPlaylistMixCommand = new RelayCommand(ClearPlaylistMix);
         AddTrackToPlaylistCommand = new RelayCommand<LocalTrack>(AddTrackToPlaylist);
         RemovePlaylistTrackCommand = new RelayCommand<LocalTrack>(RemovePlaylistTrack);
         MovePlaylistTrackUpCommand = new RelayCommand<LocalTrack>(MovePlaylistTrackUp);
@@ -269,11 +298,13 @@ public sealed partial class MainViewModel
 
             if (resetNavigation)
             {
-                var preferredIds = SelectedPlaylist?.TrackIds;
-                if (preferredIds is null || !preferredIds.Contains(track.Id))
+                var preferredIds = GetPlaylistPlaybackIds();
+                if (preferredIds is null || !preferredIds.Contains(track.Id, StringComparer.Ordinal))
                 {
-                    preferredIds = new ObservableCollection<string>(
-                        Tracks.Where(candidate => candidate.IsAvailable).Select(candidate => candidate.Id));
+                    preferredIds = Tracks
+                        .Where(candidate => candidate.IsAvailable)
+                        .Select(candidate => candidate.Id)
+                        .ToArray();
                 }
 
                 ResetPlaybackQueue(preferredIds, track.Id);
@@ -370,6 +401,7 @@ public sealed partial class MainViewModel
         }
 
         var playlist = new Playlist { Id = Guid.NewGuid().ToString("N"), Name = name };
+        AttachPlaylist(playlist);
         Playlists.Add(playlist);
         SelectedPlaylist = playlist;
         PlaylistNameDraft = playlist.Name;
@@ -394,6 +426,7 @@ public sealed partial class MainViewModel
 
         SelectedPlaylist.Name = name;
         OnPropertyChanged(nameof(Playlists));
+        OnPropertyChanged(nameof(MixedPlaylistSummary));
         SaveTrackWorkspace();
         StatusMessage = $"Playlist renombrada: {name}";
     }
@@ -408,12 +441,42 @@ public sealed partial class MainViewModel
 
         var deletedName = SelectedPlaylist.Name;
         var index = Playlists.IndexOf(SelectedPlaylist);
+        DetachPlaylist(SelectedPlaylist);
         Playlists.Remove(SelectedPlaylist);
         SelectedPlaylist = Playlists.Count == 0
             ? null
             : Playlists[Math.Min(index, Playlists.Count - 1)];
         SaveTrackWorkspace();
         StatusMessage = $"Playlist eliminada: {deletedName} · ningún audio se ha borrado";
+    }
+
+    private void ClearPlaylistMix()
+    {
+        if (!Playlists.Any(playlist => playlist.IsIncludedInMix))
+        {
+            StatusMessage = "No hay playlists marcadas para la mezcla";
+            return;
+        }
+
+        _isUpdatingPlaylistMix = true;
+        try
+        {
+            foreach (var playlist in Playlists)
+            {
+                playlist.IsIncludedInMix = false;
+            }
+        }
+        finally
+        {
+            _isUpdatingPlaylistMix = false;
+        }
+
+        ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
+        OnPropertyChanged(nameof(MixedPlaylistSummary));
+        SaveTrackWorkspace();
+        StatusMessage = SelectedPlaylist is null
+            ? "Mezcla desactivada · se reproducirá la biblioteca completa"
+            : $"Mezcla desactivada · se reproducirá {SelectedPlaylist.Name}";
     }
 
     private void AddTrackToPlaylist(LocalTrack? track)
@@ -436,7 +499,8 @@ public sealed partial class MainViewModel
         }
 
         RebuildPlaylistTracks();
-        ResetPlaybackQueue(SelectedPlaylist.TrackIds, CurrentTrack?.Id);
+        ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
+        OnPropertyChanged(nameof(MixedPlaylistSummary));
         SaveTrackWorkspace();
         StatusMessage = $"{track.Title} añadida a {SelectedPlaylist.Name}";
     }
@@ -450,7 +514,8 @@ public sealed partial class MainViewModel
         }
 
         RebuildPlaylistTracks();
-        ResetPlaybackQueue(SelectedPlaylist.TrackIds, CurrentTrack?.Id);
+        ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
+        OnPropertyChanged(nameof(MixedPlaylistSummary));
         SaveTrackWorkspace();
         StatusMessage = $"{track.Title} quitada de la playlist · el archivo sigue intacto";
     }
@@ -476,7 +541,8 @@ public sealed partial class MainViewModel
 
         RebuildPlaylistTracks();
         SelectedPlaylistTrack = track;
-        ResetPlaybackQueue(SelectedPlaylist.TrackIds, CurrentTrack?.Id);
+        ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
+        OnPropertyChanged(nameof(MixedPlaylistSummary));
         SaveTrackWorkspace();
     }
 
@@ -548,6 +614,56 @@ public sealed partial class MainViewModel
         SelectedPlaylistTrack = selectedId is null
             ? null
             : PlaylistTracks.FirstOrDefault(track => track.Id == selectedId);
+    }
+
+    private IReadOnlyList<string>? GetPlaylistPlaybackIds()
+    {
+        var hasExplicitMix = Playlists.Any(playlist => playlist.IsIncludedInMix);
+        if (!hasExplicitMix && SelectedPlaylist is null)
+        {
+            return null;
+        }
+
+        return PlaylistMixService.BuildQueue(Playlists, SelectedPlaylist);
+    }
+
+    private void ResetPlaylistPlaybackQueue(string? currentTrackId) =>
+        ResetPlaybackQueue(GetPlaylistPlaybackIds(), currentTrackId);
+
+    private void AttachPlaylist(Playlist playlist) =>
+        playlist.PropertyChanged += OnPlaylistPropertyChanged;
+
+    private void DetachPlaylist(Playlist playlist) =>
+        playlist.PropertyChanged -= OnPlaylistPropertyChanged;
+
+    private void DetachAllPlaylists()
+    {
+        foreach (var playlist in Playlists)
+        {
+            DetachPlaylist(playlist);
+        }
+    }
+
+    private void OnPlaylistPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName == nameof(Playlist.Name))
+        {
+            OnPropertyChanged(nameof(MixedPlaylistSummary));
+            return;
+        }
+
+        if (eventArgs.PropertyName != nameof(Playlist.IsIncludedInMix) ||
+            _isUpdatingPlaylistMix)
+        {
+            return;
+        }
+
+        ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
+        OnPropertyChanged(nameof(MixedPlaylistSummary));
+        if (!_isInitializingTrackWorkspace)
+        {
+            SaveTrackWorkspace();
+        }
     }
 
     private void ResetPlaybackQueue(IEnumerable<string>? preferredTrackIds, string? currentTrackId)

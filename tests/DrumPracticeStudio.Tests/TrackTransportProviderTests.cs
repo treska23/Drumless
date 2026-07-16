@@ -107,16 +107,62 @@ public sealed class TrackTransportProviderTests
         var lastPath = temporary.Combine("last.wav");
         WritePcmWave(firstPath, durationMilliseconds: 15);
         WritePcmWave(lastPath, durationMilliseconds: 85);
-        using var transport = new TrackTransportProvider(OutputFormat);
+        var firstReachedInstallBarrier = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstInstall = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var transport = new TrackTransportProvider(
+            OutputFormat,
+            async (path, cancellationToken) =>
+            {
+                if (!string.Equals(path, firstPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                firstReachedInstallBarrier.TrySetResult();
+                await releaseFirstInstall.Task.WaitAsync(cancellationToken);
+            });
 
         var firstLoad = transport.LoadAsync(firstPath);
+        await firstReachedInstallBarrier.Task;
         var lastLoad = transport.LoadAsync(lastPath);
-        await IgnoreSupersededLoadAsync(firstLoad);
         var lastGeneration = await lastLoad;
+        releaseFirstInstall.TrySetResult();
+        await IgnoreSupersededLoadAsync(firstLoad);
 
         Assert.IsTrue(lastGeneration > 0L);
         Assert.AreEqual(TrackPlaybackState.Stopped, transport.PlaybackState);
         Assert.AreEqual(85d, transport.Duration.TotalMilliseconds, 1.5d);
+    }
+
+    [TestMethod]
+    public async Task UnloadDuringLoad_PreventsThePreparedTrackFromBeingInstalled()
+    {
+        using var temporary = new TemporaryDirectory();
+        var trackPath = temporary.Combine("pending.wav");
+        WritePcmWave(trackPath, durationMilliseconds: 50);
+        var reachedInstallBarrier = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseInstall = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var transport = new TrackTransportProvider(
+            OutputFormat,
+            async (_, cancellationToken) =>
+            {
+                reachedInstallBarrier.TrySetResult();
+                await releaseInstall.Task.WaitAsync(cancellationToken);
+            });
+
+        var pendingLoad = transport.LoadAsync(trackPath);
+        await reachedInstallBarrier.Task;
+        transport.Unload();
+        releaseInstall.TrySetResult();
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(async () => await pendingLoad);
+        Assert.AreEqual(TrackPlaybackState.NoTrack, transport.PlaybackState);
+        Assert.AreEqual(TimeSpan.Zero, transport.Duration);
+        Assert.IsFalse(transport.TryDequeueTrackEnded(out _));
     }
 
     private static async Task IgnoreSupersededLoadAsync(Task<long> load)

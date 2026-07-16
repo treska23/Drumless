@@ -8,6 +8,7 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
 {
     private readonly object _gate = new();
     private readonly ConcurrentQueue<TrackEndedNotification> _endedNotifications = new();
+    private readonly Func<string, CancellationToken, Task>? _beforeSessionInstallAsync;
     private TrackSession? _session;
     private TrackPlaybackState _playbackState = TrackPlaybackState.NoTrack;
     private long _nextLoadGeneration;
@@ -20,7 +21,13 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
     private float _volume = 0.8f;
     private bool _disposed;
 
-    public TrackTransportProvider(WaveFormat waveFormat) => WaveFormat = waveFormat;
+    public TrackTransportProvider(
+        WaveFormat waveFormat,
+        Func<string, CancellationToken, Task>? beforeSessionInstallAsync = null)
+    {
+        WaveFormat = waveFormat;
+        _beforeSessionInstallAsync = beforeSessionInstallAsync;
+    }
 
     public WaveFormat WaveFormat { get; }
 
@@ -97,6 +104,11 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
                 () => TrackSession.Create(path, WaveFormat.SampleRate),
                 CancellationToken.None).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
+            if (_beforeSessionInstallAsync is not null)
+            {
+                await _beforeSessionInstallAsync(path, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
 
             lock (_gate)
             {

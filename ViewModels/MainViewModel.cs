@@ -583,6 +583,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _vstLoadCancellation?.Dispose();
         _trackLoadCancellation?.Cancel();
         _trackLoadCancellation?.Dispose();
+        DetachAllPlaylists();
         SaveActiveVstState(silent: true);
         SaveTrackWorkspace(silent: true);
         _audio.VstInstrumentExited -= OnVstInstrumentExited;
@@ -876,7 +877,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         _desiredTrackPlaying = false;
         _activeRunGeneration = 0;
-        _audio.StopTrack();
+        if (_isTrackLoading)
+        {
+            // Invalida también la generación de carga en el motor. Cancelar el token
+            // por sí solo deja una ventana mínima en la que el archivo ya abierto
+            // podría instalarse después de pulsar Parar.
+            _audio.UnloadTrack();
+        }
+        else
+        {
+            _audio.StopTrack();
+        }
         PlayButtonLabel = "Reproducir";
     }
 
