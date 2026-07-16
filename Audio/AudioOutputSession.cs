@@ -37,7 +37,7 @@ internal sealed class AudioOutputSession : IDisposable
         int sampleRate,
         IReadOnlyList<AudioInputChannelItem> inputChannels,
         AsioDuplexRenderer? duplexRenderer,
-        int? inputChannelIndex)
+        IReadOnlyList<AudioInputMonitorSetting> inputMonitorSettings)
     {
         _asioDevice = device;
         _asioDuplexRenderer = duplexRenderer;
@@ -48,8 +48,8 @@ internal sealed class AudioOutputSession : IDisposable
         DeviceId = AudioOutputDeviceId.ForAsio(driverName);
         DeviceName = driverName;
         BufferFrames = device.FramesPerBuffer;
-        InputChannelIndex = inputChannelIndex;
-        if (inputChannelIndex is not null)
+        InputMonitorSettings = inputMonitorSettings;
+        if (inputMonitorSettings.Count > 0)
         {
             InputLatencyMilliseconds = Math.Max(
                 1,
@@ -64,9 +64,12 @@ internal sealed class AudioOutputSession : IDisposable
     public bool IsRawModeActive => _rawModeActive;
     public int LatencyMilliseconds => _latencyMilliseconds;
     public int? BufferFrames { get; }
-    public int? InputChannelIndex { get; }
+    public IReadOnlyList<AudioInputMonitorSetting> InputMonitorSettings { get; } = [];
+    public int? InputChannelIndex => InputMonitorSettings.Count == 1
+        ? InputMonitorSettings[0].ChannelIndex
+        : null;
     public int? InputLatencyMilliseconds { get; }
-    public bool IsInputMonitoringActive => InputChannelIndex is not null;
+    public bool IsInputMonitoringActive => InputMonitorSettings.Count > 0;
     public IReadOnlyList<AudioInputChannelItem> InputChannels => _inputChannels;
     public string? LowLatencyUnavailableReason => _wasapiPlayer?.LowLatencyUnavailableReason;
 
@@ -75,12 +78,25 @@ internal sealed class AudioOutputSession : IDisposable
         string? deviceId,
         int? inputChannelIndex = null,
         float inputGain = 0.8f)
+        => Open(
+            provider,
+            deviceId,
+            inputChannelIndex is { } channel
+                ? [new AudioInputMonitorSetting(channel, inputGain)]
+                : []);
+
+    public static AudioOutputSession Open(
+        ISampleProvider provider,
+        string? deviceId,
+        IReadOnlyList<AudioInputMonitorSetting> inputMonitorSettings,
+        OutputRecordingSink? recordingSink = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(inputMonitorSettings);
 
         if (AudioOutputDeviceId.TryGetAsioDriverName(deviceId, out var asioDriverName))
         {
-            return OpenAsio(provider, asioDriverName, inputChannelIndex, inputGain);
+            return OpenAsio(provider, asioDriverName, inputMonitorSettings, recordingSink);
         }
 
         var enumerator = new MMDeviceEnumerator();
@@ -94,7 +110,7 @@ internal sealed class AudioOutputSession : IDisposable
                 : enumerator.GetDevice(deviceId);
             try
             {
-                player = BuildPlayer(device, provider, useRawMode: true);
+                player = BuildPlayer(device, WrapRecorder(provider, recordingSink), useRawMode: true);
                 rawModeActive = true;
             }
             catch (Exception)
@@ -104,7 +120,7 @@ internal sealed class AudioOutputSession : IDisposable
                 // Reintentamos una sola vez sin RAW; si el endpoint tampoco abre así,
                 // la excepción del segundo intento sí se entrega al usuario.
                 player?.Dispose();
-                player = BuildPlayer(device, provider, useRawMode: false);
+                player = BuildPlayer(device, WrapRecorder(provider, recordingSink), useRawMode: false);
             }
 
             return new AudioOutputSession(enumerator, device, player, rawModeActive);
@@ -121,8 +137,8 @@ internal sealed class AudioOutputSession : IDisposable
     private static AudioOutputSession OpenAsio(
         ISampleProvider provider,
         string driverName,
-        int? inputChannelIndex,
-        float inputGain)
+        IReadOnlyList<AudioInputMonitorSetting> inputMonitorSettings,
+        OutputRecordingSink? recordingSink)
     {
         AsioDevice? device = null;
         try
@@ -152,25 +168,36 @@ internal sealed class AudioOutputSession : IDisposable
                         : device.Capabilities.InputChannelInfos[index].name))
                 .ToArray();
 
-            AsioDuplexRenderer? renderer = null;
-            if (inputChannelIndex is { } channel)
+            var normalizedSettings = inputMonitorSettings
+                .GroupBy(setting => setting.ChannelIndex)
+                .Select(group => group.Last())
+                .OrderBy(setting => setting.ChannelIndex)
+                .ToArray();
+            foreach (var setting in normalizedSettings)
             {
-                if (channel < 0 || channel >= inputChannels.Length)
+                if (setting.ChannelIndex < 0 || setting.ChannelIndex >= inputChannels.Length)
                 {
                     throw new ArgumentOutOfRangeException(
-                        nameof(inputChannelIndex),
-                        $"La entrada ASIO {channel + 1} no existe en {driverName}.");
+                        nameof(inputMonitorSettings),
+                        $"La entrada ASIO {setting.ChannelIndex + 1} no existe en {driverName}.");
                 }
+            }
 
+            AsioDuplexRenderer? renderer = null;
+            if (normalizedSettings.Length > 0)
+            {
                 renderer = new AsioDuplexRenderer(
                     provider,
                     Math.Max(
                         device.Capabilities.BufferMaxSize,
                         device.Capabilities.BufferPreferredSize),
-                    inputGain);
+                    normalizedSettings,
+                    recordingSink);
                 device.InitDuplex(new AsioDuplexOptions
                 {
-                    InputChannels = [channel],
+                    InputChannels = normalizedSettings
+                        .Select(setting => setting.ChannelIndex)
+                        .ToArray(),
                     OutputChannels = [0, 1],
                     SampleRate = provider.WaveFormat.SampleRate,
                     Processor = renderer.Process
@@ -180,7 +207,7 @@ internal sealed class AudioOutputSession : IDisposable
             {
                 device.InitPlayback(new AsioPlaybackOptions
                 {
-                    Source = provider.ToWaveProvider(),
+                    Source = WrapRecorder(provider, recordingSink).ToWaveProvider(),
                     OutputChannels = [0, 1],
                     AutoStopOnEndOfStream = false
                 });
@@ -192,7 +219,7 @@ internal sealed class AudioOutputSession : IDisposable
                 provider.WaveFormat.SampleRate,
                 inputChannels,
                 renderer,
-                inputChannelIndex);
+                normalizedSettings);
         }
         catch
         {
@@ -261,8 +288,22 @@ internal sealed class AudioOutputSession : IDisposable
         }
     }
 
-    public void SetInputGain(float gain) =>
-        _asioDuplexRenderer?.SetGain(gain);
+    public void SetInputGain(float gain)
+    {
+        foreach (var setting in InputMonitorSettings)
+        {
+            _asioDuplexRenderer?.SetGain(setting.ChannelIndex, gain);
+        }
+    }
+
+    private static ISampleProvider WrapRecorder(
+        ISampleProvider provider,
+        OutputRecordingSink? sink) => sink is null
+        ? provider
+        : new RecordingSampleProvider(provider, sink);
+
+    public void SetInputGain(int channelIndex, float gain) =>
+        _asioDuplexRenderer?.SetGain(channelIndex, gain);
 
     public void Dispose()
     {
@@ -283,18 +324,32 @@ internal sealed class AudioOutputSession : IDisposable
     {
         private readonly ISampleProvider _provider;
         private readonly float[] _interleavedOutput;
-        private float _gain;
+        private readonly int[] _channelIndexes;
+        private readonly float[] _gains;
+        private readonly OutputRecordingSink? _recordingSink;
 
-        public AsioDuplexRenderer(ISampleProvider provider, int maximumFrames, float gain)
+        public AsioDuplexRenderer(
+            ISampleProvider provider,
+            int maximumFrames,
+            IReadOnlyList<AudioInputMonitorSetting> settings,
+            OutputRecordingSink? recordingSink)
         {
             _provider = provider;
             _interleavedOutput = new float[
                 Math.Max(1, maximumFrames) * provider.WaveFormat.Channels];
-            SetGain(gain);
+            _channelIndexes = settings.Select(setting => setting.ChannelIndex).ToArray();
+            _gains = settings.Select(setting => Math.Clamp(setting.Gain, 0f, 2f)).ToArray();
+            _recordingSink = recordingSink;
         }
 
-        public void SetGain(float gain) =>
-            Volatile.Write(ref _gain, Math.Clamp(gain, 0f, 2f));
+        public void SetGain(int channelIndex, float gain)
+        {
+            var position = Array.IndexOf(_channelIndexes, channelIndex);
+            if (position >= 0)
+            {
+                Volatile.Write(ref _gains[position], Math.Clamp(gain, 0f, 2f));
+            }
+        }
 
         public void Process(in AsioProcessBuffers buffers)
         {
@@ -305,13 +360,18 @@ internal sealed class AudioOutputSession : IDisposable
                 Array.Clear(_interleavedOutput, read, requiredSamples - read);
             }
 
-            var input = buffers.GetInput(0);
             var outputLeft = buffers.GetOutput(0);
             var outputRight = buffers.GetOutput(1);
-            var gain = Volatile.Read(ref _gain);
+            Span<float> samples = stackalloc float[_channelIndexes.Length];
+            Span<float> gains = stackalloc float[_channelIndexes.Length];
             for (var frame = 0; frame < buffers.Frames; frame++)
             {
-                var monitored = input[frame] * gain;
+                for (var inputIndex = 0; inputIndex < _channelIndexes.Length; inputIndex++)
+                {
+                    samples[inputIndex] = buffers.GetInput(inputIndex)[frame];
+                    gains[inputIndex] = Volatile.Read(ref _gains[inputIndex]);
+                }
+                var monitored = AudioInputMixMath.MixFrame(samples, gains);
                 outputLeft[frame] = Math.Clamp(
                     _interleavedOutput[frame * 2] + monitored,
                     -1f,
@@ -320,6 +380,17 @@ internal sealed class AudioOutputSession : IDisposable
                     _interleavedOutput[(frame * 2) + 1] + monitored,
                     -1f,
                     1f);
+            }
+
+
+            if (_recordingSink is not null)
+            {
+                for (var frame = 0; frame < buffers.Frames; frame++)
+                {
+                    _interleavedOutput[frame * 2] = outputLeft[frame];
+                    _interleavedOutput[(frame * 2) + 1] = outputRight[frame];
+                }
+                _recordingSink.Capture(_interleavedOutput.AsSpan(0, requiredSamples));
             }
         }
     }

@@ -1,7 +1,16 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
+using DrumPracticeStudio.Models;
+using DrumPracticeStudio.Services;
 using DrumPracticeStudio.ViewModels;
+using DrumPracticeStudio.Views;
+using Microsoft.Web.WebView2.Core;
 
 namespace DrumPracticeStudio;
 
@@ -18,13 +27,21 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private HwndSource? _windowSource;
     private bool _isFittingWindow;
+    private bool _isYouTubeInitializing;
+    private PlaylistWindow? _playlistWindow;
+    private Point? _libraryDragOrigin;
+    private Point? _playlistDragOrigin;
+    private bool _closeAfterRecording;
 
     public MainWindow()
     {
         InitializeComponent();
         _viewModel = new MainViewModel();
         DataContext = _viewModel;
+        _viewModel.YouTubePlaybackRequested += OnYouTubePlaybackRequested;
+        _viewModel.YouTubeControlRequested += OnYouTubeControlRequested;
         SourceInitialized += OnSourceInitialized;
+        Closing += OnClosing;
         Closed += OnClosed;
     }
 
@@ -118,7 +135,377 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _windowSource?.RemoveHook(WindowMessageHook);
+        _viewModel.YouTubePlaybackRequested -= OnYouTubePlaybackRequested;
+        _viewModel.YouTubeControlRequested -= OnYouTubeControlRequested;
+        YouTubeWebView.Dispose();
+        _playlistWindow?.Close();
         _viewModel.Dispose();
+    }
+
+    private async void OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (_closeAfterRecording || !_viewModel.IsRecordingOutput)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        IsEnabled = false;
+        try
+        {
+            await _viewModel.CompleteRecordingBeforeCloseAsync();
+        }
+        finally
+        {
+            _closeAfterRecording = true;
+            Close();
+        }
+    }
+
+    private async void OnYouTubeWebViewLoaded(object sender, RoutedEventArgs e) =>
+        await EnsureYouTubeReadyAsync();
+
+    private async Task EnsureYouTubeReadyAsync()
+    {
+        if (YouTubeWebView.CoreWebView2 is not null || _isYouTubeInitializing)
+        {
+            return;
+        }
+
+        _isYouTubeInitializing = true;
+        try
+        {
+            YouTubeStatusText.Text = "Iniciando reproductor oficial…";
+            Directory.CreateDirectory(AppPaths.YouTubeWebViewData);
+            var environment = await CoreWebView2Environment.CreateAsync(
+                userDataFolder: AppPaths.YouTubeWebViewData);
+            await YouTubeWebView.EnsureCoreWebView2Async(environment);
+            var core = YouTubeWebView.CoreWebView2 ??
+                throw new InvalidOperationException("WebView2 no devolvió un navegador inicializado.");
+
+            core.Settings.IsStatusBarEnabled = false;
+            core.Settings.AreDevToolsEnabled = false;
+            core.NewWindowRequested += OnYouTubeNewWindowRequested;
+            core.ProcessFailed += OnYouTubeProcessFailed;
+            core.WebMessageReceived += OnYouTubeWebMessageReceived;
+            if (YouTubeWebView.Source is null)
+            {
+                YouTubeWebView.Source = YouTubeNavigationService.HomeUri;
+            }
+        }
+        catch (Exception exception)
+        {
+            YouTubeStatusText.Text = $"No se pudo iniciar YouTube: {exception.Message}";
+        }
+        finally
+        {
+            _isYouTubeInitializing = false;
+        }
+    }
+
+    private async void OnYouTubeSearchClick(object sender, RoutedEventArgs e) =>
+        await SearchYouTubeAsync();
+
+    private async void OnYouTubeSearchKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await SearchYouTubeAsync();
+    }
+
+    private async Task SearchYouTubeAsync()
+    {
+        var query = YouTubeSearchBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            YouTubeStatusText.Text = "Escribe algo para buscar";
+            YouTubeSearchBox.Focus();
+            return;
+        }
+
+        await EnsureYouTubeReadyAsync();
+        if (YouTubeWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        YouTubeStatusText.Text = $"Buscando «{query}»…";
+        YouTubeWebView.Source = YouTubeNavigationService.CreateSearchUri(query);
+    }
+
+    private void OnYouTubeBackClick(object sender, RoutedEventArgs e)
+    {
+        if (YouTubeWebView.CanGoBack)
+        {
+            YouTubeWebView.GoBack();
+        }
+    }
+
+    private void OnYouTubeForwardClick(object sender, RoutedEventArgs e)
+    {
+        if (YouTubeWebView.CanGoForward)
+        {
+            YouTubeWebView.GoForward();
+        }
+    }
+
+    private async void OnYouTubeHomeClick(object sender, RoutedEventArgs e)
+    {
+        await EnsureYouTubeReadyAsync();
+        YouTubeWebView.Source = YouTubeNavigationService.HomeUri;
+    }
+
+    private async void OnYouTubeReloadClick(object sender, RoutedEventArgs e)
+    {
+        await EnsureYouTubeReadyAsync();
+        YouTubeWebView.Reload();
+    }
+
+    private void OnYouTubeInitializationCompleted(
+        object sender,
+        CoreWebView2InitializationCompletedEventArgs e)
+    {
+        YouTubeStatusText.Text = e.IsSuccess
+            ? "YouTube preparado"
+            : $"No se pudo iniciar YouTube: {e.InitializationException?.Message}";
+    }
+
+    private void OnYouTubeNavigationStarting(
+        object sender,
+        CoreWebView2NavigationStartingEventArgs e) =>
+        YouTubeStatusText.Text = "Cargando YouTube…";
+
+    private async void OnYouTubeNavigationCompleted(
+        object sender,
+        CoreWebView2NavigationCompletedEventArgs e)
+    {
+        YouTubeStatusText.Text = e.IsSuccess
+            ? "Listo · elige un vídeo para reproducirlo"
+            : $"YouTube no pudo cargar la página ({e.WebErrorStatus})";
+        if (e.IsSuccess && YouTubeWebView.CoreWebView2 is not null)
+        {
+            await YouTubeWebView.CoreWebView2.ExecuteScriptAsync(
+                """
+                (() => {
+                  if (window.__drumPracticeEndObserver) return;
+                  window.__drumPracticeEndObserver = true;
+                  const attach = () => {
+                    const video = document.querySelector('video');
+                    if (!video || video.__drumPracticeAttached) return;
+                    video.__drumPracticeAttached = true;
+                    const notifyState = () => chrome.webview.postMessage({
+                      type: 'video-state',
+                      playing: !video.paused && !video.ended
+                    });
+                    video.addEventListener('play', notifyState);
+                    video.addEventListener('pause', notifyState);
+                    video.addEventListener('ended', () => {
+                      notifyState();
+                      const id = new URL(location.href).searchParams.get('v') || '';
+                      chrome.webview.postMessage({ type: 'video-ended', videoId: id });
+                    });
+                  };
+                  attach();
+                  new MutationObserver(attach).observe(document.documentElement, { childList: true, subtree: true });
+                })();
+                """);
+        }
+    }
+
+    private void OnYouTubeNewWindowRequested(
+        object? sender,
+        CoreWebView2NewWindowRequestedEventArgs e)
+    {
+        e.Handled = true;
+        YouTubeWebView.CoreWebView2.Navigate(e.Uri);
+    }
+
+    private void OnYouTubeProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e) =>
+        Dispatcher.BeginInvoke(() =>
+            YouTubeStatusText.Text = $"El reproductor de YouTube se detuvo ({e.ProcessFailedKind})");
+
+    private async void OnYouTubePlaybackRequested(object? sender, YouTubePlaybackRequest request)
+    {
+        _viewModel.OpenYouTubePage();
+        await EnsureYouTubeReadyAsync();
+        YouTubeWebView.Source = request.Uri;
+    }
+
+    private async void OnYouTubeControlRequested(object? sender, YouTubeControlRequest request)
+    {
+        if (YouTubeWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var script = request.Action switch
+        {
+            YouTubeControlAction.Toggle =>
+                "(() => { const v=document.querySelector('video'); if(v) v.paused ? v.play() : v.pause(); })()",
+            YouTubeControlAction.Pause =>
+                "(() => { const v=document.querySelector('video'); if(v) v.pause(); })()",
+            YouTubeControlAction.Stop =>
+                "(() => { const v=document.querySelector('video'); if(v) { v.pause(); v.currentTime=0; } })()",
+            _ => ""
+        };
+        if (script.Length > 0)
+        {
+            await YouTubeWebView.CoreWebView2.ExecuteScriptAsync(script);
+        }
+    }
+
+    private async void OnYouTubeWebMessageReceived(
+        object? sender,
+        CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(e.WebMessageAsJson);
+            var root = document.RootElement;
+            if (root.GetProperty("type").GetString() == "video-ended" &&
+                root.TryGetProperty("videoId", out var videoIdElement) &&
+                videoIdElement.GetString() is { Length: > 0 } videoId)
+            {
+                await _viewModel.HandleYouTubeEndedAsync(videoId);
+            }
+            else if (root.GetProperty("type").GetString() == "video-state" &&
+                     root.TryGetProperty("playing", out var playingElement) &&
+                     playingElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                _viewModel.SetYouTubeAudioActive(playingElement.GetBoolean());
+            }
+        }
+        catch (JsonException)
+        {
+        }
+    }
+
+    private async void OnAddCurrentYouTubeToPlaylistClick(object sender, RoutedEventArgs e)
+    {
+        var uri = YouTubeWebView.Source;
+        if (!YouTubeNavigationService.TryGetVideoId(uri, out var videoId))
+        {
+            YouTubeStatusText.Text = "Abre primero un vídeo concreto para añadirlo";
+            return;
+        }
+
+        var title = "Vídeo de YouTube";
+        if (YouTubeWebView.CoreWebView2 is not null)
+        {
+            var jsonTitle = await YouTubeWebView.CoreWebView2.ExecuteScriptAsync("document.title");
+            title = JsonSerializer.Deserialize<string>(jsonTitle)?
+                .Replace(" - YouTube", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Trim() ?? title;
+        }
+
+        if (_viewModel.AddYouTubeToSelectedPlaylist(
+                videoId,
+                YouTubeNavigationService.CreateWatchUri(videoId).AbsoluteUri,
+                title,
+                YouTubeNavigationService.CreateThumbnailUrl(videoId)))
+        {
+            YouTubeStatusText.Text = $"Añadido a la playlist: {title}";
+        }
+    }
+
+    private void OnLibraryDragStart(object sender, MouseButtonEventArgs e) =>
+        _libraryDragOrigin = e.GetPosition(TrackLibraryList);
+
+    private void OnLibraryPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed ||
+            _libraryDragOrigin is not { } origin ||
+            !ExceededDragThreshold(origin, e.GetPosition(TrackLibraryList)) ||
+            TrackLibraryList.SelectedItem is not LocalTrack track)
+        {
+            return;
+        }
+
+        _libraryDragOrigin = null;
+        DragDrop.DoDragDrop(TrackLibraryList, track, DragDropEffects.Copy);
+    }
+
+    private void OnPlaylistDragStart(object sender, MouseButtonEventArgs e) =>
+        _playlistDragOrigin = e.GetPosition(PlaylistItemList);
+
+    private void OnPlaylistPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed ||
+            _playlistDragOrigin is not { } origin ||
+            !ExceededDragThreshold(origin, e.GetPosition(PlaylistItemList)) ||
+            PlaylistItemList.SelectedItem is not PlaylistItemViewModel item)
+        {
+            return;
+        }
+
+        _playlistDragOrigin = null;
+        DragDrop.DoDragDrop(PlaylistItemList, item, DragDropEffects.Move);
+    }
+
+    private void OnPlaylistDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(typeof(LocalTrack)) &&
+            e.Data.GetData(typeof(LocalTrack)) is LocalTrack track)
+        {
+            _viewModel.AddTrackToSelectedPlaylist(track);
+            return;
+        }
+
+        if (!e.Data.GetDataPresent(typeof(PlaylistItemViewModel)) ||
+            e.Data.GetData(typeof(PlaylistItemViewModel)) is not PlaylistItemViewModel dragged)
+        {
+            return;
+        }
+
+        var target = FindItemFromSource<PlaylistItemViewModel>(PlaylistItemList, e.OriginalSource);
+        var targetIndex = target is null
+            ? _viewModel.PlaylistItems.Count - 1
+            : _viewModel.PlaylistItems.IndexOf(target);
+        _viewModel.MoveSelectedPlaylistItem(dragged, targetIndex);
+    }
+
+    private void OnPlaylistItemDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (PlaylistItemList.SelectedItem is PlaylistItemViewModel item)
+        {
+            _viewModel.PlayPlaylistItem(item);
+        }
+    }
+
+    private static bool ExceededDragThreshold(Point origin, Point current) =>
+        Math.Abs(current.X - origin.X) >= SystemParameters.MinimumHorizontalDragDistance ||
+        Math.Abs(current.Y - origin.Y) >= SystemParameters.MinimumVerticalDragDistance;
+
+    private static T? FindItemFromSource<T>(ItemsControl owner, object source)
+        where T : class
+    {
+        var element = source as DependencyObject;
+        while (element is not null)
+        {
+            if (element is FrameworkElement { DataContext: T item })
+            {
+                return item;
+            }
+            element = VisualTreeHelper.GetParent(element);
+        }
+        return null;
+    }
+
+    private void OnOpenPlaylistWindowClick(object sender, RoutedEventArgs e)
+    {
+        if (_playlistWindow is { IsVisible: true })
+        {
+            _playlistWindow.Activate();
+            return;
+        }
+
+        _playlistWindow = new PlaylistWindow(_viewModel) { Owner = this };
+        _playlistWindow.Closed += (_, _) => _playlistWindow = null;
+        _playlistWindow.Show();
     }
 
     [StructLayout(LayoutKind.Sequential)]

@@ -1,13 +1,18 @@
 param(
-    [string] $ProcessName = "DrumPracticeStudio"
+    [string] $ProcessName = "DrumPracticeStudio",
+    [int] $ProcessId = 0
 )
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 
-$process = Get-Process -Name $ProcessName -ErrorAction Stop |
-    Where-Object { $_.MainWindowHandle -ne 0 } |
-    Select-Object -First 1
+$process = if ($ProcessId -gt 0) {
+    Get-Process -Id $ProcessId -ErrorAction Stop
+} else {
+    Get-Process -Name $ProcessName -ErrorAction Stop |
+        Where-Object { $_.MainWindowHandle -ne 0 } |
+        Select-Object -First 1
+}
 
 if (-not $process) {
     throw "No se encontró la ventana de $ProcessName."
@@ -52,6 +57,25 @@ Write-Output ("BOTONES: " + ($names -join " | "))
 $practice = $buttons | Where-Object { $_.Current.Name -like "*Practicar" } | Select-Object -First 1
 Invoke-Element $practice
 
+$requiredPracticeControls = @(
+    "StartOutputRecordingButton",
+    "StopOutputRecordingButton",
+    "PlayLastRecordingButton",
+    "AnalyzeTempoButton",
+    "TempoBpmTextBox",
+    "TempoFirstBeatTextBox",
+    "MetronomeEnabledCheckBox",
+    "MetronomeVolumeSlider",
+    "PerformanceLatencyTextBox",
+    "StartPerformanceButton",
+    "FinishPerformanceButton"
+)
+foreach ($automationId in $requiredPracticeControls) {
+    if (-not (Find-ElementByAutomationId $automationId)) {
+        throw "La página de práctica no expuso el control $automationId."
+    }
+}
+
 $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
 Write-Output ("TRAS PRACTICAR: " + (@($buttons | ForEach-Object { $_.Current.Name }) -join " | "))
 $kick = $buttons | Where-Object { $_.Current.Name -eq "Bombo" } | Select-Object -First 1
@@ -80,9 +104,17 @@ $requiredTrackControls = @(
     "NewPlaylistButton",
     "RenamePlaylistButton",
     "DeletePlaylistButton",
+    "AddSelectedTrackToPlaylistButton",
+    "OpenPlaylistWindowButton",
     "PlaylistMixList",
     "ClearPlaylistMixButton",
-    "PlaybackModeCombo"
+    "PlayPlaylistQueueButton",
+    "PlaybackModeCombo",
+    "CreateStemMixButton",
+    "KeepDrumsCheckBox",
+    "KeepBassCheckBox",
+    "KeepVocalsCheckBox",
+    "KeepOtherCheckBox"
 )
 foreach ($automationId in $requiredTrackControls) {
     if (-not (Find-ElementByAutomationId $automationId)) {
@@ -91,8 +123,29 @@ foreach ($automationId in $requiredTrackControls) {
 }
 
 $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
+$youtubePage = $buttons | Where-Object { $_.Current.Name -like "*YouTube" } | Select-Object -First 1
+Invoke-Element $youtubePage
+
+$requiredYouTubeControls = @(
+    "YouTubeSearchTextBox",
+    "YouTubeSearchButton",
+    "YouTubeBackButton",
+    "AddYouTubeToPlaylistButton",
+    "YouTubeWebView"
+)
+foreach ($automationId in $requiredYouTubeControls) {
+    if (-not (Find-ElementByAutomationId $automationId)) {
+        throw "La página de YouTube no expuso el control $automationId."
+    }
+}
+
+$buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
 $devices = $buttons | Where-Object { $_.Current.Name -like "*Dispositivos" } | Select-Object -First 1
 Invoke-Element $devices
+
+if (-not (Find-ElementByAutomationId "AudioInputMonitorList")) {
+    throw "La página de dispositivos no expuso la mezcla multientrada."
+}
 
 $allElements = $root.FindAll(
     [System.Windows.Automation.TreeScope]::Descendants,
@@ -107,7 +160,9 @@ if (-not $mapping) {
     Window = $root.Current.Name
     ButtonsFound = $names.Count
     PadTriggered = $kick.Current.Name
+    PracticeControlsVerified = $requiredPracticeControls.Count
     LibrariesVerified = $factory.Current.Name
     TrackControlsVerified = $requiredTrackControls.Count
+    YouTubeControlsVerified = $requiredYouTubeControls.Count
     MidiProfileVerified = $mapping.Current.Name
 }

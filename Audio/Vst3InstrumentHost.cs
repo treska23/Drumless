@@ -19,6 +19,8 @@ internal sealed class Vst3InstrumentHost : IDisposable
     private string? _diagnosticPath;
     private bool _stopping;
     private bool _hasEditor;
+    private TaskCompletionSource? _recordingStarted;
+    private TaskCompletionSource? _recordingStopped;
 
     public event EventHandler<string>? Exited;
     public event EventHandler? EditorClosed;
@@ -228,6 +230,38 @@ internal sealed class Vst3InstrumentHost : IDisposable
         Send(new Vst3RuntimeCommand("SavePreset", Text: path));
     }
 
+    public async Task StartRecordingAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_sync)
+        {
+            if (!IsProcessRunning(_process) || _writer is null)
+            {
+                throw new InvalidOperationException("El instrumento VST3 aislado no está disponible.");
+            }
+            _recordingStarted = completion;
+        }
+        Send(new Vst3RuntimeCommand("StartRecording", Text: path));
+        await completion.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+    }
+
+    public async Task StopRecordingAsync(CancellationToken cancellationToken = default)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_sync)
+        {
+            if (!IsProcessRunning(_process) || _writer is null)
+            {
+                throw new InvalidOperationException("El instrumento VST3 aislado no está disponible.");
+            }
+            _recordingStopped = completion;
+        }
+        Send(new Vst3RuntimeCommand("StopRecording"));
+        await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+    }
+
     public bool OpenEditor()
     {
         lock (_sync)
@@ -265,6 +299,12 @@ internal sealed class Vst3InstrumentHost : IDisposable
             Programs = Array.Empty<string>();
             CurrentProgram = -1;
             AudioStatus = "Audio VST3 no inicializado";
+            _recordingStarted?.TrySetException(
+                new InvalidOperationException("El motor VST3 se descargó durante la grabación."));
+            _recordingStopped?.TrySetException(
+                new InvalidOperationException("El motor VST3 se descargó durante la grabación."));
+            _recordingStarted = null;
+            _recordingStopped = null;
         }
 
         try
@@ -324,6 +364,20 @@ internal sealed class Vst3InstrumentHost : IDisposable
                 if (string.Equals(notification?.Type, "EditorClosed", StringComparison.Ordinal))
                 {
                     EditorClosed?.Invoke(this, EventArgs.Empty);
+                }
+                else if (string.Equals(
+                             notification?.Type,
+                             "StartRecordingCompleted",
+                             StringComparison.Ordinal))
+                {
+                    Interlocked.Exchange(ref _recordingStarted, null)?.TrySetResult();
+                }
+                else if (string.Equals(
+                             notification?.Type,
+                             "StopRecordingCompleted",
+                             StringComparison.Ordinal))
+                {
+                    Interlocked.Exchange(ref _recordingStopped, null)?.TrySetResult();
                 }
             }
         }
@@ -398,6 +452,12 @@ internal sealed class Vst3InstrumentHost : IDisposable
                 _process = null;
                 _hasEditor = false;
                 AudioStatus = "Audio VST3 detenido";
+                _recordingStarted?.TrySetException(
+                    new InvalidOperationException("El motor VST3 se detuvo durante la grabación."));
+                _recordingStopped?.TrySetException(
+                    new InvalidOperationException("El motor VST3 se detuvo durante la grabación."));
+                _recordingStarted = null;
+                _recordingStopped = null;
                 notify = true;
             }
         }

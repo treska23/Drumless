@@ -59,15 +59,17 @@ public sealed partial class DrumRemovalService
         progress.Report(new DrumRemovalProgress(0d, "Motor local preparado"));
     }
 
-    public async Task<DrumRemovalResult> CreateDrumlessAsync(
+    public async Task<DrumRemovalResult> CreateStemMixAsync(
         LocalTrack track,
         string outputDirectory,
+        StemSelection selection,
         IProgress<DrumRemovalProgress> progress,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(track);
         ArgumentNullException.ThrowIfNull(progress);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
+        StemMixPlan.Validate(selection);
 
         if (track.Variant != TrackVariant.Original)
         {
@@ -112,8 +114,6 @@ public sealed partial class DrumRemovalService
             startInfo.Environment["PYTHONUNBUFFERED"] = "1";
             startInfo.ArgumentList.Add("-m");
             startInfo.ArgumentList.Add("demucs.separate");
-            startInfo.ArgumentList.Add("--two-stems");
-            startInfo.ArgumentList.Add("drums");
             startInfo.ArgumentList.Add("-n");
             startInfo.ArgumentList.Add("htdemucs");
             startInfo.ArgumentList.Add("-d");
@@ -136,20 +136,17 @@ public sealed partial class DrumRemovalService
             }
 
             progress.Report(new DrumRemovalProgress(0.92d, "Validando el resultado"));
-            var generated = Directory.EnumerateFiles(jobRoot, "no_drums.wav", SearchOption.AllDirectories)
-                .FirstOrDefault();
-            if (generated is null)
-            {
-                throw new InvalidDataException("Demucs no produjo la pista no_drums.wav esperada.");
-            }
-
-            ValidateWave(generated);
             var safeTitle = SanitizeFileName(track.Title);
-            var destination = CreateUniqueDestination(resolvedOutputDirectory, safeTitle);
-            File.Copy(generated, destination, overwrite: false);
-            WriteMetadata(track, destination);
+            var destination = CreateUniqueDestination(
+                resolvedOutputDirectory,
+                safeTitle,
+                StemMixPlan.FileSuffix(selection));
+            await StemAudioMixer.MixAsync(jobRoot, selection, destination, cancellationToken);
+            WriteMetadata(track, destination, selection);
 
-            progress.Report(new DrumRemovalProgress(1d, "Versión sin batería creada"));
+            progress.Report(new DrumRemovalProgress(
+                1d,
+                $"Mezcla creada · {StemMixPlan.Describe(selection)}"));
             return new DrumRemovalResult(destination);
         }
         finally
@@ -161,9 +158,26 @@ public sealed partial class DrumRemovalService
 
     public Task<DrumRemovalResult> CreateDrumlessAsync(
         LocalTrack track,
+        string outputDirectory,
         IProgress<DrumRemovalProgress> progress,
         CancellationToken cancellationToken) =>
-        CreateDrumlessAsync(track, AppPaths.DerivedTracks, progress, cancellationToken);
+        CreateStemMixAsync(
+            track,
+            outputDirectory,
+            StemSelection.Drumless,
+            progress,
+            cancellationToken);
+
+    public Task<DrumRemovalResult> CreateDrumlessAsync(
+        LocalTrack track,
+        IProgress<DrumRemovalProgress> progress,
+        CancellationToken cancellationToken) =>
+        CreateStemMixAsync(
+            track,
+            AppPaths.DerivedTracks,
+            StemSelection.Drumless,
+            progress,
+            cancellationToken);
 
     private static Task NormalizeInputAsync(
         string sourcePath,
@@ -251,7 +265,7 @@ public sealed partial class DrumRemovalService
         if (match.Success && int.TryParse(match.Groups[1].Value, out var percent))
         {
             var mapped = 0.2d + Math.Clamp(percent, 0, 100) / 100d * 0.7d;
-            return new DrumRemovalProgress(mapped, $"Separando batería · {percent}%");
+            return new DrumRemovalProgress(mapped, $"Separando stems · {percent}%");
         }
 
         return new DrumRemovalProgress(null, line.Trim());
@@ -263,44 +277,40 @@ public sealed partial class DrumRemovalService
         return string.IsNullOrWhiteSpace(cleaned) ? "Preparando motor local…" : cleaned;
     }
 
-    private static void ValidateWave(string path)
-    {
-        var info = new FileInfo(path);
-        if (!info.Exists || info.Length < 44)
-        {
-            throw new InvalidDataException("El resultado de separación está vacío.");
-        }
-
-        using var reader = new WaveFileReader(path);
-        if (reader.TotalTime <= TimeSpan.Zero)
-        {
-            throw new InvalidDataException("El resultado no contiene audio reproducible.");
-        }
-    }
-
-    private static string CreateUniqueDestination(string outputDirectory, string safeTitle)
+    private static string CreateUniqueDestination(
+        string outputDirectory,
+        string safeTitle,
+        string mixSuffix)
     {
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var candidate = Path.Combine(outputDirectory, $"{safeTitle} - sin bateria - {stamp}.wav");
+        var candidate = Path.Combine(outputDirectory, $"{safeTitle} - {mixSuffix} - {stamp}.wav");
         var suffix = 2;
         while (File.Exists(candidate))
         {
-            candidate = Path.Combine(outputDirectory, $"{safeTitle} - sin bateria - {stamp}-{suffix++}.wav");
+            candidate = Path.Combine(
+                outputDirectory,
+                $"{safeTitle} - {mixSuffix} - {stamp}-{suffix++}.wav");
         }
 
         return candidate;
     }
 
-    private static void WriteMetadata(LocalTrack source, string drumlessPath)
+    private static void WriteMetadata(
+        LocalTrack source,
+        string outputPath,
+        StemSelection selection)
     {
-        var metadataPath = Path.ChangeExtension(drumlessPath, ".separation.json");
+        var metadataPath = Path.ChangeExtension(outputPath, ".separation.json");
         var metadata = new
         {
             schemaVersion = 1,
             source.Id,
             source.Title,
             source.Path,
-            drumlessPath,
+            outputPath,
+            keptStems = StemMixPlan.GetFileNames(selection)
+                .Select(Path.GetFileNameWithoutExtension)
+                .ToArray(),
             engine = "demucs",
             engineVersion = "4.0.1",
             model = "htdemucs",

@@ -17,6 +17,7 @@
     <PackageReference Include="NAudio.Asio" Version="3.0.0-preview.16" />
     <PackageReference Include="NAudio.Wasapi" Version="3.0.0-preview.16" />
     <PackageReference Include="NAudio.WinMM" Version="3.0.0-preview.16" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3179.45" />
   </ItemGroup>
 
   <ItemGroup>

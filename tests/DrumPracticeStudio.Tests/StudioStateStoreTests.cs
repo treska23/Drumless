@@ -24,6 +24,11 @@ public sealed class StudioStateStoreTests
             AudioInputOutputDeviceId = "asio:Focusrite USB ASIO",
             AudioInputChannelIndex = 1,
             AudioInputGain = 0.73d,
+            AudioInputMonitors =
+            [
+                new AudioInputMonitorSetting(0, 0.55f),
+                new AudioInputMonitorSetting(1, 0.73f)
+            ],
             MidiDeviceName = "MPK mini 3",
             MidiDeviceIndex = 2,
             AutoConnectMidi = true,
@@ -34,6 +39,8 @@ public sealed class StudioStateStoreTests
             VstModulePath = @"C:\Program Files\Common Files\VST3\Groove Agent SE.vst3",
             VstClassId = "0123456789ABCDEF0123456789ABCDEF",
             AutoLoadVst = true,
+            StemSelection = StemSelection.Drums | StemSelection.Bass,
+            PerformanceLatencyCompensationMs = 23.5d,
             Tracks =
             [
                 new TrackRecord
@@ -41,7 +48,14 @@ public sealed class StudioStateStoreTests
                     Id = "track-original",
                     Title = "Original",
                     Path = originalPath,
-                    Variant = TrackVariant.Original
+                    Variant = TrackVariant.Original,
+                    Tempo = new TempoSettings(
+                        127.5d,
+                        0.375d,
+                        4,
+                        MetronomeEnabled: true,
+                        MetronomeVolume: 0.42d,
+                        AnalysisConfidence: 0.81d)
                 },
                 new TrackRecord
                 {
@@ -58,8 +72,29 @@ public sealed class StudioStateStoreTests
             Name = "Práctica diaria",
             IsIncludedInMix = true
         };
-        playlist.TrackIds.Add("track-drumless");
-        playlist.TrackIds.Add("track-original");
+        playlist.Items.Add(new PlaylistItem
+        {
+            Id = "item-local",
+            Kind = PlaylistItemKind.LocalTrack,
+            TrackId = "track-drumless",
+            Title = "Sin batería"
+        });
+        playlist.Items.Add(new PlaylistItem
+        {
+            Id = "item-youtube",
+            Kind = PlaylistItemKind.YouTube,
+            YouTubeVideoId = "video12345",
+            YouTubeUrl = "https://www.youtube.com/watch?v=video12345",
+            Title = "Backing track",
+            ThumbnailUrl = "https://i.ytimg.com/vi/video12345/hqdefault.jpg"
+        });
+        playlist.Items.Add(new PlaylistItem
+        {
+            Id = "item-original",
+            Kind = PlaylistItemKind.LocalTrack,
+            TrackId = "track-original",
+            Title = "Original"
+        });
         state.Playlists.Add(playlist);
 
         store.Save(state);
@@ -73,6 +108,11 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual("asio:Focusrite USB ASIO", loaded.AudioInputOutputDeviceId);
         Assert.AreEqual(1, loaded.AudioInputChannelIndex);
         Assert.AreEqual(0.73d, loaded.AudioInputGain);
+        Assert.AreEqual(2, loaded.AudioInputMonitors.Count);
+        Assert.AreEqual(0, loaded.AudioInputMonitors[0].ChannelIndex);
+        Assert.AreEqual(0.55f, loaded.AudioInputMonitors[0].Gain);
+        Assert.AreEqual(1, loaded.AudioInputMonitors[1].ChannelIndex);
+        Assert.AreEqual(0.73f, loaded.AudioInputMonitors[1].Gain);
         Assert.AreEqual("MPK mini 3", loaded.MidiDeviceName);
         Assert.AreEqual(2, loaded.MidiDeviceIndex.GetValueOrDefault());
         Assert.IsTrue(loaded.AutoConnectMidi);
@@ -85,18 +125,30 @@ public sealed class StudioStateStoreTests
             loaded.VstModulePath);
         Assert.AreEqual("0123456789ABCDEF0123456789ABCDEF", loaded.VstClassId);
         Assert.IsTrue(loaded.AutoLoadVst);
+        Assert.AreEqual(StemSelection.Drums | StemSelection.Bass, loaded.StemSelection);
+        Assert.AreEqual(23.5d, loaded.PerformanceLatencyCompensationMs);
         Assert.AreEqual(2, loaded.Tracks.Count);
         Assert.AreEqual("track-original", loaded.Tracks[0].Id);
         Assert.AreEqual(originalPath, loaded.Tracks[0].Path);
         Assert.AreEqual(TrackVariant.Original, loaded.Tracks[0].Variant);
+        var loadedTempo = loaded.Tracks[0].Tempo;
+        Assert.IsNotNull(loadedTempo);
+        Assert.AreEqual(127.5d, loadedTempo.Bpm);
+        Assert.AreEqual(0.375d, loadedTempo.FirstBeatSeconds);
+        Assert.IsTrue(loadedTempo.MetronomeEnabled);
+        Assert.AreEqual(0.42d, loadedTempo.MetronomeVolume);
         Assert.AreEqual("track-drumless", loaded.Tracks[1].Id);
         Assert.AreEqual(TrackVariant.GeneratedDrumless, loaded.Tracks[1].Variant);
         Assert.AreEqual(1, loaded.Playlists.Count);
         Assert.AreEqual("Práctica diaria", loaded.Playlists[0].Name);
         Assert.IsTrue(loaded.Playlists[0].IsIncludedInMix);
-        CollectionAssert.AreEqual(
-            new[] { "track-drumless", "track-original" },
-            loaded.Playlists[0].TrackIds.ToArray());
+        Assert.AreEqual(3, loaded.Playlists[0].Items.Count);
+        Assert.AreEqual(PlaylistItemKind.LocalTrack, loaded.Playlists[0].Items[0].Kind);
+        Assert.AreEqual("track-drumless", loaded.Playlists[0].Items[0].TrackId);
+        Assert.AreEqual(PlaylistItemKind.YouTube, loaded.Playlists[0].Items[1].Kind);
+        Assert.AreEqual("video12345", loaded.Playlists[0].Items[1].YouTubeVideoId);
+        Assert.AreEqual("Backing track", loaded.Playlists[0].Items[1].Title);
+        Assert.AreEqual("track-original", loaded.Playlists[0].Items[2].TrackId);
     }
 
     [TestMethod]
@@ -146,6 +198,7 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(0.8d, loaded.AudioInputGain);
         Assert.IsNull(loaded.AudioInputChannelIndex);
         Assert.IsFalse(loaded.AutoLoadVst);
+        Assert.AreEqual(StemSelection.Drumless, loaded.StemSelection);
         Assert.IsFalse(loaded.Playlists.Any(playlist => playlist.IsIncludedInMix));
     }
 
@@ -177,6 +230,8 @@ public sealed class StudioStateStoreTests
         Assert.IsNull(store.LastLoadWarning);
         Assert.AreEqual(1, loaded.Playlists.Count);
         Assert.IsFalse(loaded.Playlists[0].IsIncludedInMix);
-        CollectionAssert.AreEqual(new[] { "track-a" }, loaded.Playlists[0].TrackIds.ToArray());
+        Assert.AreEqual(1, loaded.Playlists[0].Items.Count);
+        Assert.AreEqual(PlaylistItemKind.LocalTrack, loaded.Playlists[0].Items[0].Kind);
+        Assert.AreEqual("track-a", loaded.Playlists[0].Items[0].TrackId);
     }
 }

@@ -1,5 +1,6 @@
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Midi;
+using DrumPracticeStudio.Services;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
@@ -12,10 +13,14 @@ public sealed class AudioEngine : IDisposable
     private readonly DrumSamplerProvider _drums;
     private readonly TrackTransportProvider _track;
     private readonly MixingSampleProvider _mixer;
+    private readonly OutputRecordingSink _recording = new();
     private readonly Vst3InstrumentHost _vstInstrument = new();
     private DirectVst3Instrument? _directVstInstrument;
     private AudioOutputSession? _output;
     private bool _externalInstrumentSelected;
+    private string? _recordingDestination;
+    private string? _recordingJobRoot;
+    private string? _isolatedVstRecordingPath;
 
     public AudioEngine()
     {
@@ -44,6 +49,8 @@ public sealed class AudioEngine : IDisposable
     public string? OutputDeviceId { get; private set; }
     public string? OutputDeviceName { get; private set; }
     public int? AudioInputChannelIndex => _output?.InputChannelIndex;
+    public IReadOnlyList<AudioInputMonitorSetting> AudioInputMonitorSettings =>
+        _output?.InputMonitorSettings ?? [];
     public bool IsAudioInputMonitoringActive => _output?.IsInputMonitoringActive == true;
     public IReadOnlyList<AudioInputChannelItem> AudioInputChannels =>
         _output?.InputChannels ?? [];
@@ -51,6 +58,7 @@ public sealed class AudioEngine : IDisposable
     public TrackPlaybackState PlaybackState => _track.PlaybackState;
     public TimeSpan TrackPosition => _track.Position;
     public TimeSpan TrackDuration => _track.Duration;
+    public int OutputLatencyMilliseconds => _output?.LatencyMilliseconds ?? 0;
     public bool IsVstInstrumentLoaded => _directVstInstrument is not null || _vstInstrument.IsLoaded;
     public bool IsDirectVstInstrumentLoaded => _directVstInstrument is not null;
     public bool IsExternalInstrumentSelected => _externalInstrumentSelected;
@@ -131,8 +139,18 @@ public sealed class AudioEngine : IDisposable
     public void SelectOutputDevice(
         string? deviceId,
         int? inputChannelIndex = null,
-        float inputGain = 0.8f)
+        float inputGain = 0.8f) =>
+        SelectOutputDevice(
+            deviceId,
+            inputChannelIndex is { } channel
+                ? [new AudioInputMonitorSetting(channel, inputGain)]
+                : []);
+
+    public void SelectOutputDevice(
+        string? deviceId,
+        IReadOnlyList<AudioInputMonitorSetting> inputMonitorSettings)
     {
+        ArgumentNullException.ThrowIfNull(inputMonitorSettings);
         if (AudioOutputDeviceId.TryGetAsioDriverName(deviceId, out _) &&
             _vstInstrument.IsLoaded)
         {
@@ -156,8 +174,8 @@ public sealed class AudioEngine : IDisposable
             replacement = AudioOutputSession.Open(
                 _mixer,
                 deviceId,
-                inputChannelIndex,
-                inputGain);
+                inputMonitorSettings,
+                _recording);
             if (!exclusiveTransition)
             {
                 previous?.Stop();
@@ -187,12 +205,19 @@ public sealed class AudioEngine : IDisposable
         previous?.Dispose();
     }
 
-    public void SelectAudioInputChannel(int? channelIndex, float gain)
+    public void SelectAudioInputChannel(int? channelIndex, float gain) =>
+        SelectAudioInputChannels(
+            channelIndex is { } channel
+                ? [new AudioInputMonitorSetting(channel, gain)]
+                : []);
+
+    public void SelectAudioInputChannels(IReadOnlyList<AudioInputMonitorSetting> settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         if (_output is not { IsAsio: true } previous ||
             string.IsNullOrWhiteSpace(OutputDeviceId))
         {
-            if (channelIndex is null)
+            if (settings.Count == 0)
             {
                 return;
             }
@@ -200,10 +225,19 @@ public sealed class AudioEngine : IDisposable
                 "La monitorización directa necesita una salida ASIO seleccionada.");
         }
 
-        var previousChannel = previous.InputChannelIndex;
-        if (previousChannel == channelIndex)
+        var normalized = settings
+            .GroupBy(setting => setting.ChannelIndex)
+            .Select(group => group.Last())
+            .OrderBy(setting => setting.ChannelIndex)
+            .ToArray();
+        var previousSettings = previous.InputMonitorSettings;
+        if (previousSettings.Select(setting => setting.ChannelIndex)
+            .SequenceEqual(normalized.Select(setting => setting.ChannelIndex)))
         {
-            previous.SetInputGain(gain);
+            foreach (var setting in normalized)
+            {
+                previous.SetInputGain(setting.ChannelIndex, setting.Gain);
+            }
             return;
         }
 
@@ -214,7 +248,7 @@ public sealed class AudioEngine : IDisposable
         AudioOutputSession? replacement = null;
         try
         {
-            replacement = AudioOutputSession.Open(_mixer, deviceId, channelIndex, gain);
+            replacement = AudioOutputSession.Open(_mixer, deviceId, normalized, _recording);
             replacement.Play();
         }
         catch
@@ -222,7 +256,7 @@ public sealed class AudioEngine : IDisposable
             replacement?.Dispose();
             try
             {
-                replacement = AudioOutputSession.Open(_mixer, deviceId, previousChannel, gain);
+                replacement = AudioOutputSession.Open(_mixer, deviceId, previousSettings, _recording);
                 replacement.Play();
                 _output = replacement;
                 Status = DescribeOutput(
@@ -247,6 +281,9 @@ public sealed class AudioEngine : IDisposable
 
     public void SetAudioInputGain(float gain) =>
         _output?.SetInputGain(gain);
+
+    public void SetAudioInputGain(int channelIndex, float gain) =>
+        _output?.SetInputGain(channelIndex, gain);
 
     public async Task LoadVstInstrumentAsync(
         Vst3InstrumentItem instrument,
@@ -356,18 +393,135 @@ public sealed class AudioEngine : IDisposable
     public void UnloadTrack() => _track.Unload();
     public long SeekTrack(TimeSpan position) => _track.Seek(position);
     public void SetTrackVolume(float volume) => _track.SetVolume(volume);
+    public void ConfigureMetronome(TempoSettings? settings) =>
+        _track.ConfigureMetronome(settings);
     public bool TryDequeueTrackEnded(out TrackEndedNotification notification) =>
         _track.TryDequeueTrackEnded(out notification);
+    public bool IsRecording => _recording.IsRecording;
+    public string? LastRecordingWarning { get; private set; }
+    public async Task StartRecordingAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        if (IsRecording)
+        {
+            throw new InvalidOperationException("Ya hay una grabación en curso.");
+        }
+
+        var destination = Path.GetFullPath(path);
+        LastRecordingWarning = null;
+        var format = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, 2);
+        if (!_vstInstrument.IsLoaded)
+        {
+            _recording.Start(destination, format);
+            _recordingDestination = destination;
+            return;
+        }
+
+        var jobRoot = Path.Combine(AppPaths.RecordingWork, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(jobRoot);
+        var mainPath = Path.Combine(jobRoot, "main.wav");
+        var vstPath = Path.Combine(jobRoot, "isolated-vst.wav");
+        try
+        {
+            await _vstInstrument.StartRecordingAsync(vstPath, cancellationToken);
+            _recording.Start(mainPath, format);
+            _recordingDestination = destination;
+            _recordingJobRoot = jobRoot;
+            _isolatedVstRecordingPath = vstPath;
+        }
+        catch
+        {
+            try
+            {
+                await _vstInstrument.StopRecordingAsync(cancellationToken);
+            }
+            catch
+            {
+            }
+            TryDeleteRecordingJob(jobRoot);
+            throw;
+        }
+    }
+
+    public async Task<string?> StopRecordingAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var mainPath = await _recording.StopAsync();
+        var destination = _recordingDestination;
+        var jobRoot = _recordingJobRoot;
+        var vstPath = _isolatedVstRecordingPath;
+        _recordingDestination = null;
+        _recordingJobRoot = null;
+        _isolatedVstRecordingPath = null;
+        if (mainPath is null || destination is null)
+        {
+            return null;
+        }
+
+        if (vstPath is null)
+        {
+            return mainPath;
+        }
+
+        try
+        {
+            await _vstInstrument.StopRecordingAsync(cancellationToken);
+            await AudioFileMixService.MixAsync(
+                [mainPath, vstPath],
+                destination,
+                cancellationToken);
+            return destination;
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            InvalidDataException or
+            InvalidOperationException or
+            TimeoutException)
+        {
+            File.Copy(mainPath, destination, overwrite: false);
+            LastRecordingWarning =
+                $"El VST3 aislado no pudo incorporarse ({exception.Message}); " +
+                "se conservó la pista y el resto del mezclador.";
+            return destination;
+        }
+        finally
+        {
+            if (jobRoot is not null)
+            {
+                TryDeleteRecordingJob(jobRoot);
+            }
+        }
+    }
 
     public void Dispose()
     {
         UnloadVstInstrument();
         _output?.Dispose();
         _track.Dispose();
+        _recording.Dispose();
     }
 
     private void OnDirectVstEditorClosed(object? sender, EventArgs e) =>
         VstEditorClosed?.Invoke(this, EventArgs.Empty);
+
+    private static void TryDeleteRecordingJob(string jobRoot)
+    {
+        try
+        {
+            var root = Path.GetFullPath(AppPaths.RecordingWork)
+                .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var job = Path.GetFullPath(jobRoot)
+                .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (job.StartsWith(root, StringComparison.OrdinalIgnoreCase) && Directory.Exists(jobRoot))
+            {
+                Directory.Delete(jobRoot, recursive: true);
+            }
+        }
+        catch
+        {
+        }
+    }
 
     private static string DescribeOutput(AudioOutputSession output, string engine)
     {
@@ -376,8 +530,11 @@ public sealed class AudioEngine : IDisposable
             var buffer = output.BufferFrames is { } frames
                 ? $" · búfer {frames} muestras"
                 : string.Empty;
-            var input = output.InputChannelIndex is { } channel
-                ? $" · entrada {channel + 1} monitorizada" +
+            var input = output.InputMonitorSettings.Count > 0
+                ? $" · {output.InputMonitorSettings.Count} " +
+                  (output.InputMonitorSettings.Count == 1
+                      ? "entrada monitorizada"
+                      : "entradas monitorizadas") +
                   (output.InputLatencyMilliseconds is { } inputLatency
                       ? $" · {inputLatency + output.LatencyMilliseconds} ms ida y vuelta"
                       : string.Empty)

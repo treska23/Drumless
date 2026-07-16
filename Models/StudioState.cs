@@ -10,6 +10,30 @@ public enum PlaybackMode
     Shuffle
 }
 
+public enum PlaylistItemKind
+{
+    LocalTrack,
+    YouTube
+}
+
+public sealed class PlaylistItem
+{
+    public required string Id { get; init; }
+    public required PlaylistItemKind Kind { get; init; }
+    public string? TrackId { get; init; }
+    public string? YouTubeVideoId { get; init; }
+    public string? YouTubeUrl { get; init; }
+    public required string Title { get; init; }
+    public string? ThumbnailUrl { get; init; }
+
+    public string MediaKey => Kind switch
+    {
+        PlaylistItemKind.LocalTrack => $"local:{TrackId}",
+        PlaylistItemKind.YouTube => $"youtube:{YouTubeVideoId}",
+        _ => Id
+    };
+}
+
 public sealed class StudioState
 {
     public string OutputFolder { get; set; } = string.Empty;
@@ -17,6 +41,7 @@ public sealed class StudioState
     public string? AudioInputOutputDeviceId { get; set; }
     public int? AudioInputChannelIndex { get; set; }
     public double AudioInputGain { get; set; } = 0.8d;
+    public List<AudioInputMonitorSetting> AudioInputMonitors { get; set; } = [];
     public string? MidiDeviceName { get; set; }
     public int? MidiDeviceIndex { get; set; }
     public bool AutoConnectMidi { get; set; } = true;
@@ -27,6 +52,8 @@ public sealed class StudioState
     public string? VstModulePath { get; set; }
     public string? VstClassId { get; set; }
     public bool AutoLoadVst { get; set; }
+    public StemSelection StemSelection { get; set; } = StemSelection.Drumless;
+    public double PerformanceLatencyCompensationMs { get; set; }
     public List<TrackRecord> Tracks { get; set; } = [];
     public List<Playlist> Playlists { get; set; } = [];
     public string? SelectedPlaylistId { get; set; }
@@ -40,6 +67,7 @@ public sealed class TrackRecord
     public required string Title { get; init; }
     public required string Path { get; init; }
     public required TrackVariant Variant { get; init; }
+    public TempoSettings? Tempo { get; init; }
 }
 
 public sealed class Playlist : ObservableObject
@@ -61,5 +89,5 @@ public sealed class Playlist : ObservableObject
         set => SetProperty(ref _isIncludedInMix, value);
     }
 
-    public ObservableCollection<string> TrackIds { get; } = [];
+    public ObservableCollection<PlaylistItem> Items { get; } = [];
 }

@@ -7,6 +7,24 @@ namespace DrumPracticeStudio.Tests;
 public sealed class TrackLibraryServiceTests
 {
     [TestMethod]
+    public void RegisterRecording_PersistsAsAPlayableLibraryTake()
+    {
+        using var temporary = new TemporaryDirectory();
+        var path = temporary.Combine("take.wav");
+        File.WriteAllBytes(path, [1, 2, 3, 4]);
+        var library = new TrackLibraryService();
+
+        var registered = library.RegisterRecording(path, "Toma uno");
+        var restored = new TrackLibraryService(library.Snapshot());
+
+        Assert.AreEqual(TrackVariant.Recording, registered.Variant);
+        Assert.IsTrue(restored.TryGetById(registered.Id, out var loaded));
+        Assert.AreEqual("Toma uno", loaded.Title);
+        Assert.AreEqual(TrackVariant.Recording, loaded.Variant);
+        Assert.IsTrue(loaded.IsAvailable);
+    }
+
+    [TestMethod]
     public void ScanFolder_AddsSupportedFilesRecursivelyAndDeduplicates()
     {
         using var temporary = new TemporaryDirectory();

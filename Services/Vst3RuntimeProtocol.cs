@@ -99,7 +99,7 @@ internal static class Vst3RuntimeProtocol
                     runtime.CurrentProgram,
                     AudioStatus: runtime.AudioStatus)));
 
-            await RunCommandLoopAsync(reader, runtime).ConfigureAwait(false);
+            await RunCommandLoopAsync(reader, writer, runtime).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -134,7 +134,10 @@ internal static class Vst3RuntimeProtocol
         }
     }
 
-    private static Task RunCommandLoopAsync(StreamReader reader, Vst3Runtime runtime)
+    private static Task RunCommandLoopAsync(
+        StreamReader reader,
+        StreamWriter writer,
+        Vst3Runtime runtime)
     {
         var completion = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -162,6 +165,13 @@ internal static class Vst3RuntimeProtocol
                     else
                     {
                         ExecuteCommand(runtime, command);
+                    }
+
+                    if (command.Type is "StartRecording" or "StopRecording")
+                    {
+                        TrySendNotification(
+                            writer,
+                            new Vst3RuntimeNotification(command.Type + "Completed"));
                     }
 
                     if (!IsRealtimeMidi(command))
@@ -231,6 +241,12 @@ internal static class Vst3RuntimeProtocol
             case "SavePreset":
                 runtime.SavePreset(command.Text);
                 break;
+            case "StartRecording":
+                runtime.StartRecording(command.Text);
+                break;
+            case "StopRecording":
+                runtime.StopRecording();
+                break;
         }
     }
 
@@ -282,6 +298,7 @@ internal static class Vst3RuntimeProtocol
         private readonly Vst3Module _module;
         private readonly Vst3PluginView? _view;
         private readonly ISampleProvider _provider;
+        private readonly OutputRecordingSink _recording;
         private AudioOutputSession _output;
         private Vst3EditorWindow? _editor;
 
@@ -291,6 +308,7 @@ internal static class Vst3RuntimeProtocol
             Vst3PluginView? view,
             ISampleProvider provider,
             AudioOutputSession output,
+            OutputRecordingSink recording,
             string displayName)
         {
             _module = module;
@@ -298,6 +316,7 @@ internal static class Vst3RuntimeProtocol
             _view = view;
             _provider = provider;
             _output = output;
+            _recording = recording;
             DisplayName = displayName;
         }
 
@@ -343,6 +362,7 @@ internal static class Vst3RuntimeProtocol
             Vst3Plugin? plugin = null;
             Vst3PluginView? view = null;
             AudioOutputSession? output = null;
+            OutputRecordingSink? recording = null;
             try
             {
                 module = Vst3Module.Load(configuration.ModulePath);
@@ -374,13 +394,26 @@ internal static class Vst3RuntimeProtocol
                 }
 
                 view = plugin.CreateView();
-                output = AudioOutputSession.Open(provider, configuration.OutputDeviceId);
+                recording = new OutputRecordingSink();
+                output = AudioOutputSession.Open(
+                    provider,
+                    configuration.OutputDeviceId,
+                    [],
+                    recording);
                 output.Play();
-                return new Vst3Runtime(module, plugin, view, provider, output, configuration.Name);
+                return new Vst3Runtime(
+                    module,
+                    plugin,
+                    view,
+                    provider,
+                    output,
+                    recording,
+                    configuration.Name);
             }
             catch
             {
                 output?.Dispose();
+                recording?.Dispose();
                 view?.Dispose();
                 plugin?.Dispose();
                 module?.Dispose();
@@ -430,7 +463,7 @@ internal static class Vst3RuntimeProtocol
 
         public void SetOutput(string? deviceId)
         {
-            var replacement = AudioOutputSession.Open(_provider, deviceId);
+            var replacement = AudioOutputSession.Open(_provider, deviceId, [], _recording);
             var previous = _output;
             previous.Stop();
             try
@@ -487,6 +520,18 @@ internal static class Vst3RuntimeProtocol
             Plugin.SavePreset(path);
         }
 
+        public void StartRecording(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException("La ruta de grabación VST3 está vacía.", nameof(path));
+            }
+            _recording.Start(path, _provider.WaveFormat);
+        }
+
+        public void StopRecording() =>
+            _recording.StopAsync().GetAwaiter().GetResult();
+
         public void Dispose()
         {
             CloseEditor();
@@ -499,6 +544,7 @@ internal static class Vst3RuntimeProtocol
                 // El plugin puede estar cerrándose después de un fallo nativo.
             }
             _output.Dispose();
+            _recording.Dispose();
             _view?.Dispose();
             Plugin.Dispose();
             _module.Dispose();

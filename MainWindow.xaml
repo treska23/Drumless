@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
         Title="Drum Practice Studio"
         Width="1420"
@@ -155,6 +156,35 @@
                                 </Grid>
                             </Border>
 
+                            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,20" Background="#171C25">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="GRABAR LA MEZCLA FINAL" Foreground="{StaticResource Accent}"
+                                                   FontSize="10" FontWeight="Bold" />
+                                        <TextBlock Text="{Binding RecordingStatus}" Margin="0,7,18,0"
+                                                   Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <Button Style="{StaticResource PrimaryButton}" Content="● Grabar"
+                                                IsEnabled="{Binding CanStartOutputRecording}"
+                                                Command="{Binding StartOutputRecordingCommand}"
+                                                AutomationProperties.AutomationId="StartOutputRecordingButton" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="■ Terminar"
+                                                Margin="8,0,0,0" IsEnabled="{Binding CanStopOutputRecording}"
+                                                Command="{Binding StopOutputRecordingCommand}"
+                                                AutomationProperties.AutomationId="StopOutputRecordingButton" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="▶ Última toma"
+                                                Margin="8,0,0,0" IsEnabled="{Binding HasLastRecording}"
+                                                Command="{Binding PlayLastRecordingCommand}"
+                                                AutomationProperties.AutomationId="PlayLastRecordingButton" />
+                                    </WrapPanel>
+                                </Grid>
+                            </Border>
+
                             <Grid Margin="0,0,0,12">
                                 <StackPanel>
                                     <TextBlock Text="Pads del kit" FontSize="20" FontWeight="SemiBold" />
@@ -242,6 +272,67 @@
                                     <Slider Minimum="0" Maximum="1" Value="{Binding TrackVolume}" Margin="0,10,0,2" />
                                     <TextBlock Text="La batería mantiene su nivel independiente."
                                                TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardStyle}" Margin="0,16,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="CLAQUETA POR PISTA" Foreground="{StaticResource Accent}"
+                                               FontSize="10" FontWeight="Bold" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Analizar tempo de esta pista"
+                                            Margin="0,10,0,8" IsEnabled="{Binding CanAnalyzeTempo}"
+                                            Command="{Binding AnalyzeTempoCommand}"
+                                            AutomationProperties.AutomationId="AnalyzeTempoButton" />
+                                    <Grid Margin="0,2,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="10" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="BPM" Foreground="{StaticResource TextSecondary}" FontSize="10" />
+                                            <TextBox Text="{Binding TempoBpm, UpdateSourceTrigger=LostFocus}"
+                                                     AutomationProperties.AutomationId="TempoBpmTextBox" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="PRIMER PULSO (s)" Foreground="{StaticResource TextSecondary}" FontSize="10" />
+                                            <TextBox Text="{Binding TempoFirstBeatSeconds, UpdateSourceTrigger=LostFocus}"
+                                                     AutomationProperties.AutomationId="TempoFirstBeatTextBox" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <CheckBox Content="Activar claqueta sincronizada" Margin="0,10,0,5"
+                                              IsChecked="{Binding MetronomeEnabled}"
+                                              AutomationProperties.AutomationId="MetronomeEnabledCheckBox" />
+                                    <TextBlock Text="VOLUMEN DE CLAQUETA" Foreground="{StaticResource TextSecondary}" FontSize="10" />
+                                    <Slider Minimum="0" Maximum="1" Value="{Binding MetronomeVolume}"
+                                            AutomationProperties.AutomationId="MetronomeVolumeSlider" />
+                                    <TextBlock Text="{Binding TempoStatus}" Foreground="{StaticResource TextSecondary}"
+                                               TextWrapping="Wrap" FontSize="11" Margin="0,7,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardStyle}" Margin="0,16,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="PRECISIÓN DE BATERÍA MIDI" Foreground="{StaticResource Accent}"
+                                               FontSize="10" FontWeight="Bold" />
+                                    <TextBlock Text="Compensa la latencia total antes de puntuar. La rejilla usa semicorcheas."
+                                               Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
+                                               FontSize="11" Margin="0,7,0,7" />
+                                    <TextBlock Text="COMPENSACIÓN (ms)" Foreground="{StaticResource TextSecondary}" FontSize="10" />
+                                    <TextBox Text="{Binding PerformanceLatencyCompensationMs, UpdateSourceTrigger=LostFocus}"
+                                             AutomationProperties.AutomationId="PerformanceLatencyTextBox" />
+                                    <WrapPanel Margin="0,9,0,0">
+                                        <Button Style="{StaticResource PrimaryButton}" Content="Iniciar evaluación"
+                                                IsEnabled="{Binding HasTempo}"
+                                                Command="{Binding StartPerformanceEvaluationCommand}"
+                                                AutomationProperties.AutomationId="StartPerformanceButton" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="Finalizar"
+                                                Margin="8,0,0,0"
+                                                Command="{Binding FinishPerformanceEvaluationCommand}"
+                                                AutomationProperties.AutomationId="FinishPerformanceButton" />
+                                    </WrapPanel>
+                                    <TextBlock Text="{Binding PerformanceResultText}" TextWrapping="Wrap"
+                                               Margin="0,9,0,0" Foreground="{StaticResource TextSecondary}" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -400,6 +491,10 @@
 
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16">
                             <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
@@ -409,17 +504,43 @@
                                     <TextBlock Text="{Binding CurrentTrackTitle}" FontSize="21" FontWeight="SemiBold" Margin="0,7,0,3" />
                                     <TextBlock Text="{Binding CurrentTrackSubtitle}" Foreground="{StaticResource TextSecondary}" />
                                 </StackPanel>
-                                <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Crear versión sin batería"
+                                <Button Grid.Column="1" Style="{StaticResource PrimaryButton}" Content="Crear mezcla de stems"
                                         Command="{Binding CreateDrumlessCommand}" IsEnabled="{Binding CanCreateDrumless}"
-                                        VerticalAlignment="Center" />
+                                        VerticalAlignment="Center"
+                                        AutomationProperties.AutomationId="CreateStemMixButton" />
+                                <Border Grid.Row="1" Grid.ColumnSpan="2" BorderBrush="{StaticResource Stroke}"
+                                        BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,14,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="CONSERVAR EN EL ARCHIVO FINAL"
+                                                   Foreground="{StaticResource TextSecondary}" FontSize="10"
+                                                   FontWeight="Bold" />
+                                        <WrapPanel Margin="0,8,0,0">
+                                            <CheckBox Content="Batería" IsChecked="{Binding KeepDrums}"
+                                                      Margin="0,0,18,6" AutomationProperties.AutomationId="KeepDrumsCheckBox" />
+                                            <CheckBox Content="Bajo" IsChecked="{Binding KeepBass}"
+                                                      Margin="0,0,18,6" AutomationProperties.AutomationId="KeepBassCheckBox" />
+                                            <CheckBox Content="Voz" IsChecked="{Binding KeepVocals}"
+                                                      Margin="0,0,18,6" AutomationProperties.AutomationId="KeepVocalsCheckBox" />
+                                            <CheckBox Content="Guitarras, teclados y otros" IsChecked="{Binding KeepOther}"
+                                                      Margin="0,0,0,6" AutomationProperties.AutomationId="KeepOtherCheckBox" />
+                                        </WrapPanel>
+                                        <TextBlock Text="{Binding StemSelectionSummary}" Foreground="{StaticResource Accent}"
+                                                   FontWeight="SemiBold" Margin="0,3,0,0" />
+                                        <TextBlock Text="Demucs separa cuatro grupos. ‘Otros’ incluye normalmente guitarras, teclados y el resto de instrumentos."
+                                                   Foreground="{StaticResource TextSecondary}" FontSize="11"
+                                                   TextWrapping="Wrap" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Border>
                             </Grid>
                         </Border>
 
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="3*" />
-                                <ColumnDefinition Width="18" />
                                 <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="3.5*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="1.8*" />
                             </Grid.ColumnDefinitions>
 
                             <Border Grid.Column="0" Style="{StaticResource CardStyle}" Padding="16">
@@ -430,8 +551,11 @@
                                             <TextBlock Text="{Binding LibrarySummary}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
                                         </StackPanel>
                                     </Grid>
-                                    <ListBox ItemsSource="{Binding Tracks}" SelectedItem="{Binding SelectedLibraryTrack}"
-                                             MaxHeight="430" AutomationProperties.AutomationId="TrackLibraryList">
+                                    <ListBox x:Name="TrackLibraryList" ItemsSource="{Binding Tracks}"
+                                             SelectedItem="{Binding SelectedLibraryTrack}"
+                                             MaxHeight="430" AutomationProperties.AutomationId="TrackLibraryList"
+                                             PreviewMouseLeftButtonDown="OnLibraryDragStart"
+                                             PreviewMouseMove="OnLibraryPreviewMouseMove">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="4,10">
@@ -469,10 +593,86 @@
                             </Border>
 
                             <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="16">
+                                <DockPanel LastChildFill="True">
+                                    <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="PLAYLIST EN EDICIÓN" Foreground="{StaticResource Accent}"
+                                                       FontSize="10" FontWeight="Bold" />
+                                            <TextBlock Text="{Binding SelectedPlaylist.Name, TargetNullValue=Sin playlist}"
+                                                       FontSize="24" FontWeight="SemiBold" Margin="0,4,0,2" />
+                                            <TextBlock Text="{Binding SelectedPlaylistSummary}"
+                                                       Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                            <TextBlock Text="Arrastra aquí desde la biblioteca o reordena las filas. Doble clic reproduce."
+                                                       Foreground="{StaticResource TextSecondary}" FontSize="11"
+                                                       TextWrapping="Wrap" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Style="{StaticResource SecondaryButton}"
+                                                Content="Abrir ventana flotante" Padding="10,7"
+                                                Click="OnOpenPlaylistWindowClick"
+                                                AutomationProperties.AutomationId="OpenPlaylistWindowButton" />
+                                    </Grid>
+                                    <ListBox x:Name="PlaylistItemList" ItemsSource="{Binding PlaylistItems}"
+                                             SelectedItem="{Binding SelectedPlaylistItem}"
+                                             MinHeight="390" MaxHeight="540"
+                                             AutomationProperties.AutomationId="PlaylistTrackList"
+                                             AllowDrop="True" PreviewMouseLeftButtonDown="OnPlaylistDragStart"
+                                             PreviewMouseMove="OnPlaylistPreviewMouseMove" Drop="OnPlaylistDrop"
+                                             MouseDoubleClick="OnPlaylistItemDoubleClick">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="6,10">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="36" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="☰" Foreground="{StaticResource TextSecondary}"
+                                                                   FontSize="18" VerticalAlignment="Center" />
+                                                        <StackPanel Grid.Column="1" Margin="5,0,12,0">
+                                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                                                                       FontSize="15" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding AvailabilityLabel}" Foreground="{StaticResource Accent}"
+                                                                       FontSize="11" Margin="0,2,0,0" />
+                                                            <TextBlock Text="{Binding Detail}" Foreground="{StaticResource TextSecondary}"
+                                                                       FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                        <WrapPanel Grid.Column="2" VerticalAlignment="Center">
+                                                            <Button Style="{StaticResource PrimaryButton}" Content="▶" Padding="9,6" Margin="0,0,5,0"
+                                                                    Command="{Binding DataContext.PlayPlaylistItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" IsEnabled="{Binding IsAvailable}" />
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="↑" Padding="8,6" Margin="0,0,5,0"
+                                                                    Command="{Binding DataContext.MovePlaylistItemUpCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" AutomationProperties.AutomationId="MovePlaylistTrackUpButton" />
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="↓" Padding="8,6" Margin="0,0,5,0"
+                                                                    Command="{Binding DataContext.MovePlaylistItemDownCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" AutomationProperties.AutomationId="MovePlaylistTrackDownButton" />
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="Quitar" Padding="8,6"
+                                                                    Command="{Binding DataContext.RemovePlaylistItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" AutomationProperties.AutomationId="RemovePlaylistTrackButton" />
+                                                        </WrapPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </DockPanel>
+                            </Border>
+
+                            <Border Grid.Column="4" Style="{StaticResource CardStyle}" Padding="16">
                                 <StackPanel>
                                     <TextBlock Text="Playlists" FontSize="20" FontWeight="SemiBold" />
+                                    <TextBlock Text="EDITAR UNA PLAYLIST" Foreground="{StaticResource TextSecondary}"
+                                               FontSize="10" FontWeight="Bold" Margin="0,10,0,0" />
+                                    <TextBlock Text="El selector elige dónde añadir y ordenar pistas. No cambia la mezcla por sí solo."
+                                               Foreground="{StaticResource TextSecondary}" FontSize="11"
+                                               TextWrapping="Wrap" Margin="0,4,0,0" />
                                     <ComboBox ItemsSource="{Binding Playlists}" SelectedItem="{Binding SelectedPlaylist}"
-                                              Margin="0,10,0,8"
+                                              Margin="0,7,0,8"
                                               AutomationProperties.AutomationId="PlaylistSelector">
                                         <ComboBox.ItemTemplate>
                                             <DataTemplate>
@@ -495,8 +695,17 @@
                                                 AutomationProperties.AutomationId="DeletePlaylistButton" />
                                     </WrapPanel>
 
-                                    <TextBlock Text="MEZCLA DE PLAYLISTS" Foreground="{StaticResource TextSecondary}"
+                                    <Button Style="{StaticResource PrimaryButton}" Content="Añadir pista seleccionada"
+                                            Padding="11,7" Margin="0,0,0,8" HorizontalAlignment="Stretch"
+                                            Command="{Binding AddTrackToPlaylistCommand}"
+                                            CommandParameter="{Binding SelectedLibraryTrack}"
+                                            AutomationProperties.AutomationId="AddSelectedTrackToPlaylistButton" />
+
+                                    <TextBlock Text="COLA DE REPRODUCCIÓN" Foreground="{StaticResource TextSecondary}"
                                                FontSize="10" FontWeight="Bold" />
+                                    <TextBlock Text="Marca una o varias playlists para combinarlas. Si no marcas ninguna, se usa la playlist que editas."
+                                               Foreground="{StaticResource TextSecondary}" FontSize="11"
+                                               TextWrapping="Wrap" Margin="0,4,0,0" />
                                     <TextBlock Text="{Binding MixedPlaylistSummary}" Foreground="{StaticResource TextSecondary}"
                                                FontSize="11" TextWrapping="Wrap" Margin="0,5,0,7" />
                                     <Border BorderBrush="{StaticResource Stroke}" BorderThickness="1" CornerRadius="6"
@@ -515,10 +724,16 @@
                                             </ItemsControl>
                                         </ScrollViewer>
                                     </Border>
-                                    <Button Style="{StaticResource SecondaryButton}" Content="Limpiar mezcla"
-                                            Padding="10,6" Margin="0,0,0,12" HorizontalAlignment="Left"
-                                            Command="{Binding ClearPlaylistMixCommand}"
-                                            AutomationProperties.AutomationId="ClearPlaylistMixButton" />
+                                    <WrapPanel Margin="0,0,0,12">
+                                        <Button Style="{StaticResource PrimaryButton}" Content="Reproducir cola"
+                                                Padding="10,6" Margin="0,0,6,0"
+                                                Command="{Binding PlayPlaylistQueueCommand}"
+                                                AutomationProperties.AutomationId="PlayPlaylistQueueButton" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="Limpiar mezcla"
+                                                Padding="10,6"
+                                                Command="{Binding ClearPlaylistMixCommand}"
+                                                AutomationProperties.AutomationId="ClearPlaylistMixButton" />
+                                    </WrapPanel>
 
                                     <TextBlock Text="MODO DE REPRODUCCIÓN" Foreground="{StaticResource TextSecondary}" FontSize="10" FontWeight="Bold" />
                                     <ComboBox ItemsSource="{Binding PlaybackModeOptions}" SelectedItem="{Binding SelectedPlaybackMode}"
@@ -531,36 +746,6 @@
                                         </ComboBox.ItemTemplate>
                                     </ComboBox>
 
-                                    <ListBox ItemsSource="{Binding PlaylistTracks}" SelectedItem="{Binding SelectedPlaylistTrack}"
-                                             MaxHeight="300" AutomationProperties.AutomationId="PlaylistTrackList">
-                                        <ListBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="2,8">
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock Text="{Binding AvailabilityLabel}" Foreground="{StaticResource TextSecondary}" FontSize="10" Margin="0,2,0,6" />
-                                                        <WrapPanel>
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="Cargar" Padding="8,5" Margin="0,0,5,0"
-                                                                    Command="{Binding DataContext.LoadTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}" IsEnabled="{Binding IsAvailable}" />
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="↑" Padding="8,5" Margin="0,0,5,0"
-                                                                    Command="{Binding DataContext.MovePlaylistTrackUpCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}"
-                                                                    AutomationProperties.AutomationId="MovePlaylistTrackUpButton" />
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="↓" Padding="8,5" Margin="0,0,5,0"
-                                                                    Command="{Binding DataContext.MovePlaylistTrackDownCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}"
-                                                                    AutomationProperties.AutomationId="MovePlaylistTrackDownButton" />
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="Quitar" Padding="8,5"
-                                                                    Command="{Binding DataContext.RemovePlaylistTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}"
-                                                                    AutomationProperties.AutomationId="RemovePlaylistTrackButton" />
-                                                        </WrapPanel>
-                                                    </StackPanel>
-                                                </Border>
-                                            </DataTemplate>
-                                        </ListBox.ItemTemplate>
-                                    </ListBox>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -596,7 +781,7 @@
                     <!-- YOUTUBE -->
                     <StackPanel Visibility="{Binding IsYouTubePage, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock Text="YouTube" FontSize="30" FontWeight="SemiBold" />
-                        <TextBlock Text="Búsqueda y reproducción intactas dentro de la aplicación."
+                        <TextBlock Text="Busca, selecciona y reproduce vídeos en el sitio oficial sin salir del estudio."
                                    Foreground="{StaticResource TextSecondary}" Margin="0,5,0,22" />
                         <Border Style="{StaticResource CardStyle}">
                             <StackPanel>
@@ -605,17 +790,52 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBox Text="rock drumless backing track" IsEnabled="False" />
-                                    <Button Grid.Column="1" Style="{StaticResource PrimaryButton}" Content="Buscar" Margin="10,0,0,0" IsEnabled="False" />
+                                    <TextBox x:Name="YouTubeSearchBox" Text="rock drumless backing track"
+                                             KeyDown="OnYouTubeSearchKeyDown"
+                                             AutomationProperties.AutomationId="YouTubeSearchTextBox" />
+                                    <Button Grid.Column="1" Style="{StaticResource PrimaryButton}" Content="Buscar"
+                                            Margin="10,0,0,0" Click="OnYouTubeSearchClick"
+                                            AutomationProperties.AutomationId="YouTubeSearchButton" />
+                                    <Button Grid.Column="2" Style="{StaticResource SecondaryButton}"
+                                            Content="+ Añadir vídeo actual a playlist" Margin="8,0,0,0"
+                                            Click="OnAddCurrentYouTubeToPlaylistClick"
+                                            AutomationProperties.AutomationId="AddYouTubeToPlaylistButton" />
                                 </Grid>
-                                <Border Background="#121D1A" BorderBrush="#29483E" BorderThickness="1" CornerRadius="10" Padding="15" Margin="0,18,0,0">
-                                    <StackPanel>
-                                        <TextBlock Text="Siguiente integración" Foreground="{StaticResource Success}" FontWeight="SemiBold" />
-                                        <TextBlock Text="Se conectará la Data API mediante un backend sin guardar claves en la aplicación y el reproductor oficial dentro de WebView2. El audio de YouTube nunca llegará al separador."
-                                                   Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,5,0,0" />
-                                    </StackPanel>
+                                <Grid Margin="0,10,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Style="{StaticResource SecondaryButton}" Content="← Atrás" Padding="9,5"
+                                            Click="OnYouTubeBackClick" AutomationProperties.AutomationId="YouTubeBackButton" />
+                                    <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Content="Adelante →"
+                                            Padding="9,5" Margin="6,0,0,0" Click="OnYouTubeForwardClick" />
+                                    <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="Inicio"
+                                            Padding="9,5" Margin="6,0,0,0" Click="OnYouTubeHomeClick" />
+                                    <Button Grid.Column="3" Style="{StaticResource SecondaryButton}" Content="Recargar"
+                                            Padding="9,5" Margin="6,0,0,0" Click="OnYouTubeReloadClick" />
+                                    <TextBlock x:Name="YouTubeStatusText" Grid.Column="4"
+                                               Text="Preparando YouTube…" Foreground="{StaticResource TextSecondary}"
+                                               VerticalAlignment="Center" HorizontalAlignment="Right"
+                                               TextTrimming="CharacterEllipsis" Margin="12,0,0,0" />
+                                </Grid>
+                                <Border Background="#080B12" BorderBrush="{StaticResource Stroke}"
+                                        BorderThickness="1" CornerRadius="8" ClipToBounds="True">
+                                    <wv2:WebView2 x:Name="YouTubeWebView" Height="570"
+                                                  Loaded="OnYouTubeWebViewLoaded"
+                                                  NavigationStarting="OnYouTubeNavigationStarting"
+                                                  NavigationCompleted="OnYouTubeNavigationCompleted"
+                                                  CoreWebView2InitializationCompleted="OnYouTubeInitializationCompleted"
+                                                  AutomationProperties.AutomationId="YouTubeWebView" />
                                 </Border>
+                                <TextBlock Text="YouTube se reproduce en su web oficial. Las pistas locales y Demucs permanecen separados del vídeo."
+                                           Foreground="{StaticResource TextSecondary}" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,9,0,0" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -655,38 +875,38 @@
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,18">
                             <StackPanel>
                                 <TextBlock Text="Entrada de audio" FontSize="16" FontWeight="SemiBold" />
-                                <TextBlock Text="Escucha el sonido nativo del módulo de batería conectado a un jack de la interfaz. La señal entra y sale dentro del mismo callback ASIO."
+                                <TextBlock Text="Activa simultáneamente todas las entradas que necesites: guitarra, micrófono, módulo de batería u otras fuentes. Cada entrada tiene su propio nivel."
                                            Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
                                            Margin="0,5,0,0" />
-                                <ComboBox ItemsSource="{Binding AudioInputChannels}"
-                                          SelectedItem="{Binding SelectedAudioInputChannel}"
-                                          IsEnabled="{Binding IsAudioInputAvailable}"
-                                          Margin="0,10,0,0"
-                                          HorizontalAlignment="Stretch"
-                                          AutomationProperties.AutomationId="AudioInputCombo">
-                                    <ComboBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding DisplayName}" Foreground="#151820" />
-                                        </DataTemplate>
-                                    </ComboBox.ItemTemplate>
-                                </ComboBox>
-                                <Grid Margin="0,12,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Nivel" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                    <Slider Grid.Column="1" Minimum="0" Maximum="1.5"
-                                            Value="{Binding AudioInputGain, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                            IsEnabled="{Binding IsAudioInputAvailable}"
-                                            TickFrequency="0.05" Margin="12,0"
-                                            AutomationProperties.AutomationId="AudioInputGainSlider" />
-                                    <TextBlock Grid.Column="2" Text="{Binding AudioInputGainLabel}"
-                                               VerticalAlignment="Center" Foreground="{StaticResource Accent}"
-                                               FontWeight="SemiBold" />
-                                </Grid>
-                                <TextBlock Text="La monitorización permanece desactivada hasta que elijas una entrada, para evitar acoples de micrófono."
+                                <Border BorderBrush="{StaticResource Stroke}" BorderThickness="1" CornerRadius="8"
+                                        Margin="0,10,0,0" Padding="10">
+                                    <ItemsControl ItemsSource="{Binding AudioInputMonitors}"
+                                                  IsEnabled="{Binding IsAudioInputAvailable}"
+                                                  AutomationProperties.AutomationId="AudioInputMonitorList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,5">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="250" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="55" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <CheckBox IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              Content="{Binding DisplayName}" VerticalAlignment="Center"
+                                                              AutomationProperties.Name="{Binding DisplayName}" />
+                                                    <Slider Grid.Column="1" Minimum="0" Maximum="1.5"
+                                                            Value="{Binding Gain, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                            IsEnabled="{Binding IsEnabled}"
+                                                            TickFrequency="0.05" Margin="12,0" />
+                                                    <TextBlock Grid.Column="2" Text="{Binding GainLabel}"
+                                                               VerticalAlignment="Center" HorizontalAlignment="Right"
+                                                               Foreground="{StaticResource Accent}" FontWeight="SemiBold" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Border>
+                                <TextBlock Text="Las entradas permanecen desactivadas hasta que las marques, para evitar acoples de micrófono."
                                            Foreground="{StaticResource TextSecondary}" FontSize="11"
                                            TextWrapping="Wrap" Margin="0,7,0,0" />
                                 <TextBlock Text="{Binding AudioInputStatus}" Foreground="{StaticResource TextSecondary}"

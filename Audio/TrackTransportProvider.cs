@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using DrumPracticeStudio.Models;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
@@ -19,6 +20,7 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
     private double _durationSeconds;
     private double _positionSeconds;
     private float _volume = 0.8f;
+    private TempoSettings? _metronome;
     private bool _disposed;
 
     public TrackTransportProvider(
@@ -258,6 +260,15 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
         }
     }
 
+    public void ConfigureMetronome(TempoSettings? settings)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            _metronome = settings is null ? null : TempoSettings.Normalize(settings);
+        }
+    }
+
     public bool TryDequeueTrackEnded(out TrackEndedNotification notification) =>
         _endedNotifications.TryDequeue(out notification);
 
@@ -271,13 +282,21 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
                 return buffer.Length;
             }
 
+            var startSeconds = _positionSeconds;
             var read = _session.Provider.Read(buffer);
             for (var index = 0; index < read; index++)
             {
                 buffer[index] *= _volume;
             }
 
-            _positionSeconds = _session.Reader.CurrentTime.TotalSeconds;
+            if (_metronome is { MetronomeEnabled: true } metronome)
+            {
+                MixMetronome(buffer[..read], startSeconds, metronome);
+            }
+
+            _positionSeconds = Math.Min(
+                _durationSeconds,
+                startSeconds + read / (double)WaveFormat.Channels / WaveFormat.SampleRate);
             if (read < buffer.Length)
             {
                 buffer[read..].Clear();
@@ -336,6 +355,44 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
     {
         while (_endedNotifications.TryDequeue(out _))
         {
+        }
+    }
+
+    private void MixMetronome(
+        Span<float> buffer,
+        double startSeconds,
+        TempoSettings settings)
+    {
+        var channels = WaveFormat.Channels;
+        var frames = buffer.Length / channels;
+        var beatSeconds = 60d / settings.Bpm;
+        const double clickDuration = 0.028d;
+        for (var frame = 0; frame < frames; frame++)
+        {
+            var time = startSeconds + frame / (double)WaveFormat.SampleRate;
+            var relative = time - settings.FirstBeatSeconds;
+            if (relative < 0d)
+            {
+                continue;
+            }
+
+            var beatIndex = (long)Math.Floor(relative / beatSeconds + 1e-9d);
+            var phase = relative - beatIndex * beatSeconds;
+            if (phase < 0d || phase >= clickDuration)
+            {
+                continue;
+            }
+
+            var accent = beatIndex % settings.BeatsPerBar == 0;
+            var frequency = accent ? 1_760d : 1_180d;
+            var envelope = Math.Exp(-phase * 105d);
+            var click = Math.Sin(2d * Math.PI * frequency * phase) * envelope *
+                        settings.MetronomeVolume * (accent ? 0.9d : 0.65d);
+            for (var channel = 0; channel < channels; channel++)
+            {
+                var index = frame * channels + channel;
+                buffer[index] = (float)Math.Clamp(buffer[index] + click, -1d, 1d);
+            }
         }
     }
 

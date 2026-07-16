@@ -159,10 +159,35 @@ public sealed class StudioStateStore
                 ? null
                 : document.VstClassId,
             AutoLoadVst = document.AutoLoadVst ?? false,
+            StemSelection = document.StemSelection is { } stemSelection &&
+                            stemSelection != StemSelection.None &&
+                            (stemSelection & ~StemSelection.All) == 0
+                ? stemSelection
+                : StemSelection.Drumless,
+            PerformanceLatencyCompensationMs = Math.Clamp(
+                document.PerformanceLatencyCompensationMs ?? 0d,
+                -500d,
+                500d),
             PlaybackMode = Enum.IsDefined(document.PlaybackMode)
                 ? document.PlaybackMode
                 : PlaybackMode.Sequential
         };
+
+        foreach (var monitor in document.AudioInputMonitors ?? [])
+        {
+            if (monitor.ChannelIndex is >= 0)
+            {
+                state.AudioInputMonitors.Add(new AudioInputMonitorSetting(
+                    monitor.ChannelIndex.Value,
+                    (float)Math.Clamp(monitor.Gain ?? 0.8d, 0d, 1.5d)));
+            }
+        }
+        if (state.AudioInputMonitors.Count == 0 && state.AudioInputChannelIndex is { } legacyChannel)
+        {
+            state.AudioInputMonitors.Add(new AudioInputMonitorSetting(
+                legacyChannel,
+                (float)state.AudioInputGain));
+        }
 
         foreach (var track in document.Tracks ?? [])
         {
@@ -179,7 +204,8 @@ public sealed class StudioStateStore
                 Id = track.Id,
                 Title = track.Title,
                 Path = track.Path,
-                Variant = track.Variant
+                Variant = track.Variant,
+                Tempo = TryCreateTempo(track.Tempo)
             });
         }
 
@@ -196,11 +222,35 @@ public sealed class StudioStateStore
                 Name = playlist.Name,
                 IsIncludedInMix = playlist.IsIncludedInMix ?? false
             };
-            foreach (var trackId in playlist.TrackIds ?? [])
+            foreach (var item in playlist.Items ?? [])
             {
-                if (!string.IsNullOrWhiteSpace(trackId))
+                if (!TryCreatePlaylistItem(item, out var modelItem))
                 {
-                    model.TrackIds.Add(trackId);
+                    continue;
+                }
+
+                model.Items.Add(modelItem);
+            }
+
+            // Migración transparente de estados anteriores, que solo guardaban IDs locales.
+            if (model.Items.Count == 0)
+            {
+                foreach (var trackId in playlist.TrackIds ?? [])
+                {
+                    if (string.IsNullOrWhiteSpace(trackId))
+                    {
+                        continue;
+                    }
+
+                    var title = state.Tracks.FirstOrDefault(track => track.Id == trackId)?.Title ??
+                                "Pista local";
+                    model.Items.Add(new PlaylistItem
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Kind = PlaylistItemKind.LocalTrack,
+                        TrackId = trackId,
+                        Title = title
+                    });
                 }
             }
 
@@ -221,6 +271,11 @@ public sealed class StudioStateStore
         AudioInputOutputDeviceId = state.AudioInputOutputDeviceId,
         AudioInputChannelIndex = state.AudioInputChannelIndex,
         AudioInputGain = Math.Clamp(state.AudioInputGain, 0d, 1.5d),
+        AudioInputMonitors = state.AudioInputMonitors.Select(monitor => new AudioInputMonitorDto
+        {
+            ChannelIndex = monitor.ChannelIndex,
+            Gain = Math.Clamp(monitor.Gain, 0f, 1.5f)
+        }).ToList(),
         MidiDeviceName = state.MidiDeviceName,
         MidiDeviceIndex = state.MidiDeviceIndex,
         AutoConnectMidi = state.AutoConnectMidi,
@@ -231,22 +286,95 @@ public sealed class StudioStateStore
         VstModulePath = state.VstModulePath,
         VstClassId = state.VstClassId,
         AutoLoadVst = state.AutoLoadVst,
+        StemSelection = state.StemSelection,
+        PerformanceLatencyCompensationMs = Math.Clamp(
+            state.PerformanceLatencyCompensationMs,
+            -500d,
+            500d),
         PlaybackMode = state.PlaybackMode,
         Tracks = state.Tracks.Select(track => new TrackDto
         {
             Id = track.Id,
             Title = track.Title,
             Path = track.Path,
-            Variant = track.Variant
+            Variant = track.Variant,
+            Tempo = track.Tempo is null ? null : new TempoDto
+            {
+                Bpm = track.Tempo.Bpm,
+                FirstBeatSeconds = track.Tempo.FirstBeatSeconds,
+                BeatsPerBar = track.Tempo.BeatsPerBar,
+                MetronomeEnabled = track.Tempo.MetronomeEnabled,
+                MetronomeVolume = track.Tempo.MetronomeVolume,
+                AnalysisConfidence = track.Tempo.AnalysisConfidence
+            }
         }).ToList(),
         Playlists = state.Playlists.Select(playlist => new PlaylistDto
         {
             Id = playlist.Id,
             Name = playlist.Name,
             IsIncludedInMix = playlist.IsIncludedInMix,
-            TrackIds = playlist.TrackIds.ToList()
+            Items = playlist.Items.Select(item => new PlaylistItemDto
+            {
+                Id = item.Id,
+                Kind = item.Kind,
+                TrackId = item.TrackId,
+                YouTubeVideoId = item.YouTubeVideoId,
+                YouTubeUrl = item.YouTubeUrl,
+                Title = item.Title,
+                ThumbnailUrl = item.ThumbnailUrl
+            }).ToList()
         }).ToList()
     };
+
+    private static bool TryCreatePlaylistItem(PlaylistItemDto dto, out PlaylistItem item)
+    {
+        item = null!;
+        if (string.IsNullOrWhiteSpace(dto.Id) || string.IsNullOrWhiteSpace(dto.Title) ||
+            !Enum.IsDefined(dto.Kind))
+        {
+            return false;
+        }
+
+        if (dto.Kind == PlaylistItemKind.LocalTrack && string.IsNullOrWhiteSpace(dto.TrackId))
+        {
+            return false;
+        }
+        if (dto.Kind == PlaylistItemKind.YouTube &&
+            (string.IsNullOrWhiteSpace(dto.YouTubeVideoId) ||
+             string.IsNullOrWhiteSpace(dto.YouTubeUrl)))
+        {
+            return false;
+        }
+
+        item = new PlaylistItem
+        {
+            Id = dto.Id,
+            Kind = dto.Kind,
+            TrackId = dto.TrackId,
+            YouTubeVideoId = dto.YouTubeVideoId,
+            YouTubeUrl = dto.YouTubeUrl,
+            Title = dto.Title,
+            ThumbnailUrl = dto.ThumbnailUrl
+        };
+        return true;
+    }
+
+    private static TempoSettings? TryCreateTempo(TempoDto? tempo)
+    {
+        if (tempo?.Bpm is not (>= 40d and <= 240d) ||
+            tempo.FirstBeatSeconds is not >= 0d)
+        {
+            return null;
+        }
+
+        return TempoSettings.Normalize(new TempoSettings(
+            tempo.Bpm.Value,
+            tempo.FirstBeatSeconds.Value,
+            tempo.BeatsPerBar ?? 4,
+            tempo.MetronomeEnabled ?? false,
+            tempo.MetronomeVolume ?? 0.55d,
+            tempo.AnalysisConfidence ?? 0d));
+    }
 
     private static bool IsRecoverableLoadFailure(Exception exception) => exception is
         IOException or
@@ -262,6 +390,7 @@ public sealed class StudioStateStore
         public string? AudioInputOutputDeviceId { get; set; }
         public int? AudioInputChannelIndex { get; set; }
         public double? AudioInputGain { get; set; }
+        public List<AudioInputMonitorDto>? AudioInputMonitors { get; set; }
         public string? MidiDeviceName { get; set; }
         public int? MidiDeviceIndex { get; set; }
         public bool? AutoConnectMidi { get; set; }
@@ -272,6 +401,8 @@ public sealed class StudioStateStore
         public string? VstModulePath { get; set; }
         public string? VstClassId { get; set; }
         public bool? AutoLoadVst { get; set; }
+        public StemSelection? StemSelection { get; set; }
+        public double? PerformanceLatencyCompensationMs { get; set; }
         public List<TrackDto>? Tracks { get; set; }
         public List<PlaylistDto>? Playlists { get; set; }
         public string? SelectedPlaylistId { get; set; }
@@ -284,6 +415,17 @@ public sealed class StudioStateStore
         public string? Title { get; set; }
         public string? Path { get; set; }
         public TrackVariant Variant { get; set; }
+        public TempoDto? Tempo { get; set; }
+    }
+
+    private sealed class TempoDto
+    {
+        public double? Bpm { get; set; }
+        public double? FirstBeatSeconds { get; set; }
+        public int? BeatsPerBar { get; set; }
+        public bool? MetronomeEnabled { get; set; }
+        public double? MetronomeVolume { get; set; }
+        public double? AnalysisConfidence { get; set; }
     }
 
     private sealed class PlaylistDto
@@ -291,6 +433,24 @@ public sealed class StudioStateStore
         public string? Id { get; set; }
         public string? Name { get; set; }
         public bool? IsIncludedInMix { get; set; }
+        public List<PlaylistItemDto>? Items { get; set; }
         public List<string>? TrackIds { get; set; }
+    }
+
+    private sealed class PlaylistItemDto
+    {
+        public string? Id { get; set; }
+        public PlaylistItemKind Kind { get; set; }
+        public string? TrackId { get; set; }
+        public string? YouTubeVideoId { get; set; }
+        public string? YouTubeUrl { get; set; }
+        public string? Title { get; set; }
+        public string? ThumbnailUrl { get; set; }
+    }
+
+    private sealed class AudioInputMonitorDto
+    {
+        public int? ChannelIndex { get; set; }
+        public double? Gain { get; set; }
     }
 }

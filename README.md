@@ -14,11 +14,20 @@ Prototipo Windows de una aplicación de práctica para batería electrónica y t
   Groove Agent, MIDI dinámico y apertura de la interfaz nativa del instrumento.
 - Biblioteca persistente de pistas locales, con detección de archivos desaparecidos.
 - Carpeta configurable para las pistas generadas y escaneo automático al iniciar.
-- Varias playlists persistentes, mezcla de varias playlists en una sola cola, edición
-  de orden y modos de reproducción individual, secuencial y aleatorio sin repeticiones.
+- Varias playlists persistentes con audio local y vídeos de YouTube en la misma cola,
+  edición central, arrastre, ventana flotante y modos individual, secuencial y aleatorio
+  sin repeticiones.
 - Transporte con anterior, siguiente y avance automático al final natural de una pista.
-- Separación local opcional con Demucs; nunca modifica ni mueve el archivo original.
-- Módulo separado para YouTube.
+- Separación local opcional con Demucs y mezcla libre de batería, bajo, voz y otros;
+  nunca modifica ni mueve el archivo original.
+- Monitorización simultánea de todas las entradas de una interfaz ASIO, cada una con
+  activación y ganancia independientes.
+- Grabación WAV de la mezcla final de pistas locales: pista, batería interna/VST y
+  todas las entradas ASIO monitorizadas; cada toma se registra en la biblioteca.
+- Análisis de tempo bajo demanda, BPM y primer pulso editables, claqueta ligada a la
+  posición exacta del transporte y evaluación temporal de golpes de batería MIDI.
+- Búsqueda y reproducción de YouTube dentro de la aplicación mediante el sitio oficial
+  integrado con WebView2, sin claves de API guardadas.
 
 ## Ejecutar
 
@@ -42,8 +51,8 @@ reproducción secuencial/aleatoria y las garantías de concurrencia del transpor
 
 ## Límites actuales
 
-YouTube todavía no realiza búsquedas. La primera separación solicita instalar Demucs,
-Python y PyTorch en el directorio privado de datos de la aplicación. Los kits de
+La primera separación solicita instalar Demucs, Python y PyTorch en el directorio
+privado de datos de la aplicación. Los kits de
 demostración usan sonidos sintetizados al iniciar y el usuario puede sustituirlos por
 sus propios WAV. El alojamiento VST3 de NAudio 3 todavía es una función preview; un
 plugin defectuoso puede cerrar el proceso porque los instrumentos se cargan dentro de

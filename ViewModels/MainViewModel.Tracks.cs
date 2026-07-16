@@ -10,9 +10,12 @@ namespace DrumPracticeStudio.ViewModels;
 
 public sealed partial class MainViewModel
 {
+    public event EventHandler<YouTubePlaybackRequest>? YouTubePlaybackRequested;
+    public event EventHandler<YouTubeControlRequest>? YouTubeControlRequested;
     private readonly StudioStateStore _studioStateStore = new();
     private readonly TrackLibraryService _trackLibrary = new();
     private readonly PlaybackNavigator _playbackNavigator = new();
+    private readonly Dictionary<string, PlaylistItem> _playlistPlaybackItems = new(StringComparer.Ordinal);
     private CancellationTokenSource? _trackLoadCancellation;
     private long _trackLoadSequence;
     private long _activeLoadGeneration;
@@ -26,12 +29,14 @@ public sealed partial class MainViewModel
     private string _outputFolderPath = AppPaths.DerivedTracks;
     private LocalTrack? _selectedLibraryTrack;
     private Playlist? _selectedPlaylist;
-    private LocalTrack? _selectedPlaylistTrack;
+    private PlaylistItemViewModel? _selectedPlaylistItem;
+    private PlaylistItem? _currentYouTubeItem;
+    private bool _playlistQueueActive;
     private PlaybackModeOption? _selectedPlaybackMode;
     private string _playlistNameDraft = string.Empty;
 
     public ObservableCollection<Playlist> Playlists { get; }
-    public ObservableCollection<LocalTrack> PlaylistTracks { get; }
+    public ObservableCollection<PlaylistItemViewModel> PlaylistItems { get; }
     public ObservableCollection<PlaybackModeOption> PlaybackModeOptions { get; }
 
     public RelayCommand<LocalTrack> LoadTrackCommand { get; private set; } = null!;
@@ -41,10 +46,12 @@ public sealed partial class MainViewModel
     public RelayCommand RenamePlaylistCommand { get; private set; } = null!;
     public RelayCommand DeletePlaylistCommand { get; private set; } = null!;
     public RelayCommand ClearPlaylistMixCommand { get; private set; } = null!;
+    public RelayCommand PlayPlaylistQueueCommand { get; private set; } = null!;
     public RelayCommand<LocalTrack> AddTrackToPlaylistCommand { get; private set; } = null!;
-    public RelayCommand<LocalTrack> RemovePlaylistTrackCommand { get; private set; } = null!;
-    public RelayCommand<LocalTrack> MovePlaylistTrackUpCommand { get; private set; } = null!;
-    public RelayCommand<LocalTrack> MovePlaylistTrackDownCommand { get; private set; } = null!;
+    public RelayCommand<PlaylistItemViewModel> PlayPlaylistItemCommand { get; private set; } = null!;
+    public RelayCommand<PlaylistItemViewModel> RemovePlaylistItemCommand { get; private set; } = null!;
+    public RelayCommand<PlaylistItemViewModel> MovePlaylistItemUpCommand { get; private set; } = null!;
+    public RelayCommand<PlaylistItemViewModel> MovePlaylistItemDownCommand { get; private set; } = null!;
     public RelayCommand PreviousTrackCommand { get; private set; } = null!;
     public RelayCommand NextTrackCommand { get; private set; } = null!;
 
@@ -71,9 +78,10 @@ public sealed partial class MainViewModel
             }
 
             PlaylistNameDraft = value?.Name ?? string.Empty;
-            RebuildPlaylistTracks();
-            ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
+            RebuildPlaylistItems();
+            ResetPlaylistPlaybackQueue(_playbackNavigator.CurrentTrackId);
             OnPropertyChanged(nameof(MixedPlaylistSummary));
+            OnPropertyChanged(nameof(SelectedPlaylistSummary));
             if (!_isInitializingTrackWorkspace)
             {
                 SaveTrackWorkspace();
@@ -81,10 +89,10 @@ public sealed partial class MainViewModel
         }
     }
 
-    public LocalTrack? SelectedPlaylistTrack
+    public PlaylistItemViewModel? SelectedPlaylistItem
     {
-        get => _selectedPlaylistTrack;
-        set => SetProperty(ref _selectedPlaylistTrack, value);
+        get => _selectedPlaylistItem;
+        set => SetProperty(ref _selectedPlaylistItem, value);
     }
 
     public PlaybackModeOption? SelectedPlaybackMode
@@ -134,13 +142,33 @@ public sealed partial class MainViewModel
             }
 
             var trackCount = PlaylistMixService.BuildQueue(Playlists, SelectedPlaylist)
-                .Count(trackId =>
-                    _trackLibrary.TryGetById(trackId, out var track) && track.IsAvailable);
+                .Count(IsPlaylistItemAvailable);
             var playlistLabel = included.Length == 1
                 ? included[0].Name
                 : $"{included.Length} playlists";
             var trackLabel = trackCount == 1 ? "1 pista" : $"{trackCount} pistas";
             return $"{playlistLabel} · {trackLabel} en la cola";
+        }
+    }
+
+    public string SelectedPlaylistSummary
+    {
+        get
+        {
+            if (SelectedPlaylist is null)
+            {
+                return "Selecciona o crea una playlist";
+            }
+
+            var missing = SelectedPlaylist.Items.Count(item => !IsPlaylistItemAvailable(item));
+            var total = SelectedPlaylist.Items.Count;
+            var youtube = SelectedPlaylist.Items.Count(item => item.Kind == PlaylistItemKind.YouTube);
+            var totalLabel = total == 1 ? "1 elemento" : $"{total} elementos";
+            if (youtube > 0)
+            {
+                totalLabel += $" · {youtube} YouTube";
+            }
+            return missing == 0 ? totalLabel : $"{totalLabel} · {missing} sin archivo";
         }
     }
 
@@ -155,6 +183,8 @@ public sealed partial class MainViewModel
             _preferredAudioInputOutputDeviceId = state.AudioInputOutputDeviceId;
             _preferredAudioInputChannelIndex = state.AudioInputChannelIndex;
             _audioInputGain = Math.Clamp(state.AudioInputGain, 0d, 1.5d);
+            _preferredAudioInputMonitors.Clear();
+            _preferredAudioInputMonitors.AddRange(state.AudioInputMonitors);
             _preferredMidiDeviceName = state.MidiDeviceName;
             _preferredMidiDeviceIndex = state.MidiDeviceIndex;
             _autoConnectMidi = state.AutoConnectMidi;
@@ -165,7 +195,16 @@ public sealed partial class MainViewModel
             _preferredVstModulePath = state.VstModulePath;
             _preferredVstClassId = state.VstClassId;
             _autoLoadVst = state.AutoLoadVst;
+            _keepDrums = state.StemSelection.HasFlag(StemSelection.Drums);
+            _keepBass = state.StemSelection.HasFlag(StemSelection.Bass);
+            _keepVocals = state.StemSelection.HasFlag(StemSelection.Vocals);
+            _keepOther = state.StemSelection.HasFlag(StemSelection.Other);
+            _performanceLatencyCompensationMs = state.PerformanceLatencyCompensationMs;
             _trackLibrary.Load(state.Tracks);
+            _lastRecordingTrack = Tracks
+                .Where(track => track.Variant == TrackVariant.Recording && track.IsAvailable)
+                .OrderByDescending(track => File.GetLastWriteTimeUtc(track.Path))
+                .FirstOrDefault();
 
             foreach (var playlist in state.Playlists)
             {
@@ -211,7 +250,14 @@ public sealed partial class MainViewModel
         }
 
         RefreshLibraryPresentation();
-        ResetPlaylistPlaybackQueue(currentTrackId: null);
+        if (SelectedPlaylist is null && !Playlists.Any(playlist => playlist.IsIncludedInMix))
+        {
+            ResetLocalPlaybackQueue(currentTrackId: null);
+        }
+        else
+        {
+            ResetPlaylistPlaybackQueue(currentItemId: null);
+        }
         SaveTrackWorkspace(silent: true);
     }
 
@@ -230,10 +276,20 @@ public sealed partial class MainViewModel
         RenamePlaylistCommand = new RelayCommand(RenamePlaylist);
         DeletePlaylistCommand = new RelayCommand(DeletePlaylist);
         ClearPlaylistMixCommand = new RelayCommand(ClearPlaylistMix);
+        PlayPlaylistQueueCommand = new RelayCommand(() => _ = PlayPlaylistQueueAsync());
         AddTrackToPlaylistCommand = new RelayCommand<LocalTrack>(AddTrackToPlaylist);
-        RemovePlaylistTrackCommand = new RelayCommand<LocalTrack>(RemovePlaylistTrack);
-        MovePlaylistTrackUpCommand = new RelayCommand<LocalTrack>(MovePlaylistTrackUp);
-        MovePlaylistTrackDownCommand = new RelayCommand<LocalTrack>(MovePlaylistTrackDown);
+        PlayPlaylistItemCommand = new RelayCommand<PlaylistItemViewModel>(item =>
+        {
+            if (item is not null)
+            {
+                _ = PlayPlaylistItemAsync(item);
+            }
+        });
+        RemovePlaylistItemCommand = new RelayCommand<PlaylistItemViewModel>(RemovePlaylistItem);
+        MovePlaylistItemUpCommand = new RelayCommand<PlaylistItemViewModel>(item =>
+            MovePlaylistItem(item, moveUp: true));
+        MovePlaylistItemDownCommand = new RelayCommand<PlaylistItemViewModel>(item =>
+            MovePlaylistItem(item, moveUp: false));
         PreviousTrackCommand = new RelayCommand(() => _ = NavigatePlaylistAsync(previous: true));
         NextTrackCommand = new RelayCommand(() => _ = NavigatePlaylistAsync(previous: false));
     }
@@ -242,9 +298,14 @@ public sealed partial class MainViewModel
         LocalTrack track,
         bool autoPlay,
         bool resetNavigation,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? navigationId = null)
     {
         ArgumentNullException.ThrowIfNull(track);
+        if (_currentYouTubeItem is not null)
+        {
+            YouTubeControlRequested?.Invoke(this, new YouTubeControlRequest(YouTubeControlAction.Pause));
+        }
         var requestId = Interlocked.Increment(ref _trackLoadSequence);
         CancelPendingTrackLoad();
         _desiredTrackPlaying = false;
@@ -289,29 +350,28 @@ public sealed partial class MainViewModel
             }
 
             _activeLoadGeneration = loadGeneration;
+            _currentYouTubeItem = null;
             CurrentTrack = track;
             SelectedLibraryTrack = track;
-            if (SelectedPlaylist?.TrackIds.Contains(track.Id) == true)
+            var playlistSelection = PlaylistItems.FirstOrDefault(item =>
+                item.Kind == PlaylistItemKind.LocalTrack &&
+                string.Equals(item.Item.TrackId, track.Id, StringComparison.Ordinal));
+            if (playlistSelection is not null)
             {
-                SelectedPlaylistTrack = track;
+                SelectedPlaylistItem = playlistSelection;
             }
 
             if (resetNavigation)
             {
-                var preferredIds = GetPlaylistPlaybackIds();
-                if (preferredIds is null || !preferredIds.Contains(track.Id, StringComparer.Ordinal))
-                {
-                    preferredIds = Tracks
-                        .Where(candidate => candidate.IsAvailable)
-                        .Select(candidate => candidate.Id)
-                        .ToArray();
-                }
-
-                ResetPlaybackQueue(preferredIds, track.Id);
+                ResetLocalPlaybackQueue(track.Id);
             }
-            else if (!string.Equals(_playbackNavigator.CurrentTrackId, track.Id, StringComparison.Ordinal))
+            else if (navigationId is not null &&
+                     !string.Equals(
+                         _playbackNavigator.CurrentTrackId,
+                         navigationId,
+                         StringComparison.Ordinal))
             {
-                _playbackNavigator.Select(track.Id);
+                _playbackNavigator.Select(navigationId);
             }
 
             var shouldAutoPlay = autoPlay && !cancellation.IsCancellationRequested;
@@ -471,7 +531,7 @@ public sealed partial class MainViewModel
             _isUpdatingPlaylistMix = false;
         }
 
-        ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
+        ResetPlaylistPlaybackQueue(_playbackNavigator.CurrentTrackId);
         OnPropertyChanged(nameof(MixedPlaylistSummary));
         SaveTrackWorkspace();
         StatusMessage = SelectedPlaylist is null
@@ -483,67 +543,139 @@ public sealed partial class MainViewModel
     {
         if (track is null)
         {
+            StatusMessage = "Selecciona primero una pista de la biblioteca";
             return;
         }
-
         if (SelectedPlaylist is null)
         {
             StatusMessage = "Crea o selecciona una playlist primero";
             return;
         }
-
-        if (!PlaylistEditor.AddTrack(SelectedPlaylist, track.Id))
+        if (!PlaylistEditor.AddTrack(SelectedPlaylist, track))
         {
             StatusMessage = $"{track.Title} ya estaba en {SelectedPlaylist.Name}";
             return;
         }
 
-        RebuildPlaylistTracks();
-        ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
-        OnPropertyChanged(nameof(MixedPlaylistSummary));
-        SaveTrackWorkspace();
+        PlaylistChanged();
         StatusMessage = $"{track.Title} añadida a {SelectedPlaylist.Name}";
     }
 
-    private void RemovePlaylistTrack(LocalTrack? track)
+    public bool AddYouTubeToSelectedPlaylist(
+        string videoId,
+        string url,
+        string title,
+        string? thumbnailUrl = null)
     {
-        if (track is null || SelectedPlaylist is null ||
-            !PlaylistEditor.RemoveTrack(SelectedPlaylist, track.Id))
+        if (SelectedPlaylist is null)
         {
-            return;
+            StatusMessage = "Crea o selecciona una playlist antes de añadir el vídeo";
+            return false;
+        }
+        if (!PlaylistEditor.AddYouTube(
+                SelectedPlaylist,
+                videoId,
+                url,
+                title,
+                thumbnailUrl))
+        {
+            StatusMessage = $"{title} ya estaba en {SelectedPlaylist.Name}";
+            return false;
         }
 
-        RebuildPlaylistTracks();
-        ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
-        OnPropertyChanged(nameof(MixedPlaylistSummary));
-        SaveTrackWorkspace();
-        StatusMessage = $"{track.Title} quitada de la playlist · el archivo sigue intacto";
+        PlaylistChanged();
+        StatusMessage = $"Vídeo añadido a {SelectedPlaylist.Name}: {title}";
+        return true;
     }
 
-    private void MovePlaylistTrackUp(LocalTrack? track) => MovePlaylistTrack(track, moveUp: true);
-
-    private void MovePlaylistTrackDown(LocalTrack? track) => MovePlaylistTrack(track, moveUp: false);
-
-    private void MovePlaylistTrack(LocalTrack? track, bool moveUp)
+    private void RemovePlaylistItem(PlaylistItemViewModel? item)
     {
-        if (track is null || SelectedPlaylist is null)
+        if (item is null || SelectedPlaylist is null ||
+            !PlaylistEditor.RemoveItem(SelectedPlaylist, item.Id))
         {
             return;
         }
 
+        PlaylistChanged();
+        StatusMessage = $"{item.Title} quitado de la playlist · el origen sigue intacto";
+    }
+
+    private void MovePlaylistItem(PlaylistItemViewModel? item, bool moveUp)
+    {
+        if (item is null || SelectedPlaylist is null)
+        {
+            return;
+        }
         var moved = moveUp
-            ? PlaylistEditor.MoveUp(SelectedPlaylist, track.Id)
-            : PlaylistEditor.MoveDown(SelectedPlaylist, track.Id);
+            ? PlaylistEditor.MoveUp(SelectedPlaylist, item.Id)
+            : PlaylistEditor.MoveDown(SelectedPlaylist, item.Id);
         if (!moved)
         {
             return;
         }
 
-        RebuildPlaylistTracks();
-        SelectedPlaylistTrack = track;
-        ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
+        PlaylistChanged(item.Id);
+    }
+
+    public void AddTrackToSelectedPlaylist(LocalTrack track) => AddTrackToPlaylist(track);
+
+    public void MoveSelectedPlaylistItem(PlaylistItemViewModel item, int targetIndex)
+    {
+        if (SelectedPlaylist is null ||
+            !PlaylistEditor.MoveTo(SelectedPlaylist, item.Id, targetIndex))
+        {
+            return;
+        }
+
+        PlaylistChanged(item.Id);
+    }
+
+    public void PlayPlaylistItem(PlaylistItemViewModel item) =>
+        _ = PlayPlaylistItemAsync(item);
+
+    public void OpenYouTubePage() => Navigate("YouTube");
+
+    private void PlaylistChanged(string? selectedItemId = null)
+    {
+        RebuildPlaylistItems();
+        if (selectedItemId is not null)
+        {
+            SelectedPlaylistItem = PlaylistItems.FirstOrDefault(item => item.Id == selectedItemId);
+        }
+        ResetPlaylistPlaybackQueue(_playbackNavigator.CurrentTrackId);
         OnPropertyChanged(nameof(MixedPlaylistSummary));
+        OnPropertyChanged(nameof(SelectedPlaylistSummary));
         SaveTrackWorkspace();
+    }
+
+    private async Task PlayPlaylistQueueAsync()
+    {
+        CancelPendingTrackLoad();
+        _desiredTrackPlaying = false;
+        _activeRunGeneration = 0;
+        _audio.StopTrack();
+        ResetPlaylistPlaybackQueue(currentItemId: null);
+
+        var targetId = _playbackNavigator.NextManual();
+        if (targetId is null)
+        {
+            StatusMessage = "La cola no contiene pistas disponibles";
+            return;
+        }
+
+        await PlayNavigationTargetAsync(targetId, autoPlayLocal: true);
+    }
+
+    private async Task PlayPlaylistItemAsync(PlaylistItemViewModel item)
+    {
+        ResetPlaylistPlaybackQueue(item.Id);
+        if (!_playbackNavigator.Select(item.Id))
+        {
+            StatusMessage = $"{item.Title} no está disponible";
+            return;
+        }
+
+        await PlayNavigationTargetAsync(item.Id, autoPlayLocal: true);
     }
 
     private async Task NavigatePlaylistAsync(bool previous)
@@ -556,13 +688,13 @@ public sealed partial class MainViewModel
         var targetId = previous
             ? _playbackNavigator.Previous()
             : _playbackNavigator.NextManual();
-        if (targetId is null || !_trackLibrary.TryGetById(targetId, out var track))
+        if (targetId is null)
         {
             StatusMessage = previous ? "No hay una pista anterior" : "No hay una pista siguiente";
             return;
         }
 
-        await LoadAndSelectTrackAsync(track, autoPlay: true, resetNavigation: false);
+        await PlayNavigationTargetAsync(targetId, autoPlayLocal: true);
     }
 
     private void CancelPendingTrackLoad()
@@ -584,8 +716,10 @@ public sealed partial class MainViewModel
             return;
         }
 
+        FinishPerformanceEvaluation(naturalEnd: true);
+
         var nextId = _playbackNavigator.NextAutomatic();
-        if (nextId is null || !_trackLibrary.TryGetById(nextId, out var nextTrack))
+        if (nextId is null)
         {
             StatusMessage = SelectedPlaybackMode?.Mode == PlaybackMode.Single
                 ? "La pista ha terminado"
@@ -593,42 +727,143 @@ public sealed partial class MainViewModel
             return;
         }
 
-        await LoadAndSelectTrackAsync(nextTrack, autoPlay: true, resetNavigation: false);
+        await PlayNavigationTargetAsync(nextId, autoPlayLocal: true);
     }
 
-    private void RebuildPlaylistTracks()
+    public async Task HandleYouTubeEndedAsync(string videoId)
     {
-        var selectedId = SelectedPlaylistTrack?.Id;
-        PlaylistTracks.Clear();
-        if (SelectedPlaylist is not null)
+        if (_currentYouTubeItem?.YouTubeVideoId != videoId)
         {
-            foreach (var trackId in SelectedPlaylist.TrackIds)
+            return;
+        }
+
+        var nextId = _playbackNavigator.NextAutomatic();
+        if (nextId is null)
+        {
+            StatusMessage = SelectedPlaybackMode?.Mode == PlaybackMode.Single
+                ? "El vídeo ha terminado"
+                : "La cola de reproducción ha terminado";
+            return;
+        }
+
+        await PlayNavigationTargetAsync(nextId, autoPlayLocal: true);
+    }
+
+    private async Task PlayNavigationTargetAsync(string navigationId, bool autoPlayLocal)
+    {
+        if (_playlistQueueActive &&
+            _playlistPlaybackItems.TryGetValue(navigationId, out var playlistItem))
+        {
+            if (playlistItem.Kind == PlaylistItemKind.YouTube &&
+                playlistItem.YouTubeUrl is not null)
             {
-                if (_trackLibrary.TryGetById(trackId, out var track))
+                if (IsRecordingOutput)
                 {
-                    PlaylistTracks.Add(track);
+                    await StopOutputRecordingAsync();
                 }
+                CancelPendingTrackLoad();
+                _desiredTrackPlaying = false;
+                _activeLoadGeneration = 0;
+                _activeRunGeneration = 0;
+                _audio.UnloadTrack();
+                CurrentTrack = null;
+                _currentYouTubeItem = playlistItem;
+                OnPropertyChanged(nameof(CanStartOutputRecording));
+                OnPropertyChanged(nameof(CurrentTrackTitle));
+                OnPropertyChanged(nameof(CurrentTrackSubtitle));
+                OnPropertyChanged(nameof(HasTrack));
+                YouTubePlaybackRequested?.Invoke(
+                    this,
+                    new YouTubePlaybackRequest(
+                        new Uri(playlistItem.YouTubeUrl),
+                        playlistItem.YouTubeVideoId!,
+                        playlistItem.Title));
+                StatusMessage = $"Reproduciendo YouTube: {playlistItem.Title}";
+                return;
+            }
+
+            if (playlistItem.TrackId is not null &&
+                _trackLibrary.TryGetById(playlistItem.TrackId, out var localTrack) &&
+                localTrack.IsAvailable)
+            {
+                await LoadAndSelectTrackAsync(
+                    localTrack,
+                    autoPlayLocal,
+                    resetNavigation: false,
+                    navigationId: navigationId);
+                return;
             }
         }
 
-        SelectedPlaylistTrack = selectedId is null
-            ? null
-            : PlaylistTracks.FirstOrDefault(track => track.Id == selectedId);
-    }
-
-    private IReadOnlyList<string>? GetPlaylistPlaybackIds()
-    {
-        var hasExplicitMix = Playlists.Any(playlist => playlist.IsIncludedInMix);
-        if (!hasExplicitMix && SelectedPlaylist is null)
+        if (_trackLibrary.TryGetById(navigationId, out var libraryTrack) && libraryTrack.IsAvailable)
         {
-            return null;
+            await LoadAndSelectTrackAsync(
+                libraryTrack,
+                autoPlayLocal,
+                resetNavigation: false,
+                navigationId: navigationId);
+            return;
         }
 
-        return PlaylistMixService.BuildQueue(Playlists, SelectedPlaylist);
+        StatusMessage = "El elemento de la cola ya no está disponible";
     }
 
-    private void ResetPlaylistPlaybackQueue(string? currentTrackId) =>
-        ResetPlaybackQueue(GetPlaylistPlaybackIds(), currentTrackId);
+    private void RebuildPlaylistItems()
+    {
+        var selectedId = SelectedPlaylistItem?.Id;
+        PlaylistItems.Clear();
+        if (SelectedPlaylist is not null)
+        {
+            foreach (var item in SelectedPlaylist.Items)
+            {
+                LocalTrack? track = null;
+                if (item.TrackId is not null)
+                {
+                    _trackLibrary.TryGetById(item.TrackId, out track!);
+                }
+                PlaylistItems.Add(new PlaylistItemViewModel { Item = item, LocalTrack = track });
+            }
+        }
+
+        SelectedPlaylistItem = selectedId is null
+            ? null
+            : PlaylistItems.FirstOrDefault(item => item.Id == selectedId);
+    }
+
+    private bool IsPlaylistItemAvailable(PlaylistItem item) => item.Kind switch
+    {
+        PlaylistItemKind.YouTube => YouTubeNavigationService.IsYouTubeUri(
+            Uri.TryCreate(item.YouTubeUrl, UriKind.Absolute, out var uri) ? uri : null),
+        PlaylistItemKind.LocalTrack => item.TrackId is not null &&
+                                       _trackLibrary.TryGetById(item.TrackId, out var track) &&
+                                       track.IsAvailable,
+        _ => false
+    };
+
+    private void ResetPlaylistPlaybackQueue(string? currentItemId)
+    {
+        var items = PlaylistMixService.BuildQueue(Playlists, SelectedPlaylist)
+            .Where(IsPlaylistItemAvailable)
+            .ToArray();
+        _playlistPlaybackItems.Clear();
+        foreach (var item in items)
+        {
+            _playlistPlaybackItems[item.Id] = item;
+        }
+        _playlistQueueActive = true;
+        _playbackNavigator.SetQueue(items.Select(item => item.Id), currentItemId);
+    }
+
+    private void ResetLocalPlaybackQueue(string? currentTrackId)
+    {
+        _playlistPlaybackItems.Clear();
+        _playlistQueueActive = false;
+        var playableIds = Tracks
+            .Where(track => track.IsAvailable)
+            .Select(track => track.Id)
+            .ToArray();
+        _playbackNavigator.SetQueue(playableIds, currentTrackId);
+    }
 
     private void AttachPlaylist(Playlist playlist) =>
         playlist.PropertyChanged += OnPlaylistPropertyChanged;
@@ -658,7 +893,7 @@ public sealed partial class MainViewModel
             return;
         }
 
-        ResetPlaylistPlaybackQueue(CurrentTrack?.Id);
+        ResetPlaylistPlaybackQueue(_playbackNavigator.CurrentTrackId);
         OnPropertyChanged(nameof(MixedPlaylistSummary));
         if (!_isInitializingTrackWorkspace)
         {
@@ -666,21 +901,11 @@ public sealed partial class MainViewModel
         }
     }
 
-    private void ResetPlaybackQueue(IEnumerable<string>? preferredTrackIds, string? currentTrackId)
-    {
-        var ids = preferredTrackIds ?? Tracks.Select(track => track.Id);
-        var playableIds = ids
-            .Select(id => _trackLibrary.TryGetById(id, out var track) ? track : null)
-            .Where(track => track?.IsAvailable == true)
-            .Select(track => track!.Id)
-            .ToArray();
-        _playbackNavigator.SetQueue(playableIds, currentTrackId);
-    }
-
     private void RefreshLibraryPresentation()
     {
-        RebuildPlaylistTracks();
+        RebuildPlaylistItems();
         OnPropertyChanged(nameof(LibrarySummary));
+        OnPropertyChanged(nameof(SelectedPlaylistSummary));
         OnPropertyChanged(nameof(CurrentTrackSubtitle));
         OnPropertyChanged(nameof(CanCreateDrumless));
     }
@@ -703,6 +928,12 @@ public sealed partial class MainViewModel
                 AudioInputOutputDeviceId = _preferredAudioInputOutputDeviceId,
                 AudioInputChannelIndex = _preferredAudioInputChannelIndex,
                 AudioInputGain = AudioInputGain,
+                AudioInputMonitors = AudioInputMonitors.Count > 0
+                    ? AudioInputMonitors
+                        .Where(monitor => monitor.IsEnabled)
+                        .Select(monitor => monitor.ToSetting())
+                        .ToList()
+                    : _preferredAudioInputMonitors.ToList(),
                 MidiDeviceName = _preferredMidiDeviceName,
                 MidiDeviceIndex = _preferredMidiDeviceIndex,
                 AutoConnectMidi = _autoConnectMidi,
@@ -712,7 +943,9 @@ public sealed partial class MainViewModel
                 TrackVolume = TrackVolume,
                 VstModulePath = _preferredVstModulePath,
                 VstClassId = _preferredVstClassId,
-                AutoLoadVst = _autoLoadVst
+                AutoLoadVst = _autoLoadVst,
+                StemSelection = SelectedStemSelection,
+                PerformanceLatencyCompensationMs = PerformanceLatencyCompensationMs
             };
             state.Tracks.AddRange(_trackLibrary.Snapshot());
             state.Playlists.AddRange(Playlists);

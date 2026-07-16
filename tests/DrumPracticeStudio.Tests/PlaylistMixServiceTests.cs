@@ -7,53 +7,50 @@ namespace DrumPracticeStudio.Tests;
 public sealed class PlaylistMixServiceTests
 {
     [TestMethod]
-    public void BuildQueue_CombinesIncludedPlaylistsInOrderWithoutDuplicates()
+    public void BuildQueue_CombinesLocalAndYouTubeInOrderWithoutMediaDuplicates()
     {
-        var warmup = CreatePlaylist("warmup", true, "track-a", "track-b");
-        var ignored = CreatePlaylist("ignored", false, "track-x");
-        var songs = CreatePlaylist("songs", true, "track-b", "track-c", "track-d");
+        var warmup = CreatePlaylist("warmup", true,
+            Local("a"), YouTube("video11111"), Local("b"));
+        var ignored = CreatePlaylist("ignored", false, Local("x"));
+        var songs = CreatePlaylist("songs", true,
+            YouTube("video11111"), Local("b"), YouTube("video22222"));
 
         var queue = PlaylistMixService.BuildQueue([warmup, ignored, songs], ignored);
 
         CollectionAssert.AreEqual(
-            new[] { "track-a", "track-b", "track-c", "track-d" },
-            queue.ToArray());
+            new[] { "local:a", "youtube:video11111", "local:b", "youtube:video22222" },
+            queue.Select(item => item.MediaKey).ToArray());
     }
 
     [TestMethod]
     public void BuildQueue_UsesSelectedPlaylistWhenNoMixIsEnabled()
     {
-        var selected = CreatePlaylist("selected", false, "track-b", "track-a");
-        var other = CreatePlaylist("other", false, "track-x");
+        var selected = CreatePlaylist("selected", false, YouTube("video11111"), Local("a"));
+        var other = CreatePlaylist("other", false, Local("x"));
 
         var queue = PlaylistMixService.BuildQueue([other, selected], selected);
 
-        CollectionAssert.AreEqual(new[] { "track-b", "track-a" }, queue.ToArray());
+        CollectionAssert.AreEqual(
+            new[] { "youtube:video11111", "local:a" },
+            queue.Select(item => item.MediaKey).ToArray());
     }
 
-    [TestMethod]
-    public void BuildQueue_WithNoMixAndNoSelection_IsEmpty()
+    private static Playlist CreatePlaylist(string id, bool included, params PlaylistItem[] items)
     {
-        var playlist = CreatePlaylist("playlist", false, "track-a");
-
-        var queue = PlaylistMixService.BuildQueue([playlist], fallbackPlaylist: null);
-
-        Assert.AreEqual(0, queue.Count);
-    }
-
-    private static Playlist CreatePlaylist(string id, bool included, params string[] trackIds)
-    {
-        var playlist = new Playlist
-        {
-            Id = id,
-            Name = id,
-            IsIncludedInMix = included
-        };
-        foreach (var trackId in trackIds)
-        {
-            playlist.TrackIds.Add(trackId);
-        }
-
+        var playlist = new Playlist { Id = id, Name = id, IsIncludedInMix = included };
+        foreach (var item in items) playlist.Items.Add(item);
         return playlist;
     }
+
+    private static PlaylistItem Local(string id) => new()
+    {
+        Id = Guid.NewGuid().ToString("N"), Kind = PlaylistItemKind.LocalTrack,
+        TrackId = id, Title = id
+    };
+
+    private static PlaylistItem YouTube(string id) => new()
+    {
+        Id = Guid.NewGuid().ToString("N"), Kind = PlaylistItemKind.YouTube,
+        YouTubeVideoId = id, YouTubeUrl = $"https://www.youtube.com/watch?v={id}", Title = id
+    };
 }

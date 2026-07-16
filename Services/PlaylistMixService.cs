@@ -4,31 +4,25 @@ namespace DrumPracticeStudio.Services;
 
 public static class PlaylistMixService
 {
-    public static IReadOnlyList<string> BuildQueue(
+    public static IReadOnlyList<PlaylistItem> BuildQueue(
         IEnumerable<Playlist> playlists,
         Playlist? fallbackPlaylist)
     {
         ArgumentNullException.ThrowIfNull(playlists);
-
-        var playlistSnapshot = playlists.ToArray();
-        var included = playlistSnapshot
-            .Where(playlist => playlist.IsIncludedInMix)
-            .ToArray();
+        var snapshot = playlists.ToArray();
+        var included = snapshot.Where(playlist => playlist.IsIncludedInMix).ToArray();
         IEnumerable<Playlist> sources = included.Length > 0
             ? included
-            : fallbackPlaylist is null
-                ? []
-                : [fallbackPlaylist];
-
+            : fallbackPlaylist is null ? [] : [fallbackPlaylist];
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var queue = new List<string>();
+        var queue = new List<PlaylistItem>();
         foreach (var playlist in sources)
         {
-            foreach (var trackId in playlist.TrackIds)
+            foreach (var item in playlist.Items)
             {
-                if (!string.IsNullOrWhiteSpace(trackId) && seen.Add(trackId))
+                if (seen.Add(item.MediaKey))
                 {
-                    queue.Add(trackId);
+                    queue.Add(item);
                 }
             }
         }

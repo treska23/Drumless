@@ -4,62 +4,116 @@ namespace DrumPracticeStudio.Services;
 
 public static class PlaylistEditor
 {
-    public static bool AddTrack(Playlist playlist, string trackId)
+    public static bool AddTrack(Playlist playlist, LocalTrack track)
     {
-        Validate(playlist, trackId);
-        if (FindIndex(playlist, trackId) >= 0)
+        ArgumentNullException.ThrowIfNull(track);
+        return AddItem(playlist, new PlaylistItem
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Kind = PlaylistItemKind.LocalTrack,
+            TrackId = track.Id,
+            Title = track.Title
+        });
+    }
+
+    public static bool AddYouTube(
+        Playlist playlist,
+        string videoId,
+        string url,
+        string title,
+        string? thumbnailUrl = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(videoId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(url);
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        return AddItem(playlist, new PlaylistItem
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Kind = PlaylistItemKind.YouTube,
+            YouTubeVideoId = videoId,
+            YouTubeUrl = url,
+            Title = title.Trim(),
+            ThumbnailUrl = thumbnailUrl
+        });
+    }
+
+    public static bool AddItem(Playlist playlist, PlaylistItem item)
+    {
+        ArgumentNullException.ThrowIfNull(playlist);
+        ArgumentNullException.ThrowIfNull(item);
+        if (playlist.Items.Any(existing =>
+                string.Equals(existing.MediaKey, item.MediaKey, StringComparison.Ordinal)))
         {
             return false;
         }
 
-        playlist.TrackIds.Add(trackId);
+        playlist.Items.Add(item);
         return true;
     }
 
-    public static bool RemoveTrack(Playlist playlist, string trackId)
+    public static bool RemoveItem(Playlist playlist, string itemId)
     {
-        Validate(playlist, trackId);
-        var index = FindIndex(playlist, trackId);
+        Validate(playlist, itemId);
+        var index = FindIndex(playlist, itemId);
         if (index < 0)
         {
             return false;
         }
 
-        playlist.TrackIds.RemoveAt(index);
+        playlist.Items.RemoveAt(index);
         return true;
     }
 
-    public static bool MoveUp(Playlist playlist, string trackId)
+    public static bool MoveUp(Playlist playlist, string itemId)
     {
-        Validate(playlist, trackId);
-        var index = FindIndex(playlist, trackId);
+        Validate(playlist, itemId);
+        var index = FindIndex(playlist, itemId);
         if (index <= 0)
         {
             return false;
         }
 
-        playlist.TrackIds.Move(index, index - 1);
+        playlist.Items.Move(index, index - 1);
         return true;
     }
 
-    public static bool MoveDown(Playlist playlist, string trackId)
+    public static bool MoveDown(Playlist playlist, string itemId)
     {
-        Validate(playlist, trackId);
-        var index = FindIndex(playlist, trackId);
-        if (index < 0 || index >= playlist.TrackIds.Count - 1)
+        Validate(playlist, itemId);
+        var index = FindIndex(playlist, itemId);
+        if (index < 0 || index >= playlist.Items.Count - 1)
         {
             return false;
         }
 
-        playlist.TrackIds.Move(index, index + 1);
+        playlist.Items.Move(index, index + 1);
         return true;
     }
 
-    private static int FindIndex(Playlist playlist, string trackId)
+    public static bool MoveTo(Playlist playlist, string itemId, int targetIndex)
     {
-        for (var index = 0; index < playlist.TrackIds.Count; index++)
+        Validate(playlist, itemId);
+        var currentIndex = FindIndex(playlist, itemId);
+        if (currentIndex < 0 || playlist.Items.Count == 0)
         {
-            if (string.Equals(playlist.TrackIds[index], trackId, StringComparison.Ordinal))
+            return false;
+        }
+
+        var boundedTarget = Math.Clamp(targetIndex, 0, playlist.Items.Count - 1);
+        if (currentIndex == boundedTarget)
+        {
+            return false;
+        }
+
+        playlist.Items.Move(currentIndex, boundedTarget);
+        return true;
+    }
+
+    private static int FindIndex(Playlist playlist, string itemId)
+    {
+        for (var index = 0; index < playlist.Items.Count; index++)
+        {
+            if (string.Equals(playlist.Items[index].Id, itemId, StringComparison.Ordinal))
             {
                 return index;
             }
@@ -68,9 +122,9 @@ public static class PlaylistEditor
         return -1;
     }
 
-    private static void Validate(Playlist playlist, string trackId)
+    private static void Validate(Playlist playlist, string itemId)
     {
         ArgumentNullException.ThrowIfNull(playlist);
-        ArgumentException.ThrowIfNullOrWhiteSpace(trackId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(itemId);
     }
 }

@@ -55,6 +55,7 @@ public sealed class TrackLibraryService
                 Title = record.Title,
                 Path = normalizedPath,
                 Variant = record.Variant,
+                Tempo = record.Tempo,
                 IsMissing = !File.Exists(normalizedPath)
             });
         }
@@ -66,7 +67,8 @@ public sealed class TrackLibraryService
             Id = track.Id,
             Title = track.Title,
             Path = track.Path,
-            Variant = track.Variant
+            Variant = track.Variant,
+            Tempo = track.Tempo
         })
         .ToArray();
 
@@ -119,6 +121,9 @@ public sealed class TrackLibraryService
 
     public LocalTrack RegisterGenerated(string path, string? title = null) =>
         Register(path, title, TrackVariant.GeneratedDrumless);
+
+    public LocalTrack RegisterRecording(string path, string? title = null) =>
+        Register(path, title, TrackVariant.Recording);
 
     public void RefreshAvailability()
     {

@@ -53,6 +53,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private double _removalProgress;
     private string _removalStatus = "Selecciona una pista original para crear una copia sin batería.";
     private string _removalEngineStatus = "Motor local no instalado";
+    private bool _keepDrums;
+    private bool _keepBass = true;
+    private bool _keepVocals = true;
+    private bool _keepOther = true;
     private Vst3InstrumentItem? _selectedVstInstrument;
     private Vst3ProgramItem? _selectedVstProgram;
     private string _vstStatus = "Pulsa «Buscar instrumentos» para localizar Addictive Drums y Groove Agent de forma aislada.";
@@ -65,6 +69,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string? _preferredAudioOutputDeviceId;
     private string? _preferredAudioInputOutputDeviceId;
     private int? _preferredAudioInputChannelIndex;
+    private readonly List<AudioInputMonitorSetting> _preferredAudioInputMonitors = [];
     private string? _preferredMidiDeviceName;
     private int? _preferredMidiDeviceIndex;
     private bool _autoConnectMidi = true;
@@ -94,12 +99,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         MidiDevices = [];
         AudioOutputDevices = [];
         AudioInputChannels = [];
+        AudioInputMonitors = [];
         MappingRows = [];
         Vst3Instruments = [];
         Vst3Programs = [];
         Tracks = _trackLibrary.Tracks;
         Playlists = [];
-        PlaylistTracks = [];
+        PlaylistItems = [];
         PlaybackModeOptions =
         [
             new PlaybackModeOption(PlaybackMode.Single, "Una pista"),
@@ -150,6 +156,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         OpenVstEditorCommand = new RelayCommand(OpenVstEditor);
         PanicVstCommand = new RelayCommand(() => _audio.PanicVstInstrument());
         InitializeTrackCommands();
+        InitializeTempoCommands();
+        InitializeRecordingCommands();
 
         _midi.NoteReceived += OnMidiNoteReceived;
         _midi.NoteOffReceived += OnMidiNoteOffReceived;
@@ -191,6 +199,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<MidiDeviceItem> MidiDevices { get; }
     public ObservableCollection<AudioOutputDeviceItem> AudioOutputDevices { get; }
     public ObservableCollection<AudioInputChannelItem> AudioInputChannels { get; }
+    public ObservableCollection<AudioInputMonitorItem> AudioInputMonitors { get; }
     public ObservableCollection<MidiMappingRow> MappingRows { get; }
     public ObservableCollection<Vst3InstrumentItem> Vst3Instruments { get; }
     public ObservableCollection<Vst3ProgramItem> Vst3Programs { get; }
@@ -333,7 +342,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public string AudioInputGainLabel => $"{AudioInputGain * 100:0}%";
 
     public bool IsAudioInputAvailable =>
-        SelectedAudioOutputDevice?.IsAsio == true && AudioInputChannels.Count > 1;
+        SelectedAudioOutputDevice?.IsAsio == true && AudioInputMonitors.Count > 0;
 
     public double MidiVelocitySensitivity
     {
@@ -374,6 +383,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(CurrentTrackSubtitle));
                 OnPropertyChanged(nameof(HasTrack));
                 OnPropertyChanged(nameof(CanCreateDrumless));
+                OnCurrentTrackChanged(value);
+                OnPropertyChanged(nameof(CanStartOutputRecording));
             }
         }
     }
@@ -496,6 +507,53 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _removalEngineStatus, value);
     }
 
+    public bool KeepDrums
+    {
+        get => _keepDrums;
+        set => SetStemSelection(ref _keepDrums, value);
+    }
+
+    public bool KeepBass
+    {
+        get => _keepBass;
+        set => SetStemSelection(ref _keepBass, value);
+    }
+
+    public bool KeepVocals
+    {
+        get => _keepVocals;
+        set => SetStemSelection(ref _keepVocals, value);
+    }
+
+    public bool KeepOther
+    {
+        get => _keepOther;
+        set => SetStemSelection(ref _keepOther, value);
+    }
+
+    public StemSelection SelectedStemSelection =>
+        (KeepDrums ? StemSelection.Drums : StemSelection.None) |
+        (KeepBass ? StemSelection.Bass : StemSelection.None) |
+        (KeepVocals ? StemSelection.Vocals : StemSelection.None) |
+        (KeepOther ? StemSelection.Other : StemSelection.None);
+
+    public string StemSelectionSummary => SelectedStemSelection == StemSelection.None
+        ? "Selecciona al menos un stem"
+        : $"Archivo final: {StemMixPlan.Describe(SelectedStemSelection)}";
+
+    private void SetStemSelection(ref bool field, bool value)
+    {
+        if (!SetProperty(ref field, value))
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(SelectedStemSelection));
+        OnPropertyChanged(nameof(StemSelectionSummary));
+        OnPropertyChanged(nameof(CanCreateDrumless));
+        ScheduleSettingsSave();
+    }
+
     public Vst3InstrumentItem? SelectedVstInstrument
     {
         get => _selectedVstInstrument;
@@ -556,17 +614,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public bool IsTracksPage => CurrentPage == "Tracks";
     public bool IsYouTubePage => CurrentPage == "YouTube";
     public bool IsSettingsPage => CurrentPage == "Settings";
-    public bool HasTrack => CurrentTrack is not null;
+    public bool HasTrack => CurrentTrack is not null || _currentYouTubeItem is not null;
     public bool HasActiveKit => ActiveKit is not null;
     public bool HasSelectedLibraryKits => SelectedLibrary?.Kits.Count > 0;
     public bool CanCreateDrumless =>
         CurrentTrack?.Variant == TrackVariant.Original &&
         CurrentTrack.IsAvailable &&
-        !IsRemovingDrums;
+        !IsRemovingDrums &&
+        SelectedStemSelection != StemSelection.None;
     public string ActiveKitName => ActiveKit?.Name ?? "Ningún kit";
     public string ActiveLibraryName => Libraries.FirstOrDefault(library => library.Id == ActiveKit?.LibraryId)?.Name ?? "Sin librería";
-    public string CurrentTrackTitle => CurrentTrack?.Title ?? "Sin pista cargada";
-    public string CurrentTrackSubtitle => CurrentTrack is null
+    public string CurrentTrackTitle => CurrentTrack?.Title ??
+                                       _currentYouTubeItem?.Title ??
+                                       "Sin pista cargada";
+    public string CurrentTrackSubtitle => _currentYouTubeItem is not null
+        ? "YouTube · reproducción integrada"
+        : CurrentTrack is null
         ? "Importa una pista original o una pista ya drumless"
         : CurrentTrack.IsMissing
             ? $"Archivo no encontrado · {CurrentTrack.Path}"
@@ -579,11 +642,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _kitLoadCancellation?.Dispose();
         _drumRemovalCancellation?.Cancel();
         _drumRemovalCancellation?.Dispose();
+        _tempoAnalysisCancellation?.Cancel();
+        _tempoAnalysisCancellation?.Dispose();
         _vstLoadCancellation?.Cancel();
         _vstLoadCancellation?.Dispose();
         _trackLoadCancellation?.Cancel();
         _trackLoadCancellation?.Dispose();
+        FinalizeRecordingOnShutdown();
         DetachAllPlaylists();
+        DetachAllAudioInputMonitors();
         SaveActiveVstState(silent: true);
         SaveTrackWorkspace(silent: true);
         _audio.VstInstrumentExited -= OnVstInstrumentExited;
@@ -836,6 +903,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (_currentYouTubeItem is not null)
+        {
+            YouTubeControlRequested?.Invoke(this, new YouTubeControlRequest(YouTubeControlAction.Toggle));
+            return;
+        }
+
         if (CurrentTrack is null)
         {
             _ = ImportTrackAsync("original");
@@ -866,6 +939,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void StopTrack()
     {
+        FinishPerformanceEvaluation(naturalEnd: false);
         try
         {
             _trackLoadCancellation?.Cancel();
@@ -877,6 +951,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         _desiredTrackPlaying = false;
         _activeRunGeneration = 0;
+        if (_currentYouTubeItem is not null)
+        {
+            YouTubeControlRequested?.Invoke(this, new YouTubeControlRequest(YouTubeControlAction.Stop));
+        }
         if (_isTrackLoading)
         {
             // Invalida también la generación de carga en el motor. Cancelar el token
@@ -935,6 +1013,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var sourceTrack = CurrentTrack;
+        var stemSelection = SelectedStemSelection;
+        if (stemSelection == StemSelection.None)
+        {
+            StatusMessage = "Selecciona al menos un stem para el archivo final";
+            return;
+        }
         _drumRemovalCancellation = new CancellationTokenSource();
         var cancellationToken = _drumRemovalCancellation.Token;
         var progress = new Progress<DrumRemovalProgress>(UpdateRemovalProgress);
@@ -967,15 +1051,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _desiredTrackPlaying = false;
             _activeRunGeneration = 0;
             _audio.StopTrack();
-            StatusMessage = $"Quitando batería de {sourceTrack.Title}…";
-            var result = await _drumRemoval.CreateDrumlessAsync(
+            StatusMessage = $"Separando stems de {sourceTrack.Title}…";
+            var result = await _drumRemoval.CreateStemMixAsync(
                 sourceTrack,
                 OutputFolderPath,
+                stemSelection,
                 progress,
                 cancellationToken);
             var generatedTrack = _trackLibrary.RegisterGenerated(
                 result.DrumlessPath,
-                $"{sourceTrack.Title} · sin batería");
+                $"{sourceTrack.Title} · {StemMixPlan.Describe(stemSelection)}");
             SaveTrackWorkspace();
             RefreshLibraryPresentation();
 
@@ -989,7 +1074,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
 
             RemovalProgress = 1d;
-            RemovalStatus = "Versión sin batería creada y añadida a la biblioteca";
+            RemovalStatus = $"Mezcla creada y añadida · {StemMixPlan.Describe(stemSelection)}";
             StatusMessage = $"Lista: {generatedTrack.Title}";
         }
         catch (OperationCanceledException)
@@ -1163,27 +1248,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var rememberedInput = selected.IsAsio &&
+            var rememberedInputs = selected.IsAsio &&
                                   string.Equals(
                                       selected.Id,
                                       _preferredAudioInputOutputDeviceId,
                                       StringComparison.Ordinal)
-                ? _preferredAudioInputChannelIndex
-                : null;
+                ? _preferredAudioInputMonitors.ToArray()
+                : [];
             try
             {
-                _audio.SelectOutputDevice(
-                    selected.Id,
-                    rememberedInput,
-                    (float)AudioInputGain);
+                _audio.SelectOutputDevice(selected.Id, rememberedInputs);
             }
-            catch when (rememberedInput is not null)
+            catch when (rememberedInputs.Length > 0)
             {
-                _audio.SelectOutputDevice(
-                    selected.Id,
-                    inputChannelIndex: null,
-                    inputGain: (float)AudioInputGain);
+                _audio.SelectOutputDevice(selected.Id, []);
                 _preferredAudioInputChannelIndex = null;
+                _preferredAudioInputMonitors.Clear();
                 AudioInputStatus = "La entrada guardada ya no existe; la monitorización quedó desactivada.";
             }
             RefreshAudioInputChannels();
@@ -1223,11 +1303,31 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _isRefreshingAudioInputChannels = true;
         try
         {
+            DetachAllAudioInputMonitors();
             AudioInputChannels.Clear();
             AudioInputChannels.Add(new AudioInputChannelItem(null, "Desactivada"));
+            AudioInputMonitors.Clear();
+            var activeSettings = _audio.AudioInputMonitorSettings
+                .ToDictionary(setting => setting.ChannelIndex);
             foreach (var channel in _audio.AudioInputChannels)
             {
                 AudioInputChannels.Add(channel);
+                if (channel.ChannelIndex is not { } channelIndex)
+                {
+                    continue;
+                }
+
+                var monitor = new AudioInputMonitorItem
+                {
+                    ChannelIndex = channelIndex,
+                    Name = channel.Name,
+                    IsEnabled = activeSettings.ContainsKey(channelIndex),
+                    Gain = activeSettings.TryGetValue(channelIndex, out var setting)
+                        ? setting.Gain
+                        : 0.8d
+                };
+                monitor.PropertyChanged += OnAudioInputMonitorPropertyChanged;
+                AudioInputMonitors.Add(monitor);
             }
 
             SelectedAudioInputChannel = AudioInputChannels.FirstOrDefault(channel =>
@@ -1245,6 +1345,81 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             : _audio.IsAudioInputMonitoringActive
                 ? $"Monitorización directa activa · {_audio.Status}"
                 : "Elige el jack donde has conectado la salida del módulo de batería.";
+    }
+
+    private void OnAudioInputMonitorPropertyChanged(
+        object? sender,
+        System.ComponentModel.PropertyChangedEventArgs eventArgs)
+    {
+        if (_isRefreshingAudioInputChannels || sender is not AudioInputMonitorItem monitor)
+        {
+            return;
+        }
+
+        if (eventArgs.PropertyName == nameof(AudioInputMonitorItem.Gain) && monitor.IsEnabled)
+        {
+            _audio.SetAudioInputGain(monitor.ChannelIndex, (float)monitor.Gain);
+            RememberAudioInputMonitors();
+            ScheduleSettingsSave();
+            return;
+        }
+
+        if (eventArgs.PropertyName == nameof(AudioInputMonitorItem.IsEnabled))
+        {
+            ApplyAudioInputMonitors();
+        }
+    }
+
+    private void ApplyAudioInputMonitors()
+    {
+        var requested = AudioInputMonitors
+            .Where(monitor => monitor.IsEnabled)
+            .Select(monitor => monitor.ToSetting())
+            .ToArray();
+        try
+        {
+            _audio.SelectAudioInputChannels(requested);
+            _preferredAudioInputOutputDeviceId = SelectedAudioOutputDevice?.Id;
+            RememberAudioInputMonitors();
+            AudioOutputStatus = _audio.Status;
+            AudioInputStatus = requested.Length == 0
+                ? "Monitorización de entradas desactivada."
+                : $"Monitorizando {requested.Length} " +
+                  (requested.Length == 1 ? "entrada" : "entradas") +
+                  " simultáneamente por ASIO.";
+            ScheduleSettingsSave();
+            OnPropertyChanged(nameof(VstAudioStatus));
+        }
+        catch (Exception exception)
+        {
+            AudioInputStatus = $"No se pudo aplicar la mezcla de entradas: {exception.Message}";
+            RefreshAudioInputChannels();
+            MessageBox.Show(
+                $"No se pudo aplicar la mezcla de entradas.\n\n{exception.Message}\n\n" +
+                "La configuración anterior sigue activa.",
+                "Entradas de audio",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void RememberAudioInputMonitors()
+    {
+        _preferredAudioInputMonitors.Clear();
+        _preferredAudioInputMonitors.AddRange(AudioInputMonitors
+            .Where(monitor => monitor.IsEnabled)
+            .Select(monitor => monitor.ToSetting()));
+        _preferredAudioInputChannelIndex = _preferredAudioInputMonitors.Count == 1
+            ? _preferredAudioInputMonitors[0].ChannelIndex
+            : null;
+    }
+
+    private void DetachAllAudioInputMonitors()
+    {
+        foreach (var monitor in AudioInputMonitors)
+        {
+            monitor.PropertyChanged -= OnAudioInputMonitorPropertyChanged;
+        }
     }
 
     private void ApplyAudioInputSelection(AudioInputChannelItem selected)
@@ -1396,6 +1571,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void OnMidiNoteReceived(object? sender, MidiNoteMessage message)
     {
         var hasMapping = _midiProfile.TryResolve(message.Note, out var articulation);
+        if (hasMapping)
+        {
+            RecordPerformanceHit(message);
+        }
         if (!hasMapping && !_audio.IsExternalInstrumentSelected)
         {
             return;
@@ -1882,6 +2061,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private static string FormatTime(TimeSpan value) =>
         value.TotalHours >= 1d ? value.ToString(@"h\:mm\:ss") : value.ToString(@"mm\:ss");
 }
+
+public sealed record YouTubePlaybackRequest(Uri Uri, string VideoId, string Title);
+public enum YouTubeControlAction { Toggle, Pause, Stop }
+public sealed record YouTubeControlRequest(YouTubeControlAction Action);
 
 public sealed record MidiMappingRow(int Note, string Articulation)
 {

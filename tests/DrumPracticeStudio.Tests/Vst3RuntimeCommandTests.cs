@@ -30,4 +30,15 @@ public sealed class Vst3RuntimeCommandTests
         Assert.IsFalse(Vst3RuntimeProtocol.IsRealtimeMidi(command));
         Assert.IsTrue(Vst3RuntimeProtocol.RequiresUiThread(command));
     }
+
+    [DataRow("StartRecording")]
+    [DataRow("StopRecording")]
+    [TestMethod]
+    public void RecordingCommands_RunOnThePipeWorkerAndAreNotRealtimeMidi(string type)
+    {
+        var command = new Vst3RuntimeCommand(type);
+
+        Assert.IsFalse(Vst3RuntimeProtocol.IsRealtimeMidi(command));
+        Assert.IsFalse(Vst3RuntimeProtocol.RequiresUiThread(command));
+    }
 }
