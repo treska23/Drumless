@@ -136,6 +136,7 @@ $requiredYouTubeControls = @(
     "YouTubeSearchButton",
     "YouTubeBackButton",
     "AddYouTubeToPlaylistButton",
+    "ImportYouTubePlaylistButton",
     "YouTubeWebView"
 )
 foreach ($automationId in $requiredYouTubeControls) {

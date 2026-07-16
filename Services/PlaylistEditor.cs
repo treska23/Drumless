@@ -37,6 +37,28 @@ public static class PlaylistEditor
         });
     }
 
+    public static int AddYouTubeRange(
+        Playlist playlist,
+        IEnumerable<YouTubePlaylistEntry> entries)
+    {
+        ArgumentNullException.ThrowIfNull(playlist);
+        ArgumentNullException.ThrowIfNull(entries);
+        var added = 0;
+        foreach (var entry in entries)
+        {
+            if (entry is not null && AddYouTube(
+                    playlist,
+                    entry.VideoId,
+                    entry.Url,
+                    entry.Title,
+                    entry.ThumbnailUrl))
+            {
+                added++;
+            }
+        }
+        return added;
+    }
+
     public static bool AddItem(Playlist playlist, PlaylistItem item)
     {
         ArgumentNullException.ThrowIfNull(playlist);

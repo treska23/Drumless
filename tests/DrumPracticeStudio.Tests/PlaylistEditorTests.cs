@@ -58,6 +58,35 @@ public sealed class PlaylistEditorTests
         CollectionAssert.AreEqual(new[] { "d", "b", "c", "a" }, playlist.Items.Select(x => x.Id).ToArray());
     }
 
+    [TestMethod]
+    public void AddYouTubeRange_ImportsWholePlaylistInOrderAndSkipsDuplicates()
+    {
+        var playlist = new Playlist { Id = "playlist", Name = "Practice" };
+        PlaylistEditor.AddYouTube(
+            playlist,
+            "video00001",
+            "https://www.youtube.com/watch?v=video00001",
+            "Existing");
+        var entries = new[]
+        {
+            new YouTubePlaylistEntry(
+                "video00001", "Existing", "https://www.youtube.com/watch?v=video00001", null),
+            new YouTubePlaylistEntry(
+                "video00002", "Second", "https://www.youtube.com/watch?v=video00002", "thumb-2"),
+            new YouTubePlaylistEntry(
+                "video00003", "Third", "https://www.youtube.com/watch?v=video00003", "thumb-3")
+        };
+
+        var added = PlaylistEditor.AddYouTubeRange(playlist, entries);
+
+        Assert.AreEqual(2, added);
+        CollectionAssert.AreEqual(
+            new[] { "video00001", "video00002", "video00003" },
+            playlist.Items.Select(item => item.YouTubeVideoId).ToArray());
+        Assert.AreEqual("Second", playlist.Items[1].Title);
+        Assert.AreEqual("thumb-3", playlist.Items[2].ThumbnailUrl);
+    }
+
     private static LocalTrack Local(string id, string path) => new()
     {
         Id = id,

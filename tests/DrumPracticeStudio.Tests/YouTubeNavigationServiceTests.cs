@@ -41,4 +41,24 @@ public sealed class YouTubeNavigationServiceTests
         Assert.IsFalse(YouTubeNavigationService.TryGetVideoId(
             new Uri("https://www.youtube.com/results?search_query=drumless"), out _));
     }
+
+    [TestMethod]
+    public void PlaylistAndDirectNavigation_RecognizeOfficialYouTubeUrlsOnly()
+    {
+        var playlistUri = new Uri(
+            "https://www.youtube.com/playlist?list=PL1234567890_ABC");
+        var watchInPlaylist = new Uri(
+            "https://www.youtube.com/watch?v=abc_DEF-123&list=PL1234567890_ABC");
+
+        Assert.IsTrue(YouTubeNavigationService.TryGetPlaylistId(playlistUri, out var playlistId));
+        Assert.AreEqual("PL1234567890_ABC", playlistId);
+        Assert.IsTrue(YouTubeNavigationService.TryGetPlaylistId(watchInPlaylist, out _));
+        Assert.IsTrue(YouTubeNavigationService.TryGetNavigationUri(
+            $"  {playlistUri.AbsoluteUri}  ", out var direct));
+        Assert.AreEqual(playlistUri, direct);
+        Assert.IsFalse(YouTubeNavigationService.TryGetNavigationUri(
+            "https://youtube.com.example.test/playlist?list=PL1234567890_ABC", out _));
+        Assert.IsFalse(YouTubeNavigationService.TryGetPlaylistId(
+            new Uri("https://www.youtube.com/playlist?list=bad"), out _));
+    }
 }

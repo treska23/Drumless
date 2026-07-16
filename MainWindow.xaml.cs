@@ -185,6 +185,14 @@ public partial class MainWindow : Window
             var core = YouTubeWebView.CoreWebView2 ??
                 throw new InvalidOperationException("WebView2 no devolvió un navegador inicializado.");
 
+            if (core.Profile.IsInPrivateModeEnabled)
+            {
+                throw new InvalidOperationException(
+                    "El perfil de YouTube se inició en modo privado y no puede conservar la sesión.");
+            }
+            core.Profile.PreferredTrackingPreventionLevel =
+                CoreWebView2TrackingPreventionLevel.Basic;
+
             core.Settings.IsStatusBarEnabled = false;
             core.Settings.AreDevToolsEnabled = false;
             core.NewWindowRequested += OnYouTubeNewWindowRequested;
@@ -194,6 +202,7 @@ public partial class MainWindow : Window
             {
                 YouTubeWebView.Source = YouTubeNavigationService.HomeUri;
             }
+            YouTubeStatusText.Text = "YouTube preparado · sesión persistente";
         }
         catch (Exception exception)
         {
@@ -232,6 +241,15 @@ public partial class MainWindow : Window
         await EnsureYouTubeReadyAsync();
         if (YouTubeWebView.CoreWebView2 is null)
         {
+            return;
+        }
+
+        if (YouTubeNavigationService.TryGetNavigationUri(query, out var directUri))
+        {
+            YouTubeStatusText.Text = YouTubeNavigationService.TryGetPlaylistId(directUri, out _)
+                ? "Abriendo playlist de YouTube…"
+                : "Abriendo enlace de YouTube…";
+            YouTubeWebView.Source = directUri;
             return;
         }
 
@@ -515,6 +533,154 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnImportCurrentYouTubePlaylistClick(object sender, RoutedEventArgs e)
+    {
+        if (!YouTubeNavigationService.TryGetPlaylistId(YouTubeWebView.Source, out _))
+        {
+            YouTubeStatusText.Text =
+                "Abre una playlist de YouTube o pega su URL en el buscador";
+            return;
+        }
+        if (YouTubeWebView.CoreWebView2 is null)
+        {
+            YouTubeStatusText.Text = "El navegador de YouTube todavía no está preparado";
+            return;
+        }
+
+        var button = sender as Button;
+        if (button is not null)
+        {
+            button.IsEnabled = false;
+        }
+        try
+        {
+            YouTubeStatusText.Text = "Leyendo la playlist completa de YouTube…";
+            var scriptResult = await YouTubeWebView.CoreWebView2.ExecuteScriptAsync(
+                YouTubePlaylistExtractionScript);
+            var payloadJson = JsonSerializer.Deserialize<string>(scriptResult);
+            var payload = string.IsNullOrWhiteSpace(payloadJson)
+                ? null
+                : JsonSerializer.Deserialize<YouTubePlaylistPayload>(
+                    payloadJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (payload?.Items is not { Count: > 0 })
+            {
+                YouTubeStatusText.Text =
+                    "No se encontraron vídeos. Espera a que YouTube termine de cargar la playlist y vuelve a intentarlo.";
+                return;
+            }
+
+            var entries = payload.Items
+                .Select(item => TryCreateYouTubePlaylistEntry(item, out var entry) ? entry : null)
+                .Where(entry => entry is not null)
+                .Cast<YouTubePlaylistEntry>()
+                .DistinctBy(entry => entry.VideoId, StringComparer.Ordinal)
+                .ToArray();
+            if (entries.Length == 0)
+            {
+                YouTubeStatusText.Text = "YouTube no devolvió vídeos válidos para importar";
+                return;
+            }
+
+            var result = _viewModel.ImportYouTubePlaylist(
+                entries,
+                string.IsNullOrWhiteSpace(payload.Title) ? "Playlist de YouTube" : payload.Title);
+            YouTubeStatusText.Text = result.Added == 0
+                ? $"0 añadidos · {result.Duplicates} ya estaban en la playlist activa"
+                : $"{result.Added} vídeos añadidos · {result.Duplicates} duplicados omitidos";
+        }
+        catch (Exception exception)
+        {
+            YouTubeStatusText.Text = $"No se pudo importar la playlist: {exception.Message}";
+        }
+        finally
+        {
+            if (button is not null)
+            {
+                button.IsEnabled = true;
+            }
+        }
+    }
+
+    private static bool TryCreateYouTubePlaylistEntry(
+        YouTubePlaylistItemPayload item,
+        out YouTubePlaylistEntry entry)
+    {
+        entry = null!;
+        if (!Uri.TryCreate(item.Url, UriKind.Absolute, out var uri) ||
+            !YouTubeNavigationService.TryGetVideoId(uri, out var videoId) ||
+            !string.Equals(videoId, item.VideoId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var title = string.IsNullOrWhiteSpace(item.Title)
+            ? $"Vídeo {videoId}"
+            : item.Title.Trim();
+        entry = new YouTubePlaylistEntry(
+            videoId,
+            title,
+            YouTubeNavigationService.CreateWatchUri(videoId).AbsoluteUri,
+            string.IsNullOrWhiteSpace(item.ThumbnailUrl)
+                ? YouTubeNavigationService.CreateThumbnailUrl(videoId)
+                : item.ThumbnailUrl);
+        return true;
+    }
+
+    private const string YouTubePlaylistExtractionScript =
+        """
+        (async () => {
+          const playlistId = new URL(location.href).searchParams.get('list') || '';
+          if (!playlistId) return JSON.stringify({ title: '', items: [] });
+
+          const renderers = () => Array.from(document.querySelectorAll(
+            'ytd-playlist-video-renderer, ytd-playlist-panel-video-renderer'));
+          let previousCount = -1;
+          let stablePasses = 0;
+          for (let pass = 0; pass < 100 && stablePasses < 5; pass += 1) {
+            const nodes = renderers();
+            stablePasses = nodes.length === previousCount ? stablePasses + 1 : 0;
+            previousCount = nodes.length;
+            for (const selector of [
+              'ytd-playlist-video-list-renderer #contents',
+              'ytd-playlist-panel-renderer #items'
+            ]) {
+              const container = document.querySelector(selector);
+              container?.lastElementChild?.scrollIntoView({ block: 'end' });
+            }
+            window.scrollTo(0, document.documentElement.scrollHeight);
+            await new Promise(resolve => setTimeout(resolve, 350));
+          }
+
+          const seen = new Set();
+          const items = [];
+          for (const node of renderers()) {
+            const link = node.querySelector('a#video-title, a#wc-endpoint, a[href*="watch?v="]');
+            if (!link?.href) continue;
+            const url = new URL(link.href, location.origin);
+            const videoId = url.searchParams.get('v') || node.getAttribute('video-id') || '';
+            if (!videoId || seen.has(videoId)) continue;
+            seen.add(videoId);
+            const titleNode = node.querySelector('#video-title');
+            const title = (titleNode?.getAttribute('title') || titleNode?.textContent || '').trim();
+            const image = node.querySelector('img');
+            items.push({
+              videoId,
+              title,
+              url: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
+              thumbnailUrl: image?.currentSrc || image?.src || ''
+            });
+          }
+
+          const title = (
+            document.querySelector('ytd-playlist-header-renderer h1 yt-formatted-string')?.textContent ||
+            document.querySelector('ytd-playlist-panel-renderer #title')?.textContent ||
+            document.title.replace(/\s*-\s*YouTube\s*$/i, '')
+          ).trim();
+          return JSON.stringify({ title, items });
+        })()
+        """;
+
     private void OnLibraryDragStart(object sender, MouseButtonEventArgs e) =>
         _libraryDragOrigin = e.GetPosition(TrackLibraryList);
 
@@ -609,6 +775,20 @@ public partial class MainWindow : Window
         _playlistWindow = new PlaylistWindow(_viewModel) { Owner = this };
         _playlistWindow.Closed += (_, _) => _playlistWindow = null;
         _playlistWindow.Show();
+    }
+
+    private sealed class YouTubePlaylistPayload
+    {
+        public string Title { get; set; } = string.Empty;
+        public List<YouTubePlaylistItemPayload> Items { get; set; } = [];
+    }
+
+    private sealed class YouTubePlaylistItemPayload
+    {
+        public string VideoId { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Url { get; set; } = string.Empty;
+        public string? ThumbnailUrl { get; set; }
     }
 
     [StructLayout(LayoutKind.Sequential)]

@@ -804,10 +804,11 @@
                                    Foreground="{StaticResource TextSecondary}" Margin="0,5,0,22" />
                         <Border Style="{StaticResource CardStyle}">
                             <StackPanel>
-                                <TextBlock Text="Buscar pistas drumless" FontSize="20" FontWeight="SemiBold" />
+                                <TextBlock Text="Buscar pistas drumless o pegar una URL de YouTube" FontSize="20" FontWeight="SemiBold" />
                                 <Grid Margin="0,14,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
@@ -821,6 +822,10 @@
                                             Content="+ Añadir vídeo actual a playlist" Margin="8,0,0,0"
                                             Click="OnAddCurrentYouTubeToPlaylistClick"
                                             AutomationProperties.AutomationId="AddYouTubeToPlaylistButton" />
+                                    <Button Grid.Column="3" Style="{StaticResource SecondaryButton}"
+                                            Content="+ Importar playlist completa" Margin="8,0,0,0"
+                                            Click="OnImportCurrentYouTubePlaylistClick"
+                                            AutomationProperties.AutomationId="ImportYouTubePlaylistButton" />
                                 </Grid>
                                 <Grid Margin="0,10,0,10">
                                     <Grid.ColumnDefinitions>

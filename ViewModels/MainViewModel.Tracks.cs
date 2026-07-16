@@ -612,6 +612,43 @@ public sealed partial class MainViewModel
         return true;
     }
 
+    public YouTubePlaylistImportResult ImportYouTubePlaylist(
+        IReadOnlyList<YouTubePlaylistEntry> entries,
+        string playlistName)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        if (SelectedPlaylist is null)
+        {
+            StatusMessage = "Crea o selecciona una playlist antes de importar la lista de YouTube";
+            return new YouTubePlaylistImportResult(entries.Count, 0, 0, playlistName);
+        }
+
+        var added = PlaylistEditor.AddYouTubeRange(SelectedPlaylist, entries);
+        var importedIds = entries.Select(entry => entry.VideoId).ToHashSet(StringComparer.Ordinal);
+        foreach (var item in SelectedPlaylist.Items.Where(item =>
+                     item.Kind == PlaylistItemKind.YouTube &&
+                     item.YouTubeVideoId is not null &&
+                     importedIds.Contains(item.YouTubeVideoId)))
+        {
+            item.Tempo = _analysisDatabase.GetTempo(item.MediaKey);
+        }
+
+        if (added > 0)
+        {
+            PlaylistChanged();
+        }
+
+        var result = new YouTubePlaylistImportResult(
+            entries.Count,
+            added,
+            entries.Count - added,
+            playlistName);
+        StatusMessage = added == 0
+            ? $"La playlist de YouTube ya estaba incluida en {SelectedPlaylist.Name}"
+            : $"{added} vídeos importados desde {playlistName} a {SelectedPlaylist.Name}";
+        return result;
+    }
+
     private void RemovePlaylistItem(PlaylistItemViewModel? item)
     {
         if (item is null || SelectedPlaylist is null ||

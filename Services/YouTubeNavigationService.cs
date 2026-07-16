@@ -51,6 +51,28 @@ public static class YouTubeNavigationService
         return false;
     }
 
+    public static bool TryGetPlaylistId(Uri? uri, out string playlistId)
+    {
+        playlistId = string.Empty;
+        if (!IsYouTubeUri(uri) || uri is null)
+        {
+            return false;
+        }
+
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        playlistId = query["list"] ?? string.Empty;
+        return IsValidPlaylistId(playlistId);
+    }
+
+    public static bool TryGetNavigationUri(string text, out Uri uri)
+    {
+        uri = null!;
+        return !string.IsNullOrWhiteSpace(text) &&
+               Uri.TryCreate(text.Trim(), UriKind.Absolute, out var candidate) &&
+               IsYouTubeUri(candidate) &&
+               (uri = candidate) is not null;
+    }
+
     public static Uri CreateWatchUri(string videoId)
     {
         if (!IsValidVideoId(videoId))
@@ -65,5 +87,9 @@ public static class YouTubeNavigationService
 
     private static bool IsValidVideoId(string value) =>
         value.Length is >= 6 and <= 20 &&
+        value.All(character => char.IsLetterOrDigit(character) || character is '-' or '_');
+
+    private static bool IsValidPlaylistId(string value) =>
+        value.Length is >= 10 and <= 100 &&
         value.All(character => char.IsLetterOrDigit(character) || character is '-' or '_');
 }
