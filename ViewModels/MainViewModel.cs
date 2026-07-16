@@ -56,6 +56,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _keepDrums;
     private bool _keepBass = true;
     private bool _keepVocals = true;
+    private bool _keepGuitar = true;
+    private bool _keepPiano = true;
     private bool _keepOther = true;
     private Vst3InstrumentItem? _selectedVstInstrument;
     private Vst3ProgramItem? _selectedVstProgram;
@@ -531,10 +533,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         set => SetStemSelection(ref _keepOther, value);
     }
 
+    public bool KeepGuitar
+    {
+        get => _keepGuitar;
+        set => SetStemSelection(ref _keepGuitar, value);
+    }
+
+    public bool KeepPiano
+    {
+        get => _keepPiano;
+        set => SetStemSelection(ref _keepPiano, value);
+    }
+
     public StemSelection SelectedStemSelection =>
         (KeepDrums ? StemSelection.Drums : StemSelection.None) |
         (KeepBass ? StemSelection.Bass : StemSelection.None) |
         (KeepVocals ? StemSelection.Vocals : StemSelection.None) |
+        (KeepGuitar ? StemSelection.Guitar : StemSelection.None) |
+        (KeepPiano ? StemSelection.Piano : StemSelection.None) |
         (KeepOther ? StemSelection.Other : StemSelection.None);
 
     public string StemSelectionSummary => SelectedStemSelection == StemSelection.None

@@ -8,6 +8,8 @@ public enum StemSelection
     Bass = 2,
     Vocals = 4,
     Other = 8,
-    Drumless = Bass | Vocals | Other,
-    All = Drums | Bass | Vocals | Other
+    Guitar = 16,
+    Piano = 32,
+    Drumless = Bass | Vocals | Guitar | Piano | Other,
+    All = Drums | Bass | Vocals | Guitar | Piano | Other
 }

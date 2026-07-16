@@ -9,7 +9,9 @@ public static class StemMixPlan
         (StemSelection.Drums, "drums.wav", "batería"),
         (StemSelection.Bass, "bass.wav", "bajo"),
         (StemSelection.Vocals, "vocals.wav", "voz"),
-        (StemSelection.Other, "other.wav", "guitarras y otros")
+        (StemSelection.Guitar, "guitar.wav", "guitarra"),
+        (StemSelection.Piano, "piano.wav", "piano y teclados"),
+        (StemSelection.Other, "other.wav", "otros")
     ];
 
     public static IReadOnlyList<string> GetFileNames(StemSelection selection)

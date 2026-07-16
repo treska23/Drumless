@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -46,7 +46,7 @@ public sealed class StudioStateStore
                 throw new JsonException("El documento de estado está vacío.");
             }
 
-            if (document.SchemaVersion != CurrentSchemaVersion)
+            if (document.SchemaVersion is < 1 or > CurrentSchemaVersion)
             {
                 throw new NotSupportedException(
                     $"La versión {document.SchemaVersion} del estado no es compatible.");
@@ -159,11 +159,9 @@ public sealed class StudioStateStore
                 ? null
                 : document.VstClassId,
             AutoLoadVst = document.AutoLoadVst ?? false,
-            StemSelection = document.StemSelection is { } stemSelection &&
-                            stemSelection != StemSelection.None &&
-                            (stemSelection & ~StemSelection.All) == 0
-                ? stemSelection
-                : StemSelection.Drumless,
+            StemSelection = NormalizeStemSelection(
+                document.StemSelection,
+                document.SchemaVersion),
             PerformanceLatencyCompensationMs = Math.Clamp(
                 document.PerformanceLatencyCompensationMs ?? 0d,
                 -500d,
@@ -374,6 +372,34 @@ public sealed class StudioStateStore
             tempo.MetronomeEnabled ?? false,
             tempo.MetronomeVolume ?? 0.55d,
             tempo.AnalysisConfidence ?? 0d));
+    }
+
+    private static StemSelection NormalizeStemSelection(
+        StemSelection? selection,
+        int schemaVersion)
+    {
+        if (selection is null || selection == StemSelection.None ||
+            (selection & ~StemSelection.All) != 0)
+        {
+            return StemSelection.Drumless;
+        }
+
+        if (schemaVersion == 1)
+        {
+            const StemSelection legacyDrumless =
+                StemSelection.Bass | StemSelection.Vocals | StemSelection.Other;
+            const StemSelection legacyAll = StemSelection.Drums | legacyDrumless;
+            if (selection == legacyDrumless)
+            {
+                return StemSelection.Drumless;
+            }
+            if (selection == legacyAll)
+            {
+                return StemSelection.All;
+            }
+        }
+
+        return selection.Value;
     }
 
     private static bool IsRecoverableLoadFailure(Exception exception) => exception is

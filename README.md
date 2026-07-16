@@ -18,7 +18,8 @@ Prototipo Windows de una aplicación de práctica para batería electrónica y t
   edición central, arrastre, ventana flotante y modos individual, secuencial y aleatorio
   sin repeticiones.
 - Transporte con anterior, siguiente y avance automático al final natural de una pista.
-- Separación local opcional con Demucs y mezcla libre de batería, bajo, voz y otros;
+- Separación local opcional con Demucs de seis stems y mezcla libre de batería, bajo,
+  voz, guitarra, piano/teclados y otros;
   nunca modifica ni mueve el archivo original.
 - Monitorización simultánea de todas las entradas de una interfaz ASIO, cada una con
   activación y ganancia independientes.

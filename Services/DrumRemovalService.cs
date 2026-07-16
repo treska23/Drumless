@@ -115,7 +115,7 @@ public sealed partial class DrumRemovalService
             startInfo.ArgumentList.Add("-m");
             startInfo.ArgumentList.Add("demucs.separate");
             startInfo.ArgumentList.Add("-n");
-            startInfo.ArgumentList.Add("htdemucs");
+            startInfo.ArgumentList.Add("htdemucs_6s");
             startInfo.ArgumentList.Add("-d");
             startInfo.ArgumentList.Add("cpu");
             startInfo.ArgumentList.Add("--shifts");
@@ -313,7 +313,7 @@ public sealed partial class DrumRemovalService
                 .ToArray(),
             engine = "demucs",
             engineVersion = "4.0.1",
-            model = "htdemucs",
+            model = "htdemucs_6s",
             createdAtUtc = DateTimeOffset.UtcNow
         };
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(metadata, new JsonSerializerOptions

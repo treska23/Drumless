@@ -16,10 +16,10 @@ public sealed class StemMixPlanTests
             new[] { "drums.wav", "bass.wav" },
             StemMixPlan.GetFileNames(StemSelection.Drums | StemSelection.Bass).ToArray());
         CollectionAssert.AreEqual(
-            new[] { "vocals.wav", "other.wav" },
-            StemMixPlan.GetFileNames(StemSelection.Vocals | StemSelection.Other).ToArray());
+            new[] { "vocals.wav", "guitar.wav" },
+            StemMixPlan.GetFileNames(StemSelection.Vocals | StemSelection.Guitar).ToArray());
         CollectionAssert.AreEqual(
-            new[] { "bass.wav", "vocals.wav", "other.wav" },
+            new[] { "bass.wav", "vocals.wav", "guitar.wav", "piano.wav", "other.wav" },
             StemMixPlan.GetFileNames(StemSelection.Drumless).ToArray());
     }
 

@@ -198,6 +198,8 @@ public sealed partial class MainViewModel
             _keepDrums = state.StemSelection.HasFlag(StemSelection.Drums);
             _keepBass = state.StemSelection.HasFlag(StemSelection.Bass);
             _keepVocals = state.StemSelection.HasFlag(StemSelection.Vocals);
+            _keepGuitar = state.StemSelection.HasFlag(StemSelection.Guitar);
+            _keepPiano = state.StemSelection.HasFlag(StemSelection.Piano);
             _keepOther = state.StemSelection.HasFlag(StemSelection.Other);
             _performanceLatencyCompensationMs = state.PerformanceLatencyCompensationMs;
             _trackLibrary.Load(state.Tracks);

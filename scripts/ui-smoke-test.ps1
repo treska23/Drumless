@@ -114,6 +114,8 @@ $requiredTrackControls = @(
     "KeepDrumsCheckBox",
     "KeepBassCheckBox",
     "KeepVocalsCheckBox",
+    "KeepGuitarCheckBox",
+    "KeepPianoCheckBox",
     "KeepOtherCheckBox"
 )
 foreach ($automationId in $requiredTrackControls) {

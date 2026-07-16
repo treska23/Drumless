@@ -234,4 +234,27 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(PlaylistItemKind.LocalTrack, loaded.Playlists[0].Items[0].Kind);
         Assert.AreEqual("track-a", loaded.Playlists[0].Items[0].TrackId);
     }
+
+    [TestMethod]
+    public void Load_VersionOneDrumlessSelection_AddsNewGuitarAndPianoStems()
+    {
+        using var temporary = new TemporaryDirectory();
+        var statePath = temporary.Combine("studio-state.json");
+        File.WriteAllText(
+            statePath,
+            """
+            {
+              "schemaVersion": 1,
+              "outputFolder": "C:\\Audio",
+              "stemSelection": "bass, vocals, other",
+              "playbackMode": "sequential"
+            }
+            """);
+
+        var loaded = new StudioStateStore(statePath).Load();
+
+        Assert.AreEqual(StemSelection.Drumless, loaded.StemSelection);
+        Assert.IsTrue(loaded.StemSelection.HasFlag(StemSelection.Guitar));
+        Assert.IsTrue(loaded.StemSelection.HasFlag(StemSelection.Piano));
+    }
 }

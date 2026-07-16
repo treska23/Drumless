@@ -521,12 +521,16 @@
                                                       Margin="0,0,18,6" AutomationProperties.AutomationId="KeepBassCheckBox" />
                                             <CheckBox Content="Voz" IsChecked="{Binding KeepVocals}"
                                                       Margin="0,0,18,6" AutomationProperties.AutomationId="KeepVocalsCheckBox" />
-                                            <CheckBox Content="Guitarras, teclados y otros" IsChecked="{Binding KeepOther}"
+                                            <CheckBox Content="Guitarra" IsChecked="{Binding KeepGuitar}"
+                                                      Margin="0,0,18,6" AutomationProperties.AutomationId="KeepGuitarCheckBox" />
+                                            <CheckBox Content="Piano y teclados" IsChecked="{Binding KeepPiano}"
+                                                      Margin="0,0,18,6" AutomationProperties.AutomationId="KeepPianoCheckBox" />
+                                            <CheckBox Content="Otros" IsChecked="{Binding KeepOther}"
                                                       Margin="0,0,0,6" AutomationProperties.AutomationId="KeepOtherCheckBox" />
                                         </WrapPanel>
                                         <TextBlock Text="{Binding StemSelectionSummary}" Foreground="{StaticResource Accent}"
                                                    FontWeight="SemiBold" Margin="0,3,0,0" />
-                                        <TextBlock Text="Demucs separa cuatro grupos. ‘Otros’ incluye normalmente guitarras, teclados y el resto de instrumentos."
+                                        <TextBlock Text="Demucs separa seis grupos: batería, bajo, voz, guitarra, piano/teclados y otros. Puedes conservar cualquier combinación."
                                                    Foreground="{StaticResource TextSecondary}" FontSize="11"
                                                    TextWrapping="Wrap" Margin="0,4,0,0" />
                                     </StackPanel>
