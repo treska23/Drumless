@@ -86,7 +86,12 @@ public sealed class StudioStateStoreTests
             YouTubeVideoId = "video12345",
             YouTubeUrl = "https://www.youtube.com/watch?v=video12345",
             Title = "Backing track",
-            ThumbnailUrl = "https://i.ytimg.com/vi/video12345/hqdefault.jpg"
+            ThumbnailUrl = "https://i.ytimg.com/vi/video12345/hqdefault.jpg",
+            Tempo = new TempoSettings(
+                96d,
+                1.25d,
+                MetronomeEnabled: true,
+                MetronomeVolume: 0.33d)
         });
         playlist.Items.Add(new PlaylistItem
         {
@@ -96,6 +101,28 @@ public sealed class StudioStateStoreTests
             Title = "Original"
         });
         state.Playlists.Add(playlist);
+        state.AnalysisRecords.Add(new MediaAnalysisRecord
+        {
+            MediaKey = "local:track-original",
+            Tempo = state.Tracks[0].Tempo,
+            TempoOrigin = TempoAnalysisOrigin.ManuallyAdjusted,
+            TempoUpdatedAtUtc = new DateTimeOffset(2026, 7, 16, 8, 0, 0, TimeSpan.Zero),
+            PerformanceSessions =
+            [
+                new DrumPerformanceSession(
+                    "session-1",
+                    new DateTimeOffset(2026, 7, 16, 8, 5, 0, TimeSpan.Zero),
+                    true,
+                    23.5d,
+                    64,
+                    59,
+                    2,
+                    3,
+                    92.1875d,
+                    17.4d,
+                    61d)
+            ]
+        });
 
         store.Save(state);
         var loaded = store.Load();
@@ -148,7 +175,19 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(PlaylistItemKind.YouTube, loaded.Playlists[0].Items[1].Kind);
         Assert.AreEqual("video12345", loaded.Playlists[0].Items[1].YouTubeVideoId);
         Assert.AreEqual("Backing track", loaded.Playlists[0].Items[1].Title);
+        var loadedYouTubeTempo = loaded.Playlists[0].Items[1].Tempo;
+        Assert.IsNotNull(loadedYouTubeTempo);
+        Assert.AreEqual(96d, loadedYouTubeTempo.Bpm);
+        Assert.AreEqual(1.25d, loadedYouTubeTempo.FirstBeatSeconds);
+        Assert.IsTrue(loadedYouTubeTempo.MetronomeEnabled);
         Assert.AreEqual("track-original", loaded.Playlists[0].Items[2].TrackId);
+        Assert.AreEqual(2, loaded.AnalysisRecords.Count);
+        var loadedAnalysis = loaded.AnalysisRecords.Single(record =>
+            record.MediaKey == "local:track-original");
+        Assert.AreEqual(TempoAnalysisOrigin.ManuallyAdjusted, loadedAnalysis.TempoOrigin);
+        Assert.AreEqual(1, loadedAnalysis.PerformanceSessions.Count);
+        Assert.AreEqual(92.1875d, loadedAnalysis.PerformanceSessions[0].AccuracyPercent);
+        Assert.IsTrue(loadedAnalysis.PerformanceSessions[0].FinishedAtNaturalEnd);
     }
 
     [TestMethod]
@@ -256,5 +295,56 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(StemSelection.Drumless, loaded.StemSelection);
         Assert.IsTrue(loaded.StemSelection.HasFlag(StemSelection.Guitar));
         Assert.IsTrue(loaded.StemSelection.HasFlag(StemSelection.Piano));
+    }
+
+    [TestMethod]
+    public void Load_VersionTwoEmbeddedTempo_MigratesToNormalizedAnalysisDatabase()
+    {
+        using var temporary = new TemporaryDirectory();
+        var statePath = temporary.Combine("studio-state.json");
+        File.WriteAllText(
+            statePath,
+            """
+            {
+              "schemaVersion": 2,
+              "outputFolder": "C:\\Audio",
+              "tracks": [
+                {
+                  "id": "track-a",
+                  "title": "Local",
+                  "path": "C:\\Audio\\local.wav",
+                  "variant": "original",
+                  "tempo": { "bpm": 123, "firstBeatSeconds": 0.4, "analysisConfidence": 0.75 }
+                }
+              ],
+              "playlists": [
+                {
+                  "id": "playlist-a",
+                  "name": "Mixed",
+                  "items": [
+                    {
+                      "id": "video-a",
+                      "kind": "youTube",
+                      "youTubeVideoId": "abc123",
+                      "youTubeUrl": "https://www.youtube.com/watch?v=abc123",
+                      "title": "Video",
+                      "tempo": { "bpm": 98, "firstBeatSeconds": 1.2 }
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+
+        var loaded = new StudioStateStore(statePath).Load();
+
+        Assert.AreEqual(2, loaded.AnalysisRecords.Count);
+        Assert.AreEqual(
+            TempoAnalysisOrigin.Automatic,
+            loaded.AnalysisRecords.Single(record => record.MediaKey == "local:track-a").TempoOrigin);
+        Assert.AreEqual(
+            98d,
+            loaded.AnalysisRecords.Single(record => record.MediaKey == "youtube:abc123").Tempo?.Bpm);
+        Assert.AreEqual(98d, loaded.Playlists[0].Items[0].Tempo?.Bpm);
     }
 }

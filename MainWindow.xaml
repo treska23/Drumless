@@ -308,6 +308,10 @@
                                             AutomationProperties.AutomationId="MetronomeVolumeSlider" />
                                     <TextBlock Text="{Binding TempoStatus}" Foreground="{StaticResource TextSecondary}"
                                                TextWrapping="Wrap" FontSize="11" Margin="0,7,0,0" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Borrar análisis de esta pista"
+                                            Margin="0,10,0,0" HorizontalAlignment="Left"
+                                            Command="{Binding ClearAnalysisDataCommand}"
+                                            AutomationProperties.AutomationId="ClearAnalysisDataButton" />
                                 </StackPanel>
                             </Border>
 
@@ -323,7 +327,7 @@
                                              AutomationProperties.AutomationId="PerformanceLatencyTextBox" />
                                     <WrapPanel Margin="0,9,0,0">
                                         <Button Style="{StaticResource PrimaryButton}" Content="Iniciar evaluación"
-                                                IsEnabled="{Binding HasTempo}"
+                                                IsEnabled="{Binding CanEvaluatePerformance}"
                                                 Command="{Binding StartPerformanceEvaluationCommand}"
                                                 AutomationProperties.AutomationId="StartPerformanceButton" />
                                         <Button Style="{StaticResource SecondaryButton}" Content="Finalizar"
@@ -333,6 +337,11 @@
                                     </WrapPanel>
                                     <TextBlock Text="{Binding PerformanceResultText}" TextWrapping="Wrap"
                                                Margin="0,9,0,0" Foreground="{StaticResource TextSecondary}" />
+                                    <TextBlock Text="HISTORIAL GUARDADO" Foreground="{StaticResource TextSecondary}"
+                                               FontSize="10" FontWeight="Bold" Margin="0,12,0,3" />
+                                    <TextBlock Text="{Binding PerformanceHistoryText}" TextWrapping="Wrap"
+                                               Foreground="{StaticResource TextSecondary}" FontSize="11"
+                                               AutomationProperties.AutomationId="PerformanceHistoryText" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -587,6 +596,12 @@
                                                                     Command="{Binding DataContext.AddTrackToPlaylistCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                     CommandParameter="{Binding}"
                                                                     AutomationProperties.AutomationId="AddTrackToPlaylistButton" />
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="Quitar registro" Padding="10,7"
+                                                                    Margin="6,0,0,0"
+                                                                    ToolTip="Quita la pista de la biblioteca y borra su análisis; no elimina el archivo"
+                                                                    Command="{Binding DataContext.RemoveLibraryTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    AutomationProperties.AutomationId="RemoveLibraryTrackButton" />
                                                         </StackPanel>
                                                     </Grid>
                                                 </Border>

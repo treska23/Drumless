@@ -68,7 +68,9 @@ $requiredPracticeControls = @(
     "MetronomeVolumeSlider",
     "PerformanceLatencyTextBox",
     "StartPerformanceButton",
-    "FinishPerformanceButton"
+    "FinishPerformanceButton",
+    "ClearAnalysisDataButton",
+    "PerformanceHistoryText"
 )
 foreach ($automationId in $requiredPracticeControls) {
     if (-not (Find-ElementByAutomationId $automationId)) {
@@ -99,6 +101,7 @@ $requiredTrackControls = @(
     "ChooseOutputFolderButton",
     "RescanLibraryButton",
     "TrackLibraryList",
+    "RemoveLibraryTrackButton",
     "PlaylistSelector",
     "PlaylistNameTextBox",
     "NewPlaylistButton",

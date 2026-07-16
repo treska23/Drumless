@@ -136,4 +136,21 @@ public sealed class TrackLibraryServiceTests
         Assert.AreEqual(generated.Id, restored.Tracks[0].Id);
         Assert.IsTrue(restored.Tracks[0].IsAvailable);
     }
+
+    [TestMethod]
+    public void Remove_DeletesOnlyTheLibraryRecordAndKeepsTheAudioFile()
+    {
+        using var temporary = new TemporaryDirectory();
+        var path = temporary.Combine("keep-me.wav");
+        File.WriteAllBytes(path, [1, 2, 3]);
+        var library = new TrackLibraryService();
+        var track = library.RegisterImported(path, TrackVariant.Original);
+
+        var removed = library.Remove(track.Id);
+
+        Assert.IsTrue(removed);
+        Assert.AreEqual(0, library.Tracks.Count);
+        Assert.IsFalse(library.TryGetById(track.Id, out _));
+        Assert.IsTrue(File.Exists(path));
+    }
 }

@@ -36,3 +36,52 @@ public sealed record DrumPerformanceResult(
     double AccuracyPercent,
     double MeanAbsoluteErrorMilliseconds,
     double MaximumErrorMilliseconds);
+
+public enum TempoAnalysisOrigin
+{
+    Manual,
+    Automatic,
+    ManuallyAdjusted
+}
+
+public sealed class MediaAnalysisRecord
+{
+    public required string MediaKey { get; init; }
+    public TempoSettings? Tempo { get; set; }
+    public TempoAnalysisOrigin TempoOrigin { get; set; } = TempoAnalysisOrigin.Manual;
+    public DateTimeOffset? TempoUpdatedAtUtc { get; set; }
+    public List<DrumPerformanceSession> PerformanceSessions { get; set; } = [];
+}
+
+public sealed record DrumPerformanceSession(
+    string Id,
+    DateTimeOffset FinishedAtUtc,
+    bool FinishedAtNaturalEnd,
+    double LatencyCompensationMilliseconds,
+    int TotalHits,
+    int AccurateHits,
+    int EarlyHits,
+    int LateHits,
+    double AccuracyPercent,
+    double MeanAbsoluteErrorMilliseconds,
+    double MaximumErrorMilliseconds)
+{
+    public static DrumPerformanceSession Create(
+        DrumPerformanceResult result,
+        double latencyCompensationMilliseconds,
+        bool finishedAtNaturalEnd,
+        DateTimeOffset? finishedAtUtc = null) => new(
+            Guid.NewGuid().ToString("N"),
+            finishedAtUtc ?? DateTimeOffset.UtcNow,
+            finishedAtNaturalEnd,
+            Math.Clamp(latencyCompensationMilliseconds, -500d, 500d),
+            result.TotalHits,
+            result.AccurateHits,
+            result.EarlyHits,
+            result.LateHits,
+            result.AccuracyPercent,
+            result.MeanAbsoluteErrorMilliseconds,
+            result.MaximumErrorMilliseconds);
+}
+
+public sealed record YouTubeMetronomeRequest(TempoSettings? Settings);

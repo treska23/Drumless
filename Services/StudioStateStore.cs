@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -255,6 +255,29 @@ public sealed class StudioStateStore
             state.Playlists.Add(model);
         }
 
+        foreach (var analysis in document.AnalysisRecords ?? [])
+        {
+            if (TryCreateAnalysisRecord(analysis, out var record) &&
+                state.AnalysisRecords.All(existing => existing.MediaKey != record.MediaKey))
+            {
+                state.AnalysisRecords.Add(record);
+            }
+        }
+
+        // Los estados anteriores guardaban el tempo dentro de pistas y elementos de playlist.
+        // Se importa una sola vez a la base normalizada, que a partir de v3 es la autoridad.
+        foreach (var track in state.Tracks.Where(track => track.Tempo is not null))
+        {
+            ImportLegacyTempo(state, $"local:{track.Id}", track.Tempo!);
+        }
+        foreach (var item in state.Playlists.SelectMany(playlist => playlist.Items)
+                     .Where(item => item.Tempo is not null))
+        {
+            ImportLegacyTempo(state, item.MediaKey, item.Tempo!);
+        }
+
+        HydrateTempoFromAnalysis(state);
+
         return state;
     }
 
@@ -319,9 +342,146 @@ public sealed class StudioStateStore
                 YouTubeVideoId = item.YouTubeVideoId,
                 YouTubeUrl = item.YouTubeUrl,
                 Title = item.Title,
-                ThumbnailUrl = item.ThumbnailUrl
+                ThumbnailUrl = item.ThumbnailUrl,
+                Tempo = item.Tempo is null ? null : ToTempoDto(item.Tempo)
             }).ToList()
-        }).ToList()
+        }).ToList(),
+        AnalysisRecords = state.AnalysisRecords.Select(ToAnalysisDto).ToList()
+    };
+
+    private static void ImportLegacyTempo(
+        StudioState state,
+        string mediaKey,
+        TempoSettings tempo)
+    {
+        if (string.IsNullOrWhiteSpace(mediaKey) ||
+            state.AnalysisRecords.Any(record => record.MediaKey == mediaKey))
+        {
+            return;
+        }
+
+        state.AnalysisRecords.Add(new MediaAnalysisRecord
+        {
+            MediaKey = mediaKey,
+            Tempo = TempoSettings.Normalize(tempo),
+            TempoOrigin = tempo.AnalysisConfidence > 0d
+                ? TempoAnalysisOrigin.Automatic
+                : TempoAnalysisOrigin.Manual,
+            TempoUpdatedAtUtc = null
+        });
+    }
+
+    private static void HydrateTempoFromAnalysis(StudioState state)
+    {
+        var tempos = state.AnalysisRecords
+            .Where(record => record.Tempo is not null)
+            .ToDictionary(record => record.MediaKey, record => record.Tempo!, StringComparer.Ordinal);
+        foreach (var track in state.Tracks)
+        {
+            if (tempos.TryGetValue($"local:{track.Id}", out var tempo))
+            {
+                track.Tempo = tempo;
+            }
+        }
+        foreach (var item in state.Playlists.SelectMany(playlist => playlist.Items))
+        {
+            item.Tempo = tempos.GetValueOrDefault(item.MediaKey);
+        }
+    }
+
+    private static bool TryCreateAnalysisRecord(
+        MediaAnalysisDto dto,
+        out MediaAnalysisRecord record)
+    {
+        record = null!;
+        if (string.IsNullOrWhiteSpace(dto.MediaKey))
+        {
+            return false;
+        }
+
+        var tempo = TryCreateTempo(dto.Tempo);
+        var origin = Enum.IsDefined(dto.TempoOrigin)
+            ? dto.TempoOrigin
+            : TempoAnalysisOrigin.Manual;
+        var sessions = new List<DrumPerformanceSession>();
+        foreach (var session in dto.PerformanceSessions ?? [])
+        {
+            if (TryCreatePerformanceSession(session, out var model) &&
+                sessions.All(existing => existing.Id != model.Id))
+            {
+                sessions.Add(model);
+            }
+        }
+
+        record = new MediaAnalysisRecord
+        {
+            MediaKey = dto.MediaKey,
+            Tempo = tempo,
+            TempoOrigin = origin,
+            TempoUpdatedAtUtc = dto.TempoUpdatedAtUtc,
+            PerformanceSessions = sessions
+        };
+        return tempo is not null || sessions.Count > 0;
+    }
+
+    private static bool TryCreatePerformanceSession(
+        DrumPerformanceSessionDto dto,
+        out DrumPerformanceSession session)
+    {
+        session = null!;
+        if (string.IsNullOrWhiteSpace(dto.Id) || dto.FinishedAtUtc == default ||
+            dto.TotalHits is < 0 || dto.AccurateHits is < 0 ||
+            dto.EarlyHits is < 0 || dto.LateHits is < 0 ||
+            dto.AccurateHits > dto.TotalHits || dto.EarlyHits > dto.TotalHits ||
+            dto.LateHits > dto.TotalHits ||
+            dto.AccurateHits + dto.EarlyHits + dto.LateHits > dto.TotalHits ||
+            !double.IsFinite(dto.LatencyCompensationMilliseconds) ||
+            !double.IsFinite(dto.AccuracyPercent) ||
+            !double.IsFinite(dto.MeanAbsoluteErrorMilliseconds) ||
+            !double.IsFinite(dto.MaximumErrorMilliseconds) ||
+            dto.AccuracyPercent is < 0d or > 100d ||
+            dto.MeanAbsoluteErrorMilliseconds is < 0d ||
+            dto.MaximumErrorMilliseconds is < 0d)
+        {
+            return false;
+        }
+
+        session = new DrumPerformanceSession(
+            dto.Id,
+            dto.FinishedAtUtc,
+            dto.FinishedAtNaturalEnd,
+            Math.Clamp(dto.LatencyCompensationMilliseconds, -500d, 500d),
+            dto.TotalHits,
+            dto.AccurateHits,
+            dto.EarlyHits,
+            dto.LateHits,
+            dto.AccuracyPercent,
+            dto.MeanAbsoluteErrorMilliseconds,
+            dto.MaximumErrorMilliseconds);
+        return true;
+    }
+
+    private static MediaAnalysisDto ToAnalysisDto(MediaAnalysisRecord record) => new()
+    {
+        MediaKey = record.MediaKey,
+        Tempo = record.Tempo is null ? null : ToTempoDto(record.Tempo),
+        TempoOrigin = record.TempoOrigin,
+        TempoUpdatedAtUtc = record.TempoUpdatedAtUtc,
+        PerformanceSessions = record.PerformanceSessions.Select(session =>
+            new DrumPerformanceSessionDto
+            {
+                Id = session.Id,
+                FinishedAtUtc = session.FinishedAtUtc,
+                FinishedAtNaturalEnd = session.FinishedAtNaturalEnd,
+                LatencyCompensationMilliseconds = session.LatencyCompensationMilliseconds,
+                TotalHits = session.TotalHits,
+                AccurateHits = session.AccurateHits,
+                EarlyHits = session.EarlyHits,
+                LateHits = session.LateHits,
+                AccuracyPercent = session.AccuracyPercent,
+                MeanAbsoluteErrorMilliseconds = session.MeanAbsoluteErrorMilliseconds,
+                MaximumErrorMilliseconds = session.MaximumErrorMilliseconds
+            }).ToList()
     };
 
     private static bool TryCreatePlaylistItem(PlaylistItemDto dto, out PlaylistItem item)
@@ -352,7 +512,8 @@ public sealed class StudioStateStore
             YouTubeVideoId = dto.YouTubeVideoId,
             YouTubeUrl = dto.YouTubeUrl,
             Title = dto.Title,
-            ThumbnailUrl = dto.ThumbnailUrl
+            ThumbnailUrl = dto.ThumbnailUrl,
+            Tempo = TryCreateTempo(dto.Tempo)
         };
         return true;
     }
@@ -373,6 +534,16 @@ public sealed class StudioStateStore
             tempo.MetronomeVolume ?? 0.55d,
             tempo.AnalysisConfidence ?? 0d));
     }
+
+    private static TempoDto ToTempoDto(TempoSettings tempo) => new()
+    {
+        Bpm = tempo.Bpm,
+        FirstBeatSeconds = tempo.FirstBeatSeconds,
+        BeatsPerBar = tempo.BeatsPerBar,
+        MetronomeEnabled = tempo.MetronomeEnabled,
+        MetronomeVolume = tempo.MetronomeVolume,
+        AnalysisConfidence = tempo.AnalysisConfidence
+    };
 
     private static StemSelection NormalizeStemSelection(
         StemSelection? selection,
@@ -431,6 +602,7 @@ public sealed class StudioStateStore
         public double? PerformanceLatencyCompensationMs { get; set; }
         public List<TrackDto>? Tracks { get; set; }
         public List<PlaylistDto>? Playlists { get; set; }
+        public List<MediaAnalysisDto>? AnalysisRecords { get; set; }
         public string? SelectedPlaylistId { get; set; }
         public PlaybackMode PlaybackMode { get; set; } = PlaybackMode.Sequential;
     }
@@ -472,11 +644,36 @@ public sealed class StudioStateStore
         public string? YouTubeUrl { get; set; }
         public string? Title { get; set; }
         public string? ThumbnailUrl { get; set; }
+        public TempoDto? Tempo { get; set; }
     }
 
     private sealed class AudioInputMonitorDto
     {
         public int? ChannelIndex { get; set; }
         public double? Gain { get; set; }
+    }
+
+    private sealed class MediaAnalysisDto
+    {
+        public string? MediaKey { get; set; }
+        public TempoDto? Tempo { get; set; }
+        public TempoAnalysisOrigin TempoOrigin { get; set; }
+        public DateTimeOffset? TempoUpdatedAtUtc { get; set; }
+        public List<DrumPerformanceSessionDto>? PerformanceSessions { get; set; }
+    }
+
+    private sealed class DrumPerformanceSessionDto
+    {
+        public string? Id { get; set; }
+        public DateTimeOffset FinishedAtUtc { get; set; }
+        public bool FinishedAtNaturalEnd { get; set; }
+        public double LatencyCompensationMilliseconds { get; set; }
+        public int TotalHits { get; set; }
+        public int AccurateHits { get; set; }
+        public int EarlyHits { get; set; }
+        public int LateHits { get; set; }
+        public double AccuracyPercent { get; set; }
+        public double MeanAbsoluteErrorMilliseconds { get; set; }
+        public double MaximumErrorMilliseconds { get; set; }
     }
 }

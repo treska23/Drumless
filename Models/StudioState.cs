@@ -25,6 +25,7 @@ public sealed class PlaylistItem
     public string? YouTubeUrl { get; init; }
     public required string Title { get; init; }
     public string? ThumbnailUrl { get; init; }
+    public TempoSettings? Tempo { get; set; }
 
     public string MediaKey => Kind switch
     {
@@ -56,6 +57,7 @@ public sealed class StudioState
     public double PerformanceLatencyCompensationMs { get; set; }
     public List<TrackRecord> Tracks { get; set; } = [];
     public List<Playlist> Playlists { get; set; } = [];
+    public List<MediaAnalysisRecord> AnalysisRecords { get; set; } = [];
     public string? SelectedPlaylistId { get; set; }
     public PlaybackMode PlaybackMode { get; set; } =
         global::DrumPracticeStudio.Models.PlaybackMode.Sequential;
@@ -67,7 +69,7 @@ public sealed class TrackRecord
     public required string Title { get; init; }
     public required string Path { get; init; }
     public required TrackVariant Variant { get; init; }
-    public TempoSettings? Tempo { get; init; }
+    public TempoSettings? Tempo { get; set; }
 }
 
 public sealed class Playlist : ObservableObject

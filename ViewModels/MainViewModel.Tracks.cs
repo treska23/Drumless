@@ -14,6 +14,7 @@ public sealed partial class MainViewModel
     public event EventHandler<YouTubeControlRequest>? YouTubeControlRequested;
     private readonly StudioStateStore _studioStateStore = new();
     private readonly TrackLibraryService _trackLibrary = new();
+    private readonly MediaAnalysisDatabase _analysisDatabase = new();
     private readonly PlaybackNavigator _playbackNavigator = new();
     private readonly Dictionary<string, PlaylistItem> _playlistPlaybackItems = new(StringComparer.Ordinal);
     private CancellationTokenSource? _trackLoadCancellation;
@@ -40,6 +41,7 @@ public sealed partial class MainViewModel
     public ObservableCollection<PlaybackModeOption> PlaybackModeOptions { get; }
 
     public RelayCommand<LocalTrack> LoadTrackCommand { get; private set; } = null!;
+    public RelayCommand<LocalTrack> RemoveLibraryTrackCommand { get; private set; } = null!;
     public RelayCommand ChooseOutputFolderCommand { get; private set; } = null!;
     public RelayCommand RescanLibraryCommand { get; private set; } = null!;
     public RelayCommand CreatePlaylistCommand { get; private set; } = null!;
@@ -202,7 +204,13 @@ public sealed partial class MainViewModel
             _keepPiano = state.StemSelection.HasFlag(StemSelection.Piano);
             _keepOther = state.StemSelection.HasFlag(StemSelection.Other);
             _performanceLatencyCompensationMs = state.PerformanceLatencyCompensationMs;
+            _analysisDatabase.Load(state.AnalysisRecords);
             _trackLibrary.Load(state.Tracks);
+            foreach (var track in Tracks)
+            {
+                _analysisDatabase.ImportTempoIfMissing($"local:{track.Id}", track.Tempo);
+                track.Tempo = _analysisDatabase.GetTempo($"local:{track.Id}");
+            }
             _lastRecordingTrack = Tracks
                 .Where(track => track.Variant == TrackVariant.Recording && track.IsAvailable)
                 .OrderByDescending(track => File.GetLastWriteTimeUtc(track.Path))
@@ -210,6 +218,11 @@ public sealed partial class MainViewModel
 
             foreach (var playlist in state.Playlists)
             {
+                foreach (var item in playlist.Items)
+                {
+                    _analysisDatabase.ImportTempoIfMissing(item.MediaKey, item.Tempo);
+                    item.Tempo = _analysisDatabase.GetTempo(item.MediaKey);
+                }
                 AttachPlaylist(playlist);
                 Playlists.Add(playlist);
             }
@@ -272,6 +285,7 @@ public sealed partial class MainViewModel
                 _ = LoadAndSelectTrackAsync(track, autoPlay: false, resetNavigation: true);
             }
         });
+        RemoveLibraryTrackCommand = new RelayCommand<LocalTrack>(RemoveTrackFromLibrary);
         ChooseOutputFolderCommand = new RelayCommand(ChooseOutputFolder);
         RescanLibraryCommand = new RelayCommand(() => RescanOutputFolder(showStatus: true));
         CreatePlaylistCommand = new RelayCommand(CreatePlaylist);
@@ -585,6 +599,14 @@ public sealed partial class MainViewModel
             return false;
         }
 
+        var addedItem = SelectedPlaylist.Items.FirstOrDefault(item =>
+            item.Kind == PlaylistItemKind.YouTube &&
+            string.Equals(item.YouTubeVideoId, videoId, StringComparison.Ordinal));
+        if (addedItem is not null)
+        {
+            addedItem.Tempo = _analysisDatabase.GetTempo(addedItem.MediaKey);
+        }
+
         PlaylistChanged();
         StatusMessage = $"Vídeo añadido a {SelectedPlaylist.Name}: {title}";
         return true;
@@ -600,6 +622,50 @@ public sealed partial class MainViewModel
 
         PlaylistChanged();
         StatusMessage = $"{item.Title} quitado de la playlist · el origen sigue intacto";
+    }
+
+    private void RemoveTrackFromLibrary(LocalTrack? track)
+    {
+        if (track is null)
+        {
+            return;
+        }
+
+        if (CurrentTrack?.Id == track.Id)
+        {
+            StopTrack();
+            CancelPendingTrackLoad();
+            _audio.UnloadTrack();
+            CurrentTrack = null;
+        }
+
+        foreach (var playlist in Playlists)
+        {
+            for (var index = playlist.Items.Count - 1; index >= 0; index--)
+            {
+                if (playlist.Items[index].Kind == PlaylistItemKind.LocalTrack &&
+                    string.Equals(playlist.Items[index].TrackId, track.Id, StringComparison.Ordinal))
+                {
+                    playlist.Items.RemoveAt(index);
+                }
+            }
+        }
+
+        _analysisDatabase.Remove($"local:{track.Id}");
+        if (!_trackLibrary.Remove(track.Id))
+        {
+            return;
+        }
+
+        if (SelectedLibraryTrack?.Id == track.Id)
+        {
+            SelectedLibraryTrack = null;
+        }
+        ResetPlaylistPlaybackQueue(currentItemId: null);
+        RefreshLibraryPresentation();
+        RefreshPerformanceHistory();
+        SaveTrackWorkspace();
+        StatusMessage = $"{track.Title} quitada de la biblioteca y datos de análisis borrados · el archivo no se ha eliminado";
     }
 
     private void MovePlaylistItem(PlaylistItemViewModel? item, bool moveUp)
@@ -770,6 +836,7 @@ public sealed partial class MainViewModel
                 _audio.UnloadTrack();
                 CurrentTrack = null;
                 _currentYouTubeItem = playlistItem;
+                OnCurrentYouTubeChanged(playlistItem);
                 OnPropertyChanged(nameof(CanStartOutputRecording));
                 OnPropertyChanged(nameof(CurrentTrackTitle));
                 OnPropertyChanged(nameof(CurrentTrackSubtitle));
@@ -951,6 +1018,7 @@ public sealed partial class MainViewModel
             };
             state.Tracks.AddRange(_trackLibrary.Snapshot());
             state.Playlists.AddRange(Playlists);
+            state.AnalysisRecords.AddRange(_analysisDatabase.Snapshot());
             _studioStateStore.Save(state);
         }
         catch (Exception exception) when (exception is

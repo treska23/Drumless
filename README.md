@@ -27,6 +27,10 @@ Prototipo Windows de una aplicación de práctica para batería electrónica y t
   todas las entradas ASIO monitorizadas; cada toma se registra en la biblioteca.
 - Análisis de tempo bajo demanda, BPM y primer pulso editables, claqueta ligada a la
   posición exacta del transporte y evaluación temporal de golpes de batería MIDI.
+- Base de datos JSON local y versionada para conservar el tempo, origen y confianza del
+  análisis, ajustes de claqueta e historial fechado de puntuaciones por pista o vídeo.
+  Quitar un elemento de una playlist conserva esos datos; quitar una pista de la biblioteca
+  los borra sin eliminar el archivo de audio.
 - Búsqueda y reproducción de YouTube dentro de la aplicación mediante el sitio oficial
   integrado con WebView2, sin claves de API guardadas.
 
@@ -47,8 +51,9 @@ se buscan en las ubicaciones VST3 estándar de Windows, principalmente
 dotnet test DrumPracticeStudio.sln
 ```
 
-La batería cubre persistencia, escaneo y desaparecidos, playlists y reordenación,
-reproducción secuencial/aleatoria y las garantías de concurrencia del transporte.
+La batería cubre persistencia y migración de análisis, escaneo y desaparecidos, playlists
+y reordenación, reproducción secuencial/aleatoria y las garantías de concurrencia del
+transporte.
 
 ## Límites actuales
 

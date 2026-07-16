@@ -7,6 +7,7 @@ namespace DrumPracticeStudio.ViewModels;
 
 public sealed partial class MainViewModel
 {
+    public event EventHandler<YouTubeMetronomeRequest>? YouTubeMetronomeChanged;
     private readonly TempoAnalysisService _tempoAnalysis = new();
     private readonly DrumPerformanceScorer _performanceScorer = new();
     private CancellationTokenSource? _tempoAnalysisCancellation;
@@ -19,11 +20,14 @@ public sealed partial class MainViewModel
     private double _metronomeVolume = 0.55d;
     private string _tempoStatus = "Carga una pista local y analiza su tempo cuando quieras.";
     private double _performanceLatencyCompensationMs;
+    private string _performanceHistoryText = "Sin sesiones guardadas para esta pista.";
+    private string? _performanceMediaKey;
     private string _performanceResultText = "Sin sesión de precisión.";
 
     public RelayCommand AnalyzeTempoCommand { get; private set; } = null!;
     public RelayCommand StartPerformanceEvaluationCommand { get; private set; } = null!;
     public RelayCommand FinishPerformanceEvaluationCommand { get; private set; } = null!;
+    public RelayCommand ClearAnalysisDataCommand { get; private set; } = null!;
 
     public bool IsAnalyzingTempo
     {
@@ -38,7 +42,9 @@ public sealed partial class MainViewModel
     }
 
     public bool CanAnalyzeTempo => CurrentTrack is { IsAvailable: true } && !IsAnalyzingTempo;
-    public bool HasTempo => CurrentTrack?.Tempo is not null;
+    public bool HasTempo => CurrentTrack?.Tempo is not null || _currentYouTubeItem?.Tempo is not null;
+    public bool CanEvaluatePerformance => CurrentTrack?.Tempo is not null;
+    public TempoSettings? CurrentYouTubeTempoSettings => _currentYouTubeItem?.Tempo;
     public bool IsPerformanceEvaluationActive => _performanceScorer.IsActive;
 
     public double TempoBpm
@@ -127,11 +133,18 @@ public sealed partial class MainViewModel
         private set => SetProperty(ref _performanceResultText, value);
     }
 
+    public string PerformanceHistoryText
+    {
+        get => _performanceHistoryText;
+        private set => SetProperty(ref _performanceHistoryText, value);
+    }
+
     private void InitializeTempoCommands()
     {
         AnalyzeTempoCommand = new RelayCommand(() => _ = AnalyzeCurrentTrackTempoAsync());
         StartPerformanceEvaluationCommand = new RelayCommand(StartPerformanceEvaluation);
         FinishPerformanceEvaluationCommand = new RelayCommand(() => FinishPerformanceEvaluation(false));
+        ClearAnalysisDataCommand = new RelayCommand(ClearCurrentAnalysisData);
     }
 
     private async Task AnalyzeCurrentTrackTempoAsync()
@@ -164,7 +177,11 @@ public sealed partial class MainViewModel
                 MetronomeEnabled,
                 MetronomeVolume,
                 result.Confidence);
-            SynchronizeTempoEditor(track);
+            _analysisDatabase.SetTempo(
+                $"local:{track.Id}",
+                track.Tempo,
+                TempoAnalysisOrigin.Automatic);
+            SynchronizeTempoEditor(track.Tempo, track.TempoLabel);
             SaveTrackWorkspace();
             TempoStatus = $"Detectado: {result.Bpm:0.##} BPM · primer pulso " +
                           $"{result.FirstBeatSeconds:0.000} s · confianza {result.Confidence:P0}. " +
@@ -196,17 +213,37 @@ public sealed partial class MainViewModel
         {
             FinishPerformanceEvaluation(false);
         }
-        SynchronizeTempoEditor(track);
+        SynchronizeTempoEditor(track?.Tempo, track?.TempoLabel);
+        YouTubeMetronomeChanged?.Invoke(this, new YouTubeMetronomeRequest(null));
         OnPropertyChanged(nameof(CanAnalyzeTempo));
         OnPropertyChanged(nameof(HasTempo));
+        OnPropertyChanged(nameof(CanEvaluatePerformance));
+        RefreshPerformanceHistory();
     }
 
-    private void SynchronizeTempoEditor(LocalTrack? track)
+    private void OnCurrentYouTubeChanged(PlaylistItem item)
+    {
+        item.Tempo = _analysisDatabase.GetTempo(item.MediaKey) ?? item.Tempo;
+        SynchronizeTempoEditor(
+            item.Tempo,
+            item.Tempo is null
+                ? null
+                : $"YouTube · {item.Tempo.Bpm:0.##} BPM · primer pulso " +
+                  $"{item.Tempo.FirstBeatSeconds:0.000} s");
+        YouTubeMetronomeChanged?.Invoke(
+            this,
+            new YouTubeMetronomeRequest(item.Tempo));
+        OnPropertyChanged(nameof(CanAnalyzeTempo));
+        OnPropertyChanged(nameof(HasTempo));
+        OnPropertyChanged(nameof(CanEvaluatePerformance));
+        RefreshPerformanceHistory();
+    }
+
+    private void SynchronizeTempoEditor(TempoSettings? tempo, string? label)
     {
         _isSynchronizingTempo = true;
         try
         {
-            var tempo = track?.Tempo;
             _tempoBpm = tempo?.Bpm ?? 120d;
             _tempoFirstBeatSeconds = tempo?.FirstBeatSeconds ?? 0d;
             _tempoBeatsPerBar = tempo?.BeatsPerBar ?? 4;
@@ -218,10 +255,13 @@ public sealed partial class MainViewModel
             OnPropertyChanged(nameof(MetronomeEnabled));
             OnPropertyChanged(nameof(MetronomeVolume));
             OnPropertyChanged(nameof(HasTempo));
+            OnPropertyChanged(nameof(CanEvaluatePerformance));
             TempoStatus = tempo is null
-                ? "Tempo sin analizar. Puedes detectarlo o introducirlo manualmente."
-                : track!.TempoLabel;
-            _audio.ConfigureMetronome(tempo);
+                ? CurrentTrack is null && _currentYouTubeItem is not null
+                    ? "YouTube: introduce BPM y primer pulso manualmente; el análisis automático solo usa archivos locales."
+                    : "Tempo sin analizar. Puedes detectarlo o introducirlo manualmente."
+                : label ?? $"{tempo.Bpm:0.##} BPM";
+            _audio.ConfigureMetronome(CurrentTrack is null ? null : tempo);
         }
         finally
         {
@@ -231,22 +271,39 @@ public sealed partial class MainViewModel
 
     private void SaveTempoFromEditor()
     {
-        if (_isSynchronizingTempo || CurrentTrack is null)
+        if (_isSynchronizingTempo || (CurrentTrack is null && _currentYouTubeItem is null))
         {
             return;
         }
 
-        var confidence = CurrentTrack.Tempo?.AnalysisConfidence ?? 0d;
-        CurrentTrack.Tempo = new TempoSettings(
+        var currentTempo = CurrentTrack?.Tempo ?? _currentYouTubeItem?.Tempo;
+        var tempo = new TempoSettings(
             TempoBpm,
             TempoFirstBeatSeconds,
             TempoBeatsPerBar,
             MetronomeEnabled,
             MetronomeVolume,
-            confidence);
-        _audio.ConfigureMetronome(CurrentTrack.Tempo);
-        TempoStatus = CurrentTrack.TempoLabel;
+            currentTempo?.AnalysisConfidence ?? 0d);
+        if (CurrentTrack is not null)
+        {
+            CurrentTrack.Tempo = tempo;
+            var mediaKey = $"local:{CurrentTrack.Id}";
+            _analysisDatabase.SetTempo(mediaKey, tempo, ResolveEditedTempoOrigin(mediaKey));
+            _audio.ConfigureMetronome(tempo);
+            YouTubeMetronomeChanged?.Invoke(this, new YouTubeMetronomeRequest(null));
+            TempoStatus = CurrentTrack.TempoLabel;
+        }
+        else
+        {
+            var mediaKey = _currentYouTubeItem!.MediaKey;
+            _analysisDatabase.SetTempo(mediaKey, tempo, ResolveEditedTempoOrigin(mediaKey));
+            ApplyYouTubeTempo(_currentYouTubeItem.YouTubeVideoId!, tempo);
+            _audio.ConfigureMetronome(null);
+            YouTubeMetronomeChanged?.Invoke(this, new YouTubeMetronomeRequest(tempo));
+            TempoStatus = $"YouTube · {tempo.Bpm:0.##} BPM · primer pulso {tempo.FirstBeatSeconds:0.000} s";
+        }
         OnPropertyChanged(nameof(HasTempo));
+        OnPropertyChanged(nameof(CanEvaluatePerformance));
         ScheduleSettingsSave();
     }
 
@@ -259,6 +316,7 @@ public sealed partial class MainViewModel
         }
 
         _performanceScorer.Start(tempo, PerformanceLatencyCompensationMs);
+        _performanceMediaKey = $"local:{CurrentTrack.Id}";
         PerformanceResultText = "Evaluación activa · toca la batería MIDI y reproduce la pista.";
         OnPropertyChanged(nameof(IsPerformanceEvaluationActive));
     }
@@ -271,6 +329,17 @@ public sealed partial class MainViewModel
         }
 
         var result = _performanceScorer.Finish();
+        if (!string.IsNullOrWhiteSpace(_performanceMediaKey))
+        {
+            _analysisDatabase.AddPerformanceSession(
+                _performanceMediaKey,
+                DrumPerformanceSession.Create(
+                    result,
+                    PerformanceLatencyCompensationMs,
+                    naturalEnd));
+            SaveTrackWorkspace(silent: true);
+        }
+        _performanceMediaKey = null;
         PerformanceResultText = result.TotalHits == 0
             ? "Sesión finalizada sin golpes MIDI registrados."
             : $"Precisión {result.AccuracyPercent:0.0}% · {result.AccurateHits}/{result.TotalHits} golpes " +
@@ -279,6 +348,80 @@ public sealed partial class MainViewModel
               $"error medio {result.MeanAbsoluteErrorMilliseconds:0.0} ms" +
               (naturalEnd ? " · canción terminada" : string.Empty);
         OnPropertyChanged(nameof(IsPerformanceEvaluationActive));
+        RefreshPerformanceHistory();
+    }
+
+    private TempoAnalysisOrigin ResolveEditedTempoOrigin(string mediaKey)
+    {
+        var existing = _analysisDatabase.Get(mediaKey);
+        return existing?.TempoOrigin is TempoAnalysisOrigin.Automatic or
+            TempoAnalysisOrigin.ManuallyAdjusted
+            ? TempoAnalysisOrigin.ManuallyAdjusted
+            : TempoAnalysisOrigin.Manual;
+    }
+
+    private void ApplyYouTubeTempo(string videoId, TempoSettings? tempo)
+    {
+        foreach (var item in Playlists.SelectMany(playlist => playlist.Items)
+                     .Where(item => item.Kind == PlaylistItemKind.YouTube &&
+                                    string.Equals(item.YouTubeVideoId, videoId, StringComparison.Ordinal)))
+        {
+            item.Tempo = tempo;
+        }
+    }
+
+    private string? CurrentAnalysisMediaKey => CurrentTrack is not null
+        ? $"local:{CurrentTrack.Id}"
+        : _currentYouTubeItem?.MediaKey;
+
+    private void RefreshPerformanceHistory()
+    {
+        var sessions = _analysisDatabase.Get(CurrentAnalysisMediaKey)?.PerformanceSessions ?? [];
+        if (sessions.Count == 0)
+        {
+            PerformanceHistoryText = "Sin sesiones guardadas para esta pista.";
+            return;
+        }
+
+        var latest = sessions
+            .OrderByDescending(session => session.FinishedAtUtc)
+            .Take(3)
+            .Select(session =>
+                $"{session.FinishedAtUtc.ToLocalTime():dd/MM/yyyy HH:mm} · " +
+                $"{session.AccuracyPercent:0.0}% · {session.AccurateHits}/{session.TotalHits} golpes")
+            .ToArray();
+        PerformanceHistoryText = $"{sessions.Count} sesión(es) guardada(s)\n" +
+                                 string.Join("\n", latest);
+    }
+
+    private void ClearCurrentAnalysisData()
+    {
+        if (_performanceScorer.IsActive)
+        {
+            FinishPerformanceEvaluation(false);
+        }
+
+        var mediaKey = CurrentAnalysisMediaKey;
+        if (mediaKey is null || !_analysisDatabase.Remove(mediaKey))
+        {
+            TempoStatus = "Esta pista no tiene datos de análisis guardados.";
+            return;
+        }
+
+        if (CurrentTrack is not null)
+        {
+            CurrentTrack.Tempo = null;
+        }
+        else if (_currentYouTubeItem?.YouTubeVideoId is { } videoId)
+        {
+            ApplyYouTubeTempo(videoId, null);
+        }
+
+        SynchronizeTempoEditor(null, null);
+        PerformanceResultText = "Datos de análisis y sesiones borrados.";
+        RefreshPerformanceHistory();
+        SaveTrackWorkspace();
+        TempoStatus = "Datos de tempo, claqueta y puntuaciones borrados para esta pista.";
     }
 
     private void RecordPerformanceHit(MidiNoteMessage message)

@@ -40,6 +40,7 @@ public partial class MainWindow : Window
         DataContext = _viewModel;
         _viewModel.YouTubePlaybackRequested += OnYouTubePlaybackRequested;
         _viewModel.YouTubeControlRequested += OnYouTubeControlRequested;
+        _viewModel.YouTubeMetronomeChanged += OnYouTubeMetronomeChanged;
         SourceInitialized += OnSourceInitialized;
         Closing += OnClosing;
         Closed += OnClosed;
@@ -137,6 +138,7 @@ public partial class MainWindow : Window
         _windowSource?.RemoveHook(WindowMessageHook);
         _viewModel.YouTubePlaybackRequested -= OnYouTubePlaybackRequested;
         _viewModel.YouTubeControlRequested -= OnYouTubeControlRequested;
+        _viewModel.YouTubeMetronomeChanged -= OnYouTubeMetronomeChanged;
         YouTubeWebView.Dispose();
         _playlistWindow?.Close();
         _viewModel.Dispose();
@@ -303,6 +305,8 @@ public partial class MainWindow : Window
                     });
                     video.addEventListener('play', notifyState);
                     video.addEventListener('pause', notifyState);
+                    video.addEventListener('pause', () => window.__dpsMetronomeReset?.());
+                    video.addEventListener('seeking', () => window.__dpsMetronomeReset?.());
                     video.addEventListener('ended', () => {
                       notifyState();
                       const id = new URL(location.href).searchParams.get('v') || '';
@@ -311,8 +315,66 @@ public partial class MainWindow : Window
                   };
                   attach();
                   new MutationObserver(attach).observe(document.documentElement, { childList: true, subtree: true });
+
+                  if (!window.__dpsMetronomeInstalled) {
+                    window.__dpsMetronomeInstalled = true;
+                    let config = null;
+                    let context = null;
+                    let nextBeat = null;
+                    const scheduled = new Set();
+                    const reset = () => {
+                      nextBeat = null;
+                      for (const oscillator of scheduled) {
+                        try { oscillator.stop(); } catch (_) {}
+                      }
+                      scheduled.clear();
+                    };
+                    window.__dpsMetronomeReset = reset;
+                    window.__dpsSetMetronome = value => {
+                      config = value;
+                      reset();
+                    };
+                    setInterval(() => {
+                      const video = document.querySelector('video');
+                      if (!video || video.paused || video.ended || !config?.metronomeEnabled) return;
+                      context ??= new AudioContext({ latencyHint: 'interactive' });
+                      if (context.state === 'suspended') context.resume().catch(() => {});
+                      const beatSeconds = 60 / config.bpm;
+                      const firstBeat = Math.max(0, config.firstBeatSeconds || 0);
+                      const nowInVideo = video.currentTime;
+                      if (nextBeat === null || nextBeat < nowInVideo - 0.05) {
+                        const beatNumber = Math.max(0, Math.ceil((nowInVideo - firstBeat) / beatSeconds - 1e-7));
+                        nextBeat = firstBeat + beatNumber * beatSeconds;
+                      }
+                      while (nextBeat <= nowInVideo + 0.10) {
+                        const beatNumber = Math.max(0, Math.round((nextBeat - firstBeat) / beatSeconds));
+                        const accent = beatNumber % Math.max(1, config.beatsPerBar || 4) === 0;
+                        const oscillator = context.createOscillator();
+                        const gain = context.createGain();
+                        const start = context.currentTime + Math.max(0, nextBeat - nowInVideo);
+                        oscillator.frequency.value = accent ? 1760 : 1180;
+                        gain.gain.setValueAtTime((config.metronomeVolume || 0.55) * (accent ? 0.8 : 0.55), start);
+                        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.028);
+                        oscillator.connect(gain).connect(context.destination);
+                        oscillator.start(start);
+                        oscillator.stop(start + 0.03);
+                        chrome.webview.postMessage({ type: 'metronome-click', videoTime: nextBeat });
+                        scheduled.add(oscillator);
+                        oscillator.onended = () => scheduled.delete(oscillator);
+                        nextBeat += beatSeconds;
+                      }
+                    }, 25);
+                  }
                 })();
                 """);
+            var youtubeTempo = _viewModel.CurrentYouTubeTempoSettings;
+            await ApplyYouTubeMetronomeAsync(youtubeTempo);
+            if (youtubeTempo is { MetronomeEnabled: true })
+            {
+                YouTubeStatusText.Text =
+                    $"Claqueta YouTube preparada · {youtubeTempo.Bpm:0.##} BPM · primer pulso " +
+                    $"{youtubeTempo.FirstBeatSeconds:0.000} s";
+            }
         }
     }
 
@@ -358,6 +420,40 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnYouTubeMetronomeChanged(
+        object? sender,
+        YouTubeMetronomeRequest request)
+    {
+        await ApplyYouTubeMetronomeAsync(request.Settings);
+        if (request.Settings is { MetronomeEnabled: true } tempo)
+        {
+            YouTubeStatusText.Text =
+                $"Claqueta YouTube preparada · {tempo.Bpm:0.##} BPM · primer pulso " +
+                $"{tempo.FirstBeatSeconds:0.000} s";
+        }
+    }
+
+    private async Task ApplyYouTubeMetronomeAsync(TempoSettings? settings)
+    {
+        if (YouTubeWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var payload = settings is null
+            ? "null"
+            : JsonSerializer.Serialize(new
+            {
+                settings.Bpm,
+                settings.FirstBeatSeconds,
+                settings.BeatsPerBar,
+                settings.MetronomeEnabled,
+                settings.MetronomeVolume
+            }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        await YouTubeWebView.CoreWebView2.ExecuteScriptAsync(
+            $"window.__dpsSetMetronome?.({payload});");
+    }
+
     private async void OnYouTubeWebMessageReceived(
         object? sender,
         CoreWebView2WebMessageReceivedEventArgs e)
@@ -377,6 +473,13 @@ public partial class MainWindow : Window
                      playingElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
             {
                 _viewModel.SetYouTubeAudioActive(playingElement.GetBoolean());
+            }
+            else if (root.GetProperty("type").GetString() == "metronome-click" &&
+                     root.TryGetProperty("videoTime", out var clickTime) &&
+                     clickTime.TryGetDouble(out var videoSeconds))
+            {
+                YouTubeStatusText.Text =
+                    $"Claqueta sincronizada · pulso en {videoSeconds:0.000} s de vídeo";
             }
         }
         catch (JsonException)

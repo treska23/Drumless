@@ -136,6 +136,19 @@ public sealed class TrackLibraryService
     public bool TryGetById(string trackId, out LocalTrack track) =>
         _tracksById.TryGetValue(trackId, out track!);
 
+    public bool Remove(string trackId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(trackId);
+        if (!_tracksById.Remove(trackId, out var track))
+        {
+            return false;
+        }
+
+        _tracksByPath.Remove(track.Path);
+        Tracks.Remove(track);
+        return true;
+    }
+
     public static string NormalizePath(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
