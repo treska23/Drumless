@@ -66,6 +66,9 @@ public partial class PlaylistWindow : Window
         }
     }
 
+    private void OnPlaylistMouseWheel(object sender, MouseWheelEventArgs e) =>
+        MainWindow.ScrollPlaylistOrParent(sender as DependencyObject, e);
+
     private static PlaylistItemViewModel? FindItem(object source)
     {
         var element = source as DependencyObject;

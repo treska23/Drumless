@@ -34,10 +34,20 @@
 
         <ListBox x:Name="FloatingPlaylistList" Grid.Row="1" Margin="0,16"
                  ItemsSource="{Binding PlaylistItems}" SelectedItem="{Binding SelectedPlaylistItem}"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 ScrollViewer.CanContentScroll="False"
+                 HorizontalContentAlignment="Stretch"
                  AllowDrop="True" PreviewMouseLeftButtonDown="OnDragStart"
                  PreviewMouseMove="OnPreviewMouseMove" Drop="OnDrop"
+                 PreviewMouseWheel="OnPlaylistMouseWheel"
                  MouseDoubleClick="OnItemDoubleClick"
                  AutomationProperties.AutomationId="FloatingPlaylistList">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                </Style>
+            </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="8,12">

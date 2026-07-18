@@ -663,9 +663,19 @@
                                              SelectedItem="{Binding SelectedPlaylistItem}"
                                              MinHeight="390" MaxHeight="540"
                                              AutomationProperties.AutomationId="PlaylistTrackList"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             ScrollViewer.CanContentScroll="False"
+                                             HorizontalContentAlignment="Stretch"
                                              AllowDrop="True" PreviewMouseLeftButtonDown="OnPlaylistDragStart"
                                              PreviewMouseMove="OnPlaylistPreviewMouseMove" Drop="OnPlaylistDrop"
+                                             PreviewMouseWheel="OnPlaylistMouseWheel"
                                              MouseDoubleClick="OnPlaylistItemDoubleClick">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="6,10">
@@ -959,9 +969,15 @@
                                                               ItemsSource="{Binding ProfileOptions}"
                                                               SelectedValue="{Binding Profile, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                               SelectedValuePath="Kind"
-                                                              DisplayMemberPath="Label"
                                                               IsEnabled="{Binding IsEnabled}"
-                                                              AutomationProperties.Name="Perfil de procesamiento" />
+                                                              AutomationProperties.Name="Perfil de procesamiento">
+                                                        <ComboBox.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <TextBlock Text="{Binding Label}"
+                                                                           Foreground="{StaticResource ComboForeground}" />
+                                                            </DataTemplate>
+                                                        </ComboBox.ItemTemplate>
+                                                    </ComboBox>
                                                     <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3"
                                                                Text="{Binding ProcessingLabel}"
                                                                Foreground="{StaticResource TextSecondary}"

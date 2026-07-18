@@ -15,8 +15,12 @@ public sealed class AudioEngine : IDisposable
     private readonly MixingSampleProvider _mixer;
     private readonly OutputRecordingSink _recording = new();
     private readonly Vst3InstrumentHost _vstInstrument = new();
+    private readonly object _youtubeCaptureGate = new();
     private DirectVst3Instrument? _directVstInstrument;
+    private ProcessLoopbackSampleProvider? _youtubeAudio;
     private AudioOutputSession? _output;
+    private int _youtubeCaptureVersion;
+    private bool _disposed;
     private bool _externalInstrumentSelected;
     private string? _recordingDestination;
     private string? _recordingJobRoot;
@@ -72,6 +76,16 @@ public sealed class AudioEngine : IDisposable
         _directVstInstrument?.Programs ?? _vstInstrument.Programs;
     public int CurrentVstProgram =>
         _directVstInstrument?.CurrentProgram ?? _vstInstrument.CurrentProgram;
+    public bool IsYouTubeAudioCaptureActive
+    {
+        get
+        {
+            lock (_youtubeCaptureGate)
+            {
+                return _youtubeAudio is not null;
+            }
+        }
+    }
 
     public async Task LoadKitAsync(DrumKit kit, CancellationToken cancellationToken = default)
     {
@@ -430,6 +444,58 @@ public sealed class AudioEngine : IDisposable
         _track.ConfigureMetronome(settings);
     public bool TryDequeueTrackEnded(out TrackEndedNotification notification) =>
         _track.TryDequeueTrackEnded(out notification);
+    public async Task StartYouTubeAudioCaptureAsync(uint rootProcessId)
+    {
+        var requestVersion = Interlocked.Increment(ref _youtubeCaptureVersion);
+        var format = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, 2);
+        var replacement = await ProcessLoopbackSampleProvider.StartAsync(
+            rootProcessId,
+            format);
+
+        ProcessLoopbackSampleProvider? previous = null;
+        lock (_youtubeCaptureGate)
+        {
+            if (_disposed || requestVersion != _youtubeCaptureVersion)
+            {
+                replacement.Dispose();
+                return;
+            }
+
+            previous = _youtubeAudio;
+            _youtubeAudio = replacement;
+            _mixer.AddMixerInput(replacement);
+            if (previous is not null)
+            {
+                _mixer.RemoveMixerInput(previous);
+            }
+        }
+        previous?.Dispose();
+    }
+
+    public float TakeYouTubeAudioPeak()
+    {
+        lock (_youtubeCaptureGate)
+        {
+            return _youtubeAudio?.TakePeak() ?? 0f;
+        }
+    }
+
+    public void StopYouTubeAudioCapture()
+    {
+        Interlocked.Increment(ref _youtubeCaptureVersion);
+        ProcessLoopbackSampleProvider? capture;
+        lock (_youtubeCaptureGate)
+        {
+            capture = _youtubeAudio;
+            _youtubeAudio = null;
+            if (capture is not null)
+            {
+                _mixer.RemoveMixerInput(capture);
+            }
+        }
+        capture?.Dispose();
+    }
+
     public bool IsRecording => _recording.IsRecording;
     public string? LastRecordingWarning { get; private set; }
     public async Task StartRecordingAsync(
@@ -529,6 +595,16 @@ public sealed class AudioEngine : IDisposable
 
     public void Dispose()
     {
+        lock (_youtubeCaptureGate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
+        }
+
+        StopYouTubeAudioCapture();
         UnloadVstInstrument();
         _output?.Dispose();
         _track.Dispose();

@@ -878,13 +878,13 @@ public sealed partial class MainViewModel
                 OnPropertyChanged(nameof(CurrentTrackTitle));
                 OnPropertyChanged(nameof(CurrentTrackSubtitle));
                 OnPropertyChanged(nameof(HasTrack));
+                StatusMessage = $"Cargando YouTube: {playlistItem.Title}";
                 YouTubePlaybackRequested?.Invoke(
                     this,
                     new YouTubePlaybackRequest(
                         new Uri(playlistItem.YouTubeUrl),
                         playlistItem.YouTubeVideoId!,
                         playlistItem.Title));
-                StatusMessage = $"Reproduciendo YouTube: {playlistItem.Title}";
                 return;
             }
 
@@ -912,6 +912,46 @@ public sealed partial class MainViewModel
         }
 
         StatusMessage = "El elemento de la cola ya no está disponible";
+    }
+
+    public bool HandleYouTubePlaybackState(string? videoId, bool playing)
+    {
+        if (_currentYouTubeItem is null)
+        {
+            SetYouTubeAudioActive(playing);
+            return false;
+        }
+
+        if (!string.Equals(
+                _currentYouTubeItem.YouTubeVideoId,
+                videoId,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        SetYouTubeAudioActive(playing);
+        StatusMessage = playing
+            ? $"Reproduciendo YouTube: {_currentYouTubeItem.Title}"
+            : $"YouTube en pausa: {_currentYouTubeItem.Title}";
+        return true;
+    }
+
+    public void HandleYouTubePlaybackFailure(string? videoId, string? message)
+    {
+        if (_currentYouTubeItem is null ||
+            !string.Equals(
+                _currentYouTubeItem.YouTubeVideoId,
+                videoId,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        SetYouTubeAudioActive(false);
+        StatusMessage = string.IsNullOrWhiteSpace(message)
+            ? $"YouTube no pudo reproducir {_currentYouTubeItem.Title}"
+            : $"YouTube no pudo reproducir {_currentYouTubeItem.Title}: {message}";
     }
 
     private void RebuildPlaylistItems()

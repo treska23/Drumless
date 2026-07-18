@@ -13,6 +13,7 @@ public sealed partial class MainViewModel
     private string _recordingStatus = "Preparado para grabar la mezcla de salida.";
     private LocalTrack? _lastRecordingTrack;
     private bool _isYouTubeAudioActive;
+    private bool _isYouTubeAudioRouted;
 
     public RelayCommand StartOutputRecordingCommand { get; private set; } = null!;
     public RelayCommand StopOutputRecordingCommand { get; private set; } = null!;
@@ -33,7 +34,7 @@ public sealed partial class MainViewModel
 
     public bool CanStartOutputRecording =>
         !IsRecordingOutput && !_isStartingOutputRecording &&
-        _currentYouTubeItem is null && !_isYouTubeAudioActive;
+        (_currentYouTubeItem is null || _isYouTubeAudioRouted);
     public bool CanStopOutputRecording => IsRecordingOutput && !_isStoppingOutputRecording;
     public bool HasLastRecording => LastRecordingTrack is not null;
 
@@ -73,6 +74,45 @@ public sealed partial class MainViewModel
 
     public Task CompleteRecordingBeforeCloseAsync() => StopOutputRecordingAsync();
 
+    public bool IsYouTubeAudioRouted => _isYouTubeAudioRouted;
+
+    public Task StartYouTubeAudioRoutingAsync(uint browserProcessId) =>
+        _audio.StartYouTubeAudioCaptureAsync(browserProcessId);
+
+    public float TakeYouTubeAudioPeak() =>
+        _audio.TakeYouTubeAudioPeak();
+
+    public void ConfirmYouTubeAudioRouting()
+    {
+        if (_isYouTubeAudioRouted)
+        {
+            return;
+        }
+
+        _isYouTubeAudioRouted = true;
+        OnPropertyChanged(nameof(IsYouTubeAudioRouted));
+        OnPropertyChanged(nameof(CanStartOutputRecording));
+        RecordingStatus = _isYouTubeAudioActive
+            ? "YouTube está en el mezclador: usa la salida elegida y se incluirá en la grabación."
+            : "YouTube preparado en el mezclador de la aplicación.";
+    }
+
+    public void StopYouTubeAudioRouting(string? reason = null)
+    {
+        _audio.StopYouTubeAudioCapture();
+        if (_isYouTubeAudioRouted)
+        {
+            _isYouTubeAudioRouted = false;
+            OnPropertyChanged(nameof(IsYouTubeAudioRouted));
+            OnPropertyChanged(nameof(CanStartOutputRecording));
+        }
+
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            RecordingStatus = reason;
+        }
+    }
+
     public void SetYouTubeAudioActive(bool active)
     {
         if (_isYouTubeAudioActive == active)
@@ -83,8 +123,9 @@ public sealed partial class MainViewModel
         OnPropertyChanged(nameof(CanStartOutputRecording));
         if (active)
         {
-            RecordingStatus = "YouTube está reproduciendo fuera del mezclador local; " +
-                              "pausa el vídeo para grabar una toma local completa.";
+            RecordingStatus = _isYouTubeAudioRouted
+                ? "YouTube está en el mezclador: usa la salida elegida y se incluirá en la grabación."
+                : "Conectando YouTube con la salida de audio elegida…";
         }
         else if (!IsRecordingOutput)
         {
@@ -100,10 +141,9 @@ public sealed partial class MainViewModel
         {
             return;
         }
-        if (_currentYouTubeItem is not null)
+        if (_currentYouTubeItem is not null && !_isYouTubeAudioRouted)
         {
-            RecordingStatus = "La grabación directa está disponible para pistas locales. " +
-                              "El audio de YouTube lo reproduce el navegador y no entra en el mezclador ASIO.";
+            RecordingStatus = "YouTube todavía no está conectado al mezclador de la aplicación.";
             return;
         }
 
@@ -140,7 +180,9 @@ public sealed partial class MainViewModel
             }
             await _audio.StartRecordingAsync(destination);
             IsRecordingOutput = true;
-            RecordingStatus = "● Grabando mezcla final: pista + instrumentos + entradas monitorizadas.";
+            RecordingStatus = _currentYouTubeItem is not null
+                ? "● Grabando mezcla final: YouTube + instrumentos + entradas monitorizadas."
+                : "● Grabando mezcla final: pista + instrumentos + entradas monitorizadas.";
             StatusMessage = "Grabación de salida iniciada";
         }
         catch (Exception exception) when (exception is

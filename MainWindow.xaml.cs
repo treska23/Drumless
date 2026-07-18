@@ -28,6 +28,10 @@ public partial class MainWindow : Window
     private HwndSource? _windowSource;
     private bool _isFittingWindow;
     private bool _isYouTubeInitializing;
+    private long _youtubePlaybackRequestVersion;
+    private long _youtubeAudioProbeVersion;
+    private int _youtubeAudioRoutingInProgress;
+    private YouTubePlaybackRequest? _pendingYouTubePlayback;
     private PlaylistWindow? _playlistWindow;
     private Point? _libraryDragOrigin;
     private Point? _playlistDragOrigin;
@@ -319,7 +323,8 @@ public partial class MainWindow : Window
                     video.__drumPracticeAttached = true;
                     const notifyState = () => chrome.webview.postMessage({
                       type: 'video-state',
-                      playing: !video.paused && !video.ended
+                      playing: !video.paused && !video.ended,
+                      videoId: new URL(location.href).searchParams.get('v') || ''
                     });
                     video.addEventListener('play', notifyState);
                     video.addEventListener('pause', notifyState);
@@ -393,6 +398,8 @@ public partial class MainWindow : Window
                     $"Claqueta YouTube preparada · {youtubeTempo.Bpm:0.##} BPM · primer pulso " +
                     $"{youtubeTempo.FirstBeatSeconds:0.000} s";
             }
+
+            await StartPendingYouTubePlaybackAsync();
         }
     }
 
@@ -406,13 +413,96 @@ public partial class MainWindow : Window
 
     private void OnYouTubeProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e) =>
         Dispatcher.BeginInvoke(() =>
-            YouTubeStatusText.Text = $"El reproductor de YouTube se detuvo ({e.ProcessFailedKind})");
+        {
+            Interlocked.Increment(ref _youtubeAudioProbeVersion);
+            _viewModel.StopYouTubeAudioRouting(
+                "El audio de YouTube se desconectó del mezclador; vuelve a reproducir para reconectarlo.");
+            YouTubeStatusText.Text = $"El reproductor de YouTube se detuvo ({e.ProcessFailedKind})";
+        });
 
     private async void OnYouTubePlaybackRequested(object? sender, YouTubePlaybackRequest request)
     {
-        _viewModel.OpenYouTubePage();
+        var requestVersion = ++_youtubePlaybackRequestVersion;
+        _pendingYouTubePlayback = request;
         await EnsureYouTubeReadyAsync();
-        YouTubeWebView.Source = request.Uri;
+        if (requestVersion != _youtubePlaybackRequestVersion ||
+            YouTubeWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await YouTubeWebView.CoreWebView2.ExecuteScriptAsync(
+                "document.querySelector('video')?.pause();");
+        }
+        catch (InvalidOperationException)
+        {
+            // La navegación anterior puede destruir el documento mientras se pausa.
+        }
+
+        if (requestVersion == _youtubePlaybackRequestVersion)
+        {
+            YouTubeWebView.Source = request.Uri;
+        }
+    }
+
+    private async Task StartPendingYouTubePlaybackAsync()
+    {
+        var pending = _pendingYouTubePlayback;
+        var core = YouTubeWebView.CoreWebView2;
+        if (pending is null ||
+            core is null ||
+            !YouTubeNavigationService.TryGetVideoId(YouTubeWebView.Source, out var currentVideoId) ||
+            !string.Equals(currentVideoId, pending.VideoId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var expectedVideoId = JsonSerializer.Serialize(pending.VideoId);
+        await core.ExecuteScriptAsync(
+            $$"""
+            (() => {
+              clearInterval(window.__dpsAutoplayTimer);
+              const expectedVideoId = {{expectedVideoId}};
+              let attempts = 0;
+              let lastError = '';
+              window.__dpsAutoplayTimer = setInterval(async () => {
+                const currentVideoId = new URL(location.href).searchParams.get('v') || '';
+                if (currentVideoId !== expectedVideoId) {
+                  clearInterval(window.__dpsAutoplayTimer);
+                  return;
+                }
+
+                const video = document.querySelector('video');
+                attempts += 1;
+                if (video) {
+                  video.muted = false;
+                  try {
+                    await video.play();
+                    clearInterval(window.__dpsAutoplayTimer);
+                    chrome.webview.postMessage({
+                      type: 'video-state',
+                      playing: true,
+                      videoId: expectedVideoId
+                    });
+                    return;
+                  } catch (error) {
+                    lastError = String(error?.message || error || '');
+                  }
+                }
+
+                if (attempts >= 80) {
+                  clearInterval(window.__dpsAutoplayTimer);
+                  chrome.webview.postMessage({
+                    type: 'playback-error',
+                    videoId: expectedVideoId,
+                    message: lastError || 'YouTube no creó el reproductor a tiempo'
+                  });
+                }
+              }, 125);
+            })();
+            """);
     }
 
     private async void OnYouTubeControlRequested(object? sender, YouTubeControlRequest request)
@@ -490,7 +580,29 @@ public partial class MainWindow : Window
                      root.TryGetProperty("playing", out var playingElement) &&
                      playingElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
             {
-                _viewModel.SetYouTubeAudioActive(playingElement.GetBoolean());
+                var stateVideoIdText = root.TryGetProperty("videoId", out var stateVideoId)
+                    ? stateVideoId.GetString()
+                    : null;
+                var playing = playingElement.GetBoolean();
+                if (_viewModel.HandleYouTubePlaybackState(stateVideoIdText, playing) &&
+                    playing)
+                {
+                    _pendingYouTubePlayback = null;
+                    YouTubeStatusText.Text = "Reproduciendo desde la playlist";
+                    _ = EnsureYouTubeAudioRoutingAsync();
+                }
+            }
+            else if (root.GetProperty("type").GetString() == "playback-error" &&
+                     root.TryGetProperty("videoId", out var failedVideoId))
+            {
+                var message = root.TryGetProperty("message", out var errorMessage)
+                    ? errorMessage.GetString()
+                    : null;
+                _viewModel.HandleYouTubePlaybackFailure(
+                    failedVideoId.GetString(),
+                    message);
+                YouTubeStatusText.Text =
+                    "YouTube no pudo iniciar la reproducción automáticamente";
             }
             else if (root.GetProperty("type").GetString() == "metronome-click" &&
                      root.TryGetProperty("videoTime", out var clickTime) &&
@@ -502,6 +614,87 @@ public partial class MainWindow : Window
         }
         catch (JsonException)
         {
+        }
+    }
+
+    private async Task EnsureYouTubeAudioRoutingAsync()
+    {
+        var core = YouTubeWebView.CoreWebView2;
+        if (core is null ||
+            _viewModel.IsYouTubeAudioRouted ||
+            Interlocked.CompareExchange(ref _youtubeAudioRoutingInProgress, 1, 0) != 0)
+        {
+            return;
+        }
+
+        var probeVersion = Interlocked.Increment(ref _youtubeAudioProbeVersion);
+        var routingStage = "preparar WebView2";
+        try
+        {
+            core.IsMuted = false;
+            routingStage = "obtener el proceso de WebView2";
+            var browserProcessId = core.BrowserProcessId;
+            routingStage = "crear captura por proceso";
+            await _viewModel.StartYouTubeAudioRoutingAsync(browserProcessId);
+            if (probeVersion != _youtubeAudioProbeVersion)
+            {
+                return;
+            }
+
+            _viewModel.TakeYouTubeAudioPeak();
+            routingStage = "medir audio sin silenciar";
+            await Task.Delay(1200);
+            var unmutedPeak = _viewModel.TakeYouTubeAudioPeak();
+            if (probeVersion != _youtubeAudioProbeVersion)
+            {
+                return;
+            }
+
+            if (unmutedPeak < 0.0005f)
+            {
+                _viewModel.StopYouTubeAudioRouting(
+                    "No se detectó audio de YouTube para redirigir; se mantiene la salida normal del navegador.");
+                return;
+            }
+
+            core.IsMuted = true;
+            _viewModel.TakeYouTubeAudioPeak();
+            routingStage = "medir audio con WebView2 silenciado";
+            await Task.Delay(1200);
+            var mutedPeak = _viewModel.TakeYouTubeAudioPeak();
+            if (probeVersion != _youtubeAudioProbeVersion)
+            {
+                return;
+            }
+
+            if (mutedPeak >= 0.0005f)
+            {
+                _viewModel.ConfirmYouTubeAudioRouting();
+                YouTubeStatusText.Text =
+                    "Reproduciendo · audio enviado a la salida elegida";
+                return;
+            }
+
+            core.IsMuted = false;
+            _viewModel.StopYouTubeAudioRouting(
+                "Este WebView2 no permite redirigir el audio sin silenciarlo; se mantiene la salida normal.");
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or
+            COMException or
+            NotSupportedException)
+        {
+            if (YouTubeWebView.CoreWebView2 is { } activeCore)
+            {
+                activeCore.IsMuted = false;
+            }
+            _viewModel.StopYouTubeAudioRouting(
+                $"No se pudo conectar YouTube con la salida elegida al {routingStage}: " +
+                exception.Message);
+        }
+        finally
+        {
+            Volatile.Write(ref _youtubeAudioRoutingInProgress, 0);
         }
     }
 
@@ -745,9 +938,90 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnPlaylistMouseWheel(object sender, MouseWheelEventArgs e) =>
+        ScrollPlaylistOrParent(sender as DependencyObject, e);
+
+    internal static void ScrollPlaylistOrParent(DependencyObject? source, MouseWheelEventArgs e)
+    {
+        if (source is null)
+        {
+            return;
+        }
+
+        var listScrollViewer = FindVisualChild<ScrollViewer>(source);
+        if (listScrollViewer is not null)
+        {
+            var direction = Math.Sign(e.Delta);
+            var canScrollList = direction < 0
+                ? listScrollViewer.VerticalOffset < listScrollViewer.ScrollableHeight
+                : listScrollViewer.VerticalOffset > 0;
+
+            if (canScrollList)
+            {
+                listScrollViewer.ScrollToVerticalOffset(
+                    Math.Clamp(
+                        listScrollViewer.VerticalOffset - e.Delta,
+                        0,
+                        listScrollViewer.ScrollableHeight));
+                e.Handled = true;
+                return;
+            }
+        }
+
+        var parentScrollViewer = FindVisualParent<ScrollViewer>(source);
+        if (parentScrollViewer is null)
+        {
+            return;
+        }
+
+        parentScrollViewer.ScrollToVerticalOffset(
+            Math.Clamp(
+                parentScrollViewer.VerticalOffset - e.Delta,
+                0,
+                parentScrollViewer.ScrollableHeight));
+        e.Handled = true;
+    }
+
     private static bool ExceededDragThreshold(Point origin, Point current) =>
         Math.Abs(current.X - origin.X) >= SystemParameters.MinimumHorizontalDragDistance ||
         Math.Abs(current.Y - origin.Y) >= SystemParameters.MinimumVerticalDragDistance;
+
+    private static T? FindVisualChild<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match)
+            {
+                return match;
+            }
+
+            if (FindVisualChild<T>(child) is { } descendant)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
+    }
+
+    private static T? FindVisualParent<T>(DependencyObject child)
+        where T : DependencyObject
+    {
+        var current = VisualTreeHelper.GetParent(child);
+        while (current is not null)
+        {
+            if (current is T match)
+            {
+                return match;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
+    }
 
     private static T? FindItemFromSource<T>(ItemsControl owner, object source)
         where T : class

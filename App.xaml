@@ -14,6 +14,10 @@
         <SolidColorBrush x:Key="Accent" Color="#FFB548" />
         <SolidColorBrush x:Key="AccentDark" Color="#3B2B14" />
         <SolidColorBrush x:Key="Success" Color="#62D3A4" />
+        <SolidColorBrush x:Key="ComboBackground" Color="#F4F6FA" />
+        <SolidColorBrush x:Key="ComboForeground" Color="#151820" />
+        <SolidColorBrush x:Key="ComboDisabledBackground" Color="#D9DDE5" />
+        <SolidColorBrush x:Key="ComboDisabledForeground" Color="#596170" />
 
         <Style TargetType="Window">
             <Setter Property="FontFamily" Value="Segoe UI" />
@@ -89,16 +93,38 @@
         </Style>
 
         <Style TargetType="ComboBox">
-            <Setter Property="Background" Value="#F4F6FA" />
-            <Setter Property="Foreground" Value="#151820" />
+            <Setter Property="Background" Value="{StaticResource ComboBackground}" />
+            <Setter Property="Foreground" Value="{StaticResource ComboForeground}" />
             <Setter Property="BorderBrush" Value="{StaticResource Stroke}" />
             <Setter Property="Padding" Value="9,7" />
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="{StaticResource ComboDisabledBackground}" />
+                    <Setter Property="Foreground" Value="{StaticResource ComboDisabledForeground}" />
+                    <Setter Property="Opacity" Value="1" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <Style TargetType="ComboBoxItem">
-            <Setter Property="Background" Value="#F4F6FA" />
-            <Setter Property="Foreground" Value="#151820" />
+            <Setter Property="Background" Value="{StaticResource ComboBackground}" />
+            <Setter Property="Foreground" Value="{StaticResource ComboForeground}" />
             <Setter Property="Padding" Value="9,7" />
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter Property="Background" Value="#FFD491" />
+                    <Setter Property="Foreground" Value="{StaticResource ComboForeground}" />
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Accent}" />
+                    <Setter Property="Foreground" Value="{StaticResource ComboForeground}" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="{StaticResource ComboDisabledBackground}" />
+                    <Setter Property="Foreground" Value="{StaticResource ComboDisabledForeground}" />
+                    <Setter Property="Opacity" Value="1" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <Style TargetType="ListBox">
