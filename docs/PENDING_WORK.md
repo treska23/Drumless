@@ -22,26 +22,16 @@ Estado revisado el 18 de julio de 2026.
 - Aviso y recuperación ante parada inesperada de WASAPI/ASIO, con diagnóstico persistente.
 - BPM y primer pulso bajo demanda, edición manual, claqueta sincronizada y puntuación MIDI
   persistente por pista o vídeo.
+- Editor de cuatro slots por entrada y buses de pista, YouTube y maestro: orden, bypass,
+  parámetros, A/B y presets importables/exportables.
+- Efectos VST3 externos aislados, compensación de latencia y bypass automático ante fallo.
+- Mapa persistente de segmentos con inicio, BPM, compás, fase, confianza y fuente; editor,
+  propuesta automática por ventanas y sincronización al pausar, buscar o cambiar de tramo.
+- Búsqueda online con URL y evidencia; Ollama local opcional para contrastar candidatos.
+- Análisis de una pista de batería de referencia y puntuación de golpes correctos,
+  adelantados, atrasados, omitidos y adicionales.
 
-## Ampliaciones avanzadas
-
-### Efectos
-
-- Editor de los cuatro slots incorporados: reordenar, bypass individual, parámetros y
-  variantes personales.
-- Efectos VST3 externos por entrada, pista, YouTube y bus maestro. Deben ejecutarse aislados,
-  compensar latencia y sobrevivir al fallo de un plugin sin detener el audio principal.
-- Comparación A/B y presets personales exportables.
-
-### Tempo variable y fuentes
-
-- Mapa persistente de segmentos con inicio, BPM, compás, fase, confianza y fuente.
-- Editor manual y analizador por ventanas que proponga cambios sin aplicarlos solo.
-- Claqueta y puntuación que mantengan fase al cruzar segmentos, pausar o buscar.
-- Búsqueda online con URL y texto de fuente; Ollama local será opcional para contrastar
-  candidatos, nunca una fuente autónoma ni autoridad sin enlace verificable.
-
-### Validación física pendiente
+## Validación física pendiente
 
 - Sesión prolongada reiniciando y desconectando la interfaz real.
 - Prueba auditiva de cada preset con voz, guitarra, bajo y módulo de batería.

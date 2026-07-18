@@ -23,12 +23,21 @@ Prototipo Windows de una aplicación de práctica para batería electrónica y t
   nunca modifica ni mueve el archivo original.
 - Monitorización simultánea de todas las entradas de una interfaz ASIO, cada una con
   activación, ganancia y perfil independiente. Incluye presets Limpio, Voz, Guitarra
-  limpia, Guitarra con distorsión, Bajo y Batería, con cadenas de hasta cuatro procesos.
+  limpia, Guitarra con distorsión, Bajo y Batería, con cadenas editables de hasta cuatro
+  procesos, bypass A/B y presets importables/exportables. Las ganancias usan faders
+  verticales de estilo mesa de mezclas con clic preciso; la claqueta usa un knob circular.
+- Efectos incorporados o VST3 externos en cada entrada y en los buses de pista local,
+  YouTube y maestro. Los efectos externos se ejecutan en un proceso aislado: si fallan,
+  la señal continúa en bypass y la aplicación muestra el diagnóstico.
 - Grabación WAV de la mezcla final de pistas locales o YouTube: pista/vídeo,
   batería interna/VST y todas las entradas ASIO monitorizadas; cada toma se registra
   inmediatamente en la biblioteca.
-- Análisis de tempo bajo demanda, BPM y primer pulso editables, claqueta ligada a la
-  posición exacta del transporte y evaluación temporal de golpes de batería MIDI.
+- Análisis de tempo bajo demanda con mapa editable por tramos, BPM, compás, primer pulso,
+  confianza y fuente. La claqueta mantiene la fase al cambiar de tramo, pausar o buscar.
+- Búsqueda web de BPM con enlace y evidencia verificables; Ollama local puede ordenar y
+  comentar los candidatos, pero no inventar un tempo ni sustituir la fuente.
+- Evaluación temporal de golpes de batería MIDI contra la rejilla o contra una pista de
+  batería de referencia analizada, con omitidos, golpes extra, latencia e historial.
 - Base de datos JSON local y versionada para conservar el tempo, origen y confianza del
   análisis, ajustes de claqueta e historial fechado de puntuaciones por pista o vídeo.
   Quitar un elemento de una playlist conserva esos datos; quitar una pista de la biblioteca
@@ -55,9 +64,10 @@ se buscan en las ubicaciones VST3 estándar de Windows, principalmente
 dotnet test DrumPracticeStudio.sln
 ```
 
-La batería cubre persistencia y migración de análisis, escaneo y desaparecidos, playlists
-y reordenación, reproducción secuencial/aleatoria, transporte, perfiles de entrada y el
-protocolo del capturador aislado de YouTube.
+La batería cubre persistencia y migración de análisis, mapas de tempo, fuentes web,
+escaneo y desaparecidos, playlists y reordenación, reproducción secuencial/aleatoria,
+transporte, cadenas de entrada y buses, puntuación con referencia y los procesos aislados
+de YouTube y VST3.
 
 ## Límites actuales
 
@@ -67,6 +77,7 @@ demostración usan sonidos sintetizados al iniciar y el usuario puede sustituirl
 sus propios WAV. El alojamiento VST3 de NAudio 3 todavía es una función preview; un
 plugin defectuoso puede cerrar el proceso porque los instrumentos se cargan dentro de
 la propia aplicación. Groove Agent SE puede estar limitado a anfitriones Steinberg;
-Groove Agent completo y Addictive Drums 2 son los objetivos principales. Los VST3 de
-efecto externos por entrada y los mapas de tempo variables siguen en la hoja de ruta;
-los perfiles de efecto incorporados y el BPM global editable ya son funcionales.
+Groove Agent completo y Addictive Drums 2 son los objetivos principales. Esta limitación
+afecta a los instrumentos VST3; los efectos VST3 se alojan en procesos independientes.
+La detección automática de tempo es una propuesta que el usuario debe revisar antes de
+aplicar, especialmente en grabaciones con rubato o cambios poco marcados.

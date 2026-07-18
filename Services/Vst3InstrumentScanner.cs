@@ -29,7 +29,7 @@ public sealed class Vst3InstrumentScanner
             try
             {
                 var classes = await ProbeModuleAsync(moduleInfo.Path, cancellationToken);
-                foreach (var probedClass in classes)
+                foreach (var probedClass in classes.Where(candidate => candidate.IsInstrument))
                 {
                     var pluginClass = new Vst3ClassInfo(
                         probedClass.ClassId,
@@ -59,7 +59,7 @@ public sealed class Vst3InstrumentScanner
         module.Name.Contains("Addictive Drums", StringComparison.OrdinalIgnoreCase) ||
         module.Name.Contains("Groove Agent", StringComparison.OrdinalIgnoreCase);
 
-    private static async Task<IReadOnlyList<Vst3ProbedClass>> ProbeModuleAsync(
+    internal static async Task<IReadOnlyList<Vst3ProbedClass>> ProbeModuleAsync(
         string modulePath,
         CancellationToken cancellationToken)
     {

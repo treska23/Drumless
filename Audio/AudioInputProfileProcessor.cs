@@ -7,11 +7,17 @@ namespace DrumPracticeStudio.Audio;
 /// Los perfiles son puntos de partida seguros; el nivel de entrada continúa
 /// controlándose de forma independiente en el mezclador.
 /// </summary>
-internal sealed class AudioInputProfileProcessor
+internal sealed class AudioInputProfileProcessor : IDisposable
 {
     private readonly int _sampleRate;
     private readonly float[] _reverbDelay;
     private AudioInputProfileKind _profile;
+    private AudioEffectSlotSetting[] _effects = [];
+    private int _effectsBypassed;
+    private readonly object _externalGate = new();
+    private List<ExternalEffect> _externalEffects = [];
+    private string _externalSignature = string.Empty;
+    private string? _externalWarning;
     private int _reverbPosition;
     private float _highPassPreviousInput;
     private float _highPassPreviousOutput;
@@ -24,13 +30,47 @@ internal sealed class AudioInputProfileProcessor
         ArgumentOutOfRangeException.ThrowIfLessThan(sampleRate, 8_000);
         _sampleRate = sampleRate;
         _reverbDelay = new float[Math.Max(1, (int)(sampleRate * 0.037d))];
-        _profile = profile;
+        Profile = profile;
     }
 
     public AudioInputProfileKind Profile
     {
         get => _profile;
-        set => _profile = Enum.IsDefined(value) ? value : AudioInputProfileKind.Clean;
+        set
+        {
+            _profile = Enum.IsDefined(value) ? value : AudioInputProfileKind.Clean;
+            SetEffects(AudioInputEffectPresetCatalog.Create(_profile), bypassed: false);
+        }
+    }
+
+    public void SetEffects(
+        IEnumerable<AudioEffectSlotSetting>? effects,
+        bool bypassed,
+        bool configureExternal = true)
+    {
+        var normalized = (effects ?? AudioInputEffectPresetCatalog.Create(Profile))
+            .Take(AudioEffectCatalog.MaximumSlots)
+            .Select(AudioEffectSlotSetting.Normalize)
+            .ToArray();
+        Volatile.Write(ref _effects, normalized);
+        Volatile.Write(ref _effectsBypassed, bypassed ? 1 : 0);
+        if (configureExternal)
+        {
+            ConfigureExternalEffects(normalized);
+        }
+    }
+
+    public string? ExternalWarning => Volatile.Read(ref _externalWarning);
+    public uint ExternalLatencySamples
+    {
+        get
+        {
+            lock (_externalGate)
+            {
+                return (uint)_externalEffects.Sum(effect =>
+                    (long)effect.Processor.TotalLatencySamples);
+            }
+        }
     }
 
     public float Process(float sample)
@@ -40,16 +80,141 @@ internal sealed class AudioInputProfileProcessor
             return 0f;
         }
 
-        var processed = Profile switch
+        if (Volatile.Read(ref _effectsBypassed) != 0)
         {
-            AudioInputProfileKind.Voice => ProcessVoice(sample),
-            AudioInputProfileKind.GuitarClean => ProcessGuitarClean(sample),
-            AudioInputProfileKind.GuitarDrive => ProcessGuitarDrive(sample),
-            AudioInputProfileKind.Bass => ProcessBass(sample),
-            AudioInputProfileKind.Drums => ProcessDrums(sample),
-            _ => sample
-        };
+            return sample;
+        }
+
+        var processed = sample;
+        foreach (var effect in Volatile.Read(ref _effects))
+        {
+            if (!effect.IsEnabled || effect.Kind == AudioEffectKind.ExternalVst3)
+            {
+                continue;
+            }
+            var dry = processed;
+            var amount = (float)effect.Amount;
+            processed = effect.Kind switch
+            {
+                AudioEffectKind.HighPass =>
+                    HighPass(processed, 25f + (amount * 180f)),
+                AudioEffectKind.Gate =>
+                    Gate(processed, 0.003f + (amount * 0.05f), 0.08f),
+                AudioEffectKind.Equalizer =>
+                    Tone(
+                        processed,
+                        1f + ((0.5f - amount) * 0.45f),
+                        1f + ((amount - 0.5f) * 0.55f),
+                        350f + (amount * 2_600f)),
+                AudioEffectKind.Compressor =>
+                    Compress(
+                        processed,
+                        0.55f - (amount * 0.4f),
+                        1.5f + (amount * 5f),
+                        1f + (amount * 0.14f)),
+                AudioEffectKind.Saturation =>
+                    Saturate(processed, 1f + (amount * 6f)),
+                AudioEffectKind.Reverb =>
+                    Reverb(processed, 0.65f, 0.12f + (amount * 0.52f)),
+                AudioEffectKind.Transient =>
+                    EnhanceTransient(processed, amount * 0.45f),
+                _ => processed
+            };
+            processed = (dry * (1f - (float)effect.Mix)) +
+                        (processed * (float)effect.Mix);
+        }
         return Math.Clamp(processed, -1f, 1f);
+    }
+
+    public void ProcessBlock(Span<float> samples)
+    {
+        for (var index = 0; index < samples.Length; index++)
+        {
+            samples[index] = Process(samples[index]);
+        }
+        if (Volatile.Read(ref _effectsBypassed) != 0)
+        {
+            return;
+        }
+
+        lock (_externalGate)
+        {
+            foreach (var effect in _externalEffects)
+            {
+                effect.Processor.ProcessMono(samples, effect.Mix);
+                if (effect.Processor.Failure is { } failure)
+                {
+                    Volatile.Write(ref _externalWarning, failure);
+                }
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_externalGate)
+        {
+            foreach (var effect in _externalEffects)
+            {
+                effect.Processor.Dispose();
+            }
+            _externalEffects.Clear();
+        }
+    }
+
+    private void ConfigureExternalEffects(IReadOnlyList<AudioEffectSlotSetting> effects)
+    {
+        var external = effects
+            .Where(effect =>
+                effect.IsEnabled &&
+                effect.Kind == AudioEffectKind.ExternalVst3 &&
+                effect.ExternalVst3 is not null)
+            .ToArray();
+        var signature = string.Join(
+            "|",
+            external.Select(effect =>
+                $"{effect.Id}:{effect.ExternalVst3!.ModulePath}:{effect.ExternalVst3.ClassId}:" +
+                $"{effect.ExternalVst3.PresetPath}"));
+        lock (_externalGate)
+        {
+            if (string.Equals(signature, _externalSignature, StringComparison.Ordinal))
+            {
+                for (var index = 0; index < external.Length && index < _externalEffects.Count; index++)
+                {
+                    _externalEffects[index] = _externalEffects[index] with
+                    {
+                        Mix = (float)external[index].Mix
+                    };
+                }
+                return;
+            }
+
+            foreach (var effect in _externalEffects)
+            {
+                effect.Processor.Dispose();
+            }
+            _externalEffects = [];
+            _externalSignature = signature;
+            Volatile.Write(ref _externalWarning, null);
+            foreach (var setting in external)
+            {
+                try
+                {
+                    _externalEffects.Add(new ExternalEffect(
+                        setting.Id,
+                        (float)setting.Mix,
+                        IsolatedVst3EffectProcessor.Start(
+                            setting.ExternalVst3!,
+                            _sampleRate)));
+                }
+                catch (Exception exception)
+                {
+                    Volatile.Write(
+                        ref _externalWarning,
+                        $"{setting.ExternalVst3!.Name} quedó en bypass: {exception.Message}");
+                }
+            }
+        }
     }
 
     private float ProcessVoice(float sample)
@@ -154,4 +319,9 @@ internal sealed class AudioInputProfileProcessor
         var transient = MathF.Max(0f, absolute - previous);
         return sample * (1f + (transient * amount * 8f));
     }
+
+    private sealed record ExternalEffect(
+        string Id,
+        float Mix,
+        IsolatedVst3EffectProcessor Processor);
 }

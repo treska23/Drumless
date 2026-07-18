@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -180,7 +180,16 @@ public sealed class StudioStateStore
                     (float)Math.Clamp(monitor.Gain ?? 0.8d, 0d, 1.5d),
                     monitor.Profile is { } profile && Enum.IsDefined(profile)
                         ? profile
-                        : AudioInputProfileKind.Clean));
+                        : AudioInputProfileKind.Clean,
+                    monitor.Effects is null
+                        ? null
+                        : monitor.Effects
+                            .Select(TryCreateAudioEffect)
+                            .Where(effect => effect is not null)
+                            .Cast<AudioEffectSlotSetting>()
+                            .Take(AudioEffectCatalog.MaximumSlots)
+                            .ToArray(),
+                    monitor.EffectsBypassed ?? false));
             }
         }
         if (state.AudioInputMonitors.Count == 0 && state.AudioInputChannelIndex is { } legacyChannel)
@@ -188,6 +197,24 @@ public sealed class StudioStateStore
             state.AudioInputMonitors.Add(new AudioInputMonitorSetting(
                 legacyChannel,
                 (float)state.AudioInputGain));
+        }
+
+        foreach (var bus in document.AudioEffectBuses ?? [])
+        {
+            if (!Enum.IsDefined(bus.Target) ||
+                state.AudioEffectBuses.Any(existing => existing.Target == bus.Target))
+            {
+                continue;
+            }
+            state.AudioEffectBuses.Add(new AudioEffectBusSetting(
+                bus.Target,
+                (bus.Effects ?? [])
+                    .Select(TryCreateAudioEffect)
+                    .Where(effect => effect is not null)
+                    .Cast<AudioEffectSlotSetting>()
+                    .Take(AudioEffectCatalog.MaximumSlots)
+                    .ToArray(),
+                bus.EffectsBypassed ?? false));
         }
 
         foreach (var track in document.Tracks ?? [])
@@ -299,7 +326,37 @@ public sealed class StudioStateStore
         {
             ChannelIndex = monitor.ChannelIndex,
             Gain = Math.Clamp(monitor.Gain, 0f, 1.5f),
-            Profile = monitor.Profile
+            Profile = monitor.Profile,
+            EffectsBypassed = monitor.EffectsBypassed,
+            Effects = monitor.EffectiveEffects.Select(effect => new AudioEffectSlotDto
+            {
+                Id = effect.Id,
+                Kind = effect.Kind,
+                IsEnabled = effect.IsEnabled,
+                Amount = effect.Amount,
+                Mix = effect.Mix,
+                ExternalVst3 = effect.ExternalVst3 is null
+                    ? null
+                    : new Vst3EffectReferenceDto
+                    {
+                        ModulePath = effect.ExternalVst3.ModulePath,
+                        ModuleName = effect.ExternalVst3.ModuleName,
+                        ClassId = effect.ExternalVst3.ClassId,
+                        Category = effect.ExternalVst3.Category,
+                        Name = effect.ExternalVst3.Name,
+                        Vendor = effect.ExternalVst3.Vendor,
+                        Version = effect.ExternalVst3.Version,
+                        SdkVersion = effect.ExternalVst3.SdkVersion,
+                        SubCategories = effect.ExternalVst3.SubCategories,
+                        PresetPath = effect.ExternalVst3.PresetPath
+                    }
+            }).ToList()
+        }).ToList(),
+        AudioEffectBuses = state.AudioEffectBuses.Select(bus => new AudioEffectBusDto
+        {
+            Target = bus.Target,
+            EffectsBypassed = bus.EffectsBypassed,
+            Effects = bus.EffectiveEffects.Select(ToAudioEffectSlotDto).ToList()
         }).ToList(),
         MidiDeviceName = state.MidiDeviceName,
         MidiDeviceIndex = state.MidiDeviceIndex,
@@ -323,15 +380,7 @@ public sealed class StudioStateStore
             Title = track.Title,
             Path = track.Path,
             Variant = track.Variant,
-            Tempo = track.Tempo is null ? null : new TempoDto
-            {
-                Bpm = track.Tempo.Bpm,
-                FirstBeatSeconds = track.Tempo.FirstBeatSeconds,
-                BeatsPerBar = track.Tempo.BeatsPerBar,
-                MetronomeEnabled = track.Tempo.MetronomeEnabled,
-                MetronomeVolume = track.Tempo.MetronomeVolume,
-                AnalysisConfidence = track.Tempo.AnalysisConfidence
-            }
+            Tempo = track.Tempo is null ? null : ToTempoDto(track.Tempo)
         }).ToList(),
         Playlists = state.Playlists.Select(playlist => new PlaylistDto
         {
@@ -416,6 +465,7 @@ public sealed class StudioStateStore
                 sessions.Add(model);
             }
         }
+        var drumReference = TryCreateDrumReference(dto.DrumReference);
 
         record = new MediaAnalysisRecord
         {
@@ -423,9 +473,10 @@ public sealed class StudioStateStore
             Tempo = tempo,
             TempoOrigin = origin,
             TempoUpdatedAtUtc = dto.TempoUpdatedAtUtc,
+            DrumReference = drumReference,
             PerformanceSessions = sessions
         };
-        return tempo is not null || sessions.Count > 0;
+        return tempo is not null || drumReference is not null || sessions.Count > 0;
     }
 
     private static bool TryCreatePerformanceSession(
@@ -436,9 +487,11 @@ public sealed class StudioStateStore
         if (string.IsNullOrWhiteSpace(dto.Id) || dto.FinishedAtUtc == default ||
             dto.TotalHits is < 0 || dto.AccurateHits is < 0 ||
             dto.EarlyHits is < 0 || dto.LateHits is < 0 ||
+            dto.ExpectedHits is < 0 || dto.MissedHits is < 0 || dto.ExtraHits is < 0 ||
             dto.AccurateHits > dto.TotalHits || dto.EarlyHits > dto.TotalHits ||
             dto.LateHits > dto.TotalHits ||
             dto.AccurateHits + dto.EarlyHits + dto.LateHits > dto.TotalHits ||
+            dto.MissedHits > dto.ExpectedHits ||
             !double.IsFinite(dto.LatencyCompensationMilliseconds) ||
             !double.IsFinite(dto.AccuracyPercent) ||
             !double.IsFinite(dto.MeanAbsoluteErrorMilliseconds) ||
@@ -461,8 +514,31 @@ public sealed class StudioStateStore
             dto.LateHits,
             dto.AccuracyPercent,
             dto.MeanAbsoluteErrorMilliseconds,
-            dto.MaximumErrorMilliseconds);
+            dto.MaximumErrorMilliseconds,
+            dto.ExpectedHits,
+            dto.MissedHits,
+            dto.ExtraHits,
+            dto.ReferenceVersion);
         return true;
+    }
+
+    private static DrumReferenceMap? TryCreateDrumReference(DrumReferenceDto? dto)
+    {
+        if (dto is null ||
+            string.IsNullOrWhiteSpace(dto.Version) ||
+            string.IsNullOrWhiteSpace(dto.SourcePath) ||
+            dto.AnalyzedAtUtc == default ||
+            !double.IsFinite(dto.Confidence))
+        {
+            return null;
+        }
+        var normalized = DrumReferenceMap.Normalize(new DrumReferenceMap(
+            dto.Version,
+            dto.SourcePath,
+            dto.AnalyzedAtUtc,
+            dto.Confidence,
+            dto.HitTimesSeconds ?? []));
+        return normalized.HitTimesSeconds.Count == 0 ? null : normalized;
     }
 
     private static MediaAnalysisDto ToAnalysisDto(MediaAnalysisRecord record) => new()
@@ -471,6 +547,16 @@ public sealed class StudioStateStore
         Tempo = record.Tempo is null ? null : ToTempoDto(record.Tempo),
         TempoOrigin = record.TempoOrigin,
         TempoUpdatedAtUtc = record.TempoUpdatedAtUtc,
+        DrumReference = record.DrumReference is null
+            ? null
+            : new DrumReferenceDto
+            {
+                Version = record.DrumReference.Version,
+                SourcePath = record.DrumReference.SourcePath,
+                AnalyzedAtUtc = record.DrumReference.AnalyzedAtUtc,
+                Confidence = record.DrumReference.Confidence,
+                HitTimesSeconds = record.DrumReference.HitTimesSeconds.ToList()
+            },
         PerformanceSessions = record.PerformanceSessions.Select(session =>
             new DrumPerformanceSessionDto
             {
@@ -484,7 +570,11 @@ public sealed class StudioStateStore
                 LateHits = session.LateHits,
                 AccuracyPercent = session.AccuracyPercent,
                 MeanAbsoluteErrorMilliseconds = session.MeanAbsoluteErrorMilliseconds,
-                MaximumErrorMilliseconds = session.MaximumErrorMilliseconds
+                MaximumErrorMilliseconds = session.MaximumErrorMilliseconds,
+                ExpectedHits = session.ExpectedHits,
+                MissedHits = session.MissedHits,
+                ExtraHits = session.ExtraHits,
+                ReferenceVersion = session.ReferenceVersion
             }).ToList()
     };
 
@@ -536,7 +626,23 @@ public sealed class StudioStateStore
             tempo.BeatsPerBar ?? 4,
             tempo.MetronomeEnabled ?? false,
             tempo.MetronomeVolume ?? 0.55d,
-            tempo.AnalysisConfidence ?? 0d));
+            tempo.AnalysisConfidence ?? 0d,
+            (tempo.Segments ?? [])
+                .Where(segment =>
+                    !string.IsNullOrWhiteSpace(segment.Id) &&
+                    segment.StartSeconds is >= 0d &&
+                    segment.Bpm is >= 40d and <= 240d &&
+                    segment.FirstBeatSeconds is >= 0d)
+                .Select(segment => new TempoSegment(
+                    segment.Id!,
+                    segment.StartSeconds!.Value,
+                    segment.Bpm!.Value,
+                    segment.FirstBeatSeconds!.Value,
+                    segment.BeatsPerBar ?? 4,
+                    segment.Confidence ?? 0d,
+                    segment.SourceName ?? string.Empty,
+                    segment.SourceUrl))
+                .ToArray()));
     }
 
     private static TempoDto ToTempoDto(TempoSettings tempo) => new()
@@ -546,7 +652,82 @@ public sealed class StudioStateStore
         BeatsPerBar = tempo.BeatsPerBar,
         MetronomeEnabled = tempo.MetronomeEnabled,
         MetronomeVolume = tempo.MetronomeVolume,
-        AnalysisConfidence = tempo.AnalysisConfidence
+        AnalysisConfidence = tempo.AnalysisConfidence,
+        Segments = tempo.EffectiveSegments.Select(segment => new TempoSegmentDto
+        {
+            Id = segment.Id,
+            StartSeconds = segment.StartSeconds,
+            Bpm = segment.Bpm,
+            FirstBeatSeconds = segment.FirstBeatSeconds,
+            BeatsPerBar = segment.BeatsPerBar,
+            Confidence = segment.Confidence,
+            SourceName = segment.SourceName,
+            SourceUrl = segment.SourceUrl
+        }).ToList()
+    };
+
+    private static AudioEffectSlotSetting? TryCreateAudioEffect(AudioEffectSlotDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Id) || !Enum.IsDefined(dto.Kind))
+        {
+            return null;
+        }
+
+        Vst3EffectReference? external = null;
+        if (dto.Kind == AudioEffectKind.ExternalVst3)
+        {
+            var vst = dto.ExternalVst3;
+            if (vst is null ||
+                string.IsNullOrWhiteSpace(vst.ModulePath) ||
+                string.IsNullOrWhiteSpace(vst.ClassId) ||
+                string.IsNullOrWhiteSpace(vst.Name))
+            {
+                return null;
+            }
+            external = new Vst3EffectReference(
+                vst.ModulePath,
+                vst.ModuleName ?? Path.GetFileNameWithoutExtension(vst.ModulePath),
+                vst.ClassId,
+                vst.Category ?? "Audio Module Class",
+                vst.Name,
+                vst.Vendor ?? string.Empty,
+                vst.Version ?? string.Empty,
+                vst.SdkVersion ?? string.Empty,
+                vst.SubCategories ?? string.Empty,
+                vst.PresetPath);
+        }
+
+        return AudioEffectSlotSetting.Normalize(new AudioEffectSlotSetting(
+            dto.Id,
+            dto.Kind,
+            dto.IsEnabled ?? true,
+            dto.Amount ?? 0.5d,
+            dto.Mix ?? 1d,
+            external));
+    }
+
+    private static AudioEffectSlotDto ToAudioEffectSlotDto(AudioEffectSlotSetting effect) => new()
+    {
+        Id = effect.Id,
+        Kind = effect.Kind,
+        IsEnabled = effect.IsEnabled,
+        Amount = effect.Amount,
+        Mix = effect.Mix,
+        ExternalVst3 = effect.ExternalVst3 is null
+            ? null
+            : new Vst3EffectReferenceDto
+            {
+                ModulePath = effect.ExternalVst3.ModulePath,
+                ModuleName = effect.ExternalVst3.ModuleName,
+                ClassId = effect.ExternalVst3.ClassId,
+                Category = effect.ExternalVst3.Category,
+                Name = effect.ExternalVst3.Name,
+                Vendor = effect.ExternalVst3.Vendor,
+                Version = effect.ExternalVst3.Version,
+                SdkVersion = effect.ExternalVst3.SdkVersion,
+                SubCategories = effect.ExternalVst3.SubCategories,
+                PresetPath = effect.ExternalVst3.PresetPath
+            }
     };
 
     private static StemSelection NormalizeStemSelection(
@@ -592,6 +773,7 @@ public sealed class StudioStateStore
         public int? AudioInputChannelIndex { get; set; }
         public double? AudioInputGain { get; set; }
         public List<AudioInputMonitorDto>? AudioInputMonitors { get; set; }
+        public List<AudioEffectBusDto>? AudioEffectBuses { get; set; }
         public string? MidiDeviceName { get; set; }
         public int? MidiDeviceIndex { get; set; }
         public bool? AutoConnectMidi { get; set; }
@@ -628,6 +810,19 @@ public sealed class StudioStateStore
         public bool? MetronomeEnabled { get; set; }
         public double? MetronomeVolume { get; set; }
         public double? AnalysisConfidence { get; set; }
+        public List<TempoSegmentDto>? Segments { get; set; }
+    }
+
+    private sealed class TempoSegmentDto
+    {
+        public string? Id { get; set; }
+        public double? StartSeconds { get; set; }
+        public double? Bpm { get; set; }
+        public double? FirstBeatSeconds { get; set; }
+        public int? BeatsPerBar { get; set; }
+        public double? Confidence { get; set; }
+        public string? SourceName { get; set; }
+        public string? SourceUrl { get; set; }
     }
 
     private sealed class PlaylistDto
@@ -656,6 +851,39 @@ public sealed class StudioStateStore
         public int? ChannelIndex { get; set; }
         public double? Gain { get; set; }
         public AudioInputProfileKind? Profile { get; set; }
+        public bool? EffectsBypassed { get; set; }
+        public List<AudioEffectSlotDto>? Effects { get; set; }
+    }
+
+    private sealed class AudioEffectSlotDto
+    {
+        public string? Id { get; set; }
+        public AudioEffectKind Kind { get; set; }
+        public bool? IsEnabled { get; set; }
+        public double? Amount { get; set; }
+        public double? Mix { get; set; }
+        public Vst3EffectReferenceDto? ExternalVst3 { get; set; }
+    }
+
+    private sealed class AudioEffectBusDto
+    {
+        public AudioEffectBusTarget Target { get; set; }
+        public bool? EffectsBypassed { get; set; }
+        public List<AudioEffectSlotDto>? Effects { get; set; }
+    }
+
+    private sealed class Vst3EffectReferenceDto
+    {
+        public string? ModulePath { get; set; }
+        public string? ModuleName { get; set; }
+        public string? ClassId { get; set; }
+        public string? Category { get; set; }
+        public string? Name { get; set; }
+        public string? Vendor { get; set; }
+        public string? Version { get; set; }
+        public string? SdkVersion { get; set; }
+        public string? SubCategories { get; set; }
+        public string? PresetPath { get; set; }
     }
 
     private sealed class MediaAnalysisDto
@@ -664,7 +892,17 @@ public sealed class StudioStateStore
         public TempoDto? Tempo { get; set; }
         public TempoAnalysisOrigin TempoOrigin { get; set; }
         public DateTimeOffset? TempoUpdatedAtUtc { get; set; }
+        public DrumReferenceDto? DrumReference { get; set; }
         public List<DrumPerformanceSessionDto>? PerformanceSessions { get; set; }
+    }
+
+    private sealed class DrumReferenceDto
+    {
+        public string? Version { get; set; }
+        public string? SourcePath { get; set; }
+        public DateTimeOffset AnalyzedAtUtc { get; set; }
+        public double Confidence { get; set; }
+        public List<double>? HitTimesSeconds { get; set; }
     }
 
     private sealed class DrumPerformanceSessionDto
@@ -680,5 +918,9 @@ public sealed class StudioStateStore
         public double AccuracyPercent { get; set; }
         public double MeanAbsoluteErrorMilliseconds { get; set; }
         public double MaximumErrorMilliseconds { get; set; }
+        public int ExpectedHits { get; set; }
+        public int MissedHits { get; set; }
+        public int ExtraHits { get; set; }
+        public string? ReferenceVersion { get; set; }
     }
 }

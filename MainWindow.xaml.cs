@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -33,6 +34,33 @@ public partial class MainWindow : Window
     private int _youtubeAudioRoutingInProgress;
     private YouTubePlaybackRequest? _pendingYouTubePlayback;
     private PlaylistWindow? _playlistWindow;
+
+    private void OnMixerFaderPreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs eventArgs)
+    {
+        if (sender is not Slider slider ||
+            eventArgs.OriginalSource is Thumb ||
+            slider.Template.FindName("PART_Track", slider) is not Track track ||
+            track.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        var thumbHeight = track.Thumb?.ActualHeight ?? 0d;
+        var usableHeight = Math.Max(1d, track.ActualHeight - thumbHeight);
+        var point = eventArgs.GetPosition(track);
+        var centeredPosition = Math.Clamp(
+            point.Y - (thumbHeight / 2d),
+            0d,
+            usableHeight);
+        var ratio = 1d - (centeredPosition / usableHeight);
+        slider.Value = Math.Clamp(
+            slider.Minimum + (ratio * (slider.Maximum - slider.Minimum)),
+            slider.Minimum,
+            slider.Maximum);
+        eventArgs.Handled = true;
+    }
     private Point? _libraryDragOrigin;
     private Point? _playlistDragOrigin;
     private bool _closeAfterRecording;
@@ -344,9 +372,12 @@ public partial class MainWindow : Window
                     let config = null;
                     let context = null;
                     let nextBeat = null;
+                    let currentSegmentId = null;
+                    let lastPositionNotice = 0;
                     const scheduled = new Set();
                     const reset = () => {
                       nextBeat = null;
+                      currentSegmentId = null;
                       for (const oscillator of scheduled) {
                         try { oscillator.stop(); } catch (_) {}
                       }
@@ -359,19 +390,51 @@ public partial class MainWindow : Window
                     };
                     setInterval(() => {
                       const video = document.querySelector('video');
-                      if (!video || video.paused || video.ended || !config?.metronomeEnabled) return;
+                      if (!video || video.paused || video.ended) return;
+                      const nowTicks = performance.now();
+                      if (nowTicks - lastPositionNotice >= 80) {
+                        lastPositionNotice = nowTicks;
+                        chrome.webview.postMessage({
+                          type: 'video-position',
+                          seconds: video.currentTime
+                        });
+                      }
+                      if (!config?.metronomeEnabled) return;
                       context ??= new AudioContext({ latencyHint: 'interactive' });
                       if (context.state === 'suspended') context.resume().catch(() => {});
-                      const beatSeconds = 60 / config.bpm;
-                      const firstBeat = Math.max(0, config.firstBeatSeconds || 0);
                       const nowInVideo = video.currentTime;
+                      const segments = Array.isArray(config.segments) && config.segments.length
+                        ? config.segments
+                        : [{
+                            id: 'base',
+                            startSeconds: 0,
+                            bpm: config.bpm,
+                            firstBeatSeconds: config.firstBeatSeconds,
+                            beatsPerBar: config.beatsPerBar
+                          }];
+                      let segmentIndex = 0;
+                      for (let index = 1; index < segments.length; index++) {
+                        if ((segments[index].startSeconds || 0) > nowInVideo) break;
+                        segmentIndex = index;
+                      }
+                      const segment = segments[segmentIndex];
+                      const segmentId = segment.id || String(segmentIndex);
+                      const beatSeconds = 60 / segment.bpm;
+                      const firstBeat = Math.max(0, segment.firstBeatSeconds || 0);
+                      const segmentEnd = segmentIndex + 1 < segments.length
+                        ? segments[segmentIndex + 1].startSeconds
+                        : Number.POSITIVE_INFINITY;
+                      if (currentSegmentId !== segmentId) {
+                        currentSegmentId = segmentId;
+                        nextBeat = null;
+                      }
                       if (nextBeat === null || nextBeat < nowInVideo - 0.05) {
                         const beatNumber = Math.max(0, Math.ceil((nowInVideo - firstBeat) / beatSeconds - 1e-7));
                         nextBeat = firstBeat + beatNumber * beatSeconds;
                       }
-                      while (nextBeat <= nowInVideo + 0.10) {
+                      while (nextBeat <= nowInVideo + 0.10 && nextBeat < segmentEnd) {
                         const beatNumber = Math.max(0, Math.round((nextBeat - firstBeat) / beatSeconds));
-                        const accent = beatNumber % Math.max(1, config.beatsPerBar || 4) === 0;
+                        const accent = beatNumber % Math.max(1, segment.beatsPerBar || 4) === 0;
                         const oscillator = context.createOscillator();
                         const gain = context.createGain();
                         const start = context.currentTime + Math.max(0, nextBeat - nowInVideo);
@@ -556,7 +619,15 @@ public partial class MainWindow : Window
                 settings.FirstBeatSeconds,
                 settings.BeatsPerBar,
                 settings.MetronomeEnabled,
-                settings.MetronomeVolume
+                settings.MetronomeVolume,
+                Segments = settings.EffectiveSegments.Select(segment => new
+                {
+                    segment.Id,
+                    segment.StartSeconds,
+                    segment.Bpm,
+                    segment.FirstBeatSeconds,
+                    segment.BeatsPerBar
+                })
             }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         await YouTubeWebView.CoreWebView2.ExecuteScriptAsync(
             $"window.__dpsSetMetronome?.({payload});");
@@ -603,6 +674,12 @@ public partial class MainWindow : Window
                     message);
                 YouTubeStatusText.Text =
                     "YouTube no pudo iniciar la reproducción automáticamente";
+            }
+            else if (root.GetProperty("type").GetString() == "video-position" &&
+                     root.TryGetProperty("seconds", out var secondsElement) &&
+                     secondsElement.TryGetDouble(out var playbackSeconds))
+            {
+                _viewModel.UpdateYouTubePlaybackPosition(playbackSeconds);
             }
             else if (root.GetProperty("type").GetString() == "metronome-click" &&
                      root.TryGetProperty("videoTime", out var clickTime) &&
@@ -935,6 +1012,20 @@ public partial class MainWindow : Window
         if (PlaylistItemList.SelectedItem is PlaylistItemViewModel item)
         {
             _viewModel.PlayPlaylistItem(item);
+        }
+    }
+
+    private void OnInputVst3EffectSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox
+            {
+                Tag: AudioEffectSlotItem slot,
+                SelectedItem: Vst3EffectItem effect
+            })
+        {
+            slot.ExternalVst3 = effect.ToReference();
         }
     }
 

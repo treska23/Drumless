@@ -8,11 +8,19 @@ public sealed class TempoAnalysisService
     private const int EnvelopeRate = 200;
     private const double MinimumBpm = 60d;
     private const double MaximumBpm = 200d;
+    private const int MapWindowSeconds = 24;
+    private const int MapHopSeconds = 12;
 
     public Task<TempoAnalysisResult> AnalyzeAsync(
         string path,
         CancellationToken cancellationToken = default) => Task.Run(
         () => Analyze(path, cancellationToken),
+        cancellationToken);
+
+    public Task<TempoMapAnalysisResult> AnalyzeMapAsync(
+        string path,
+        CancellationToken cancellationToken = default) => Task.Run(
+        () => AnalyzeMap(path, cancellationToken),
         cancellationToken);
 
     public TempoAnalysisResult Analyze(
@@ -22,6 +30,64 @@ public sealed class TempoAnalysisService
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         using var reader = new AudioFileReader(path);
         var envelope = BuildOnsetEnvelope(reader, cancellationToken);
+        return AnalyzeEnvelope(envelope, 0d, cancellationToken);
+    }
+
+    public TempoMapAnalysisResult AnalyzeMap(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        using var reader = new AudioFileReader(path);
+        var envelope = BuildOnsetEnvelope(reader, cancellationToken);
+        if (envelope.Length < EnvelopeRate * 4 || envelope.Max() <= 1e-8d)
+        {
+            throw new InvalidDataException("La pista no contiene suficientes pulsos para estimar el tempo.");
+        }
+
+        var windowLength = EnvelopeRate * MapWindowSeconds;
+        var hopLength = EnvelopeRate * MapHopSeconds;
+        var raw = new List<TempoSegment>();
+        for (var start = 0; start < envelope.Length; start += hopLength)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var length = Math.Min(windowLength, envelope.Length - start);
+            if (length < EnvelopeRate * 8 && raw.Count > 0)
+            {
+                break;
+            }
+
+            var result = AnalyzeEnvelope(
+                envelope.AsSpan(start, length).ToArray(),
+                start / (double)EnvelopeRate,
+                cancellationToken);
+            var bpm = ResolveHalfDoubleTempo(raw.LastOrDefault()?.Bpm, result.Bpm);
+            raw.Add(TempoSegment.Create(
+                startSeconds: start / (double)EnvelopeRate,
+                bpm: bpm,
+                firstBeatSeconds: result.FirstBeatSeconds,
+                confidence: result.Confidence,
+                sourceName: "Análisis local por ventanas"));
+        }
+
+        var merged = MergeStableWindows(raw);
+        var overallConfidence = merged.Count == 0
+            ? 0d
+            : merged.Average(segment => segment.Confidence);
+        var summary = merged.Count switch
+        {
+            0 => "No se pudo proponer ningún tramo.",
+            1 => $"Tempo estable propuesto: {merged[0].Bpm:0.##} BPM.",
+            _ => $"{merged.Count} tramos propuestos; revisa los límites antes de aplicarlos."
+        };
+        return new TempoMapAnalysisResult(merged, overallConfidence, summary);
+    }
+
+    private static TempoAnalysisResult AnalyzeEnvelope(
+        double[] envelope,
+        double absoluteOffsetSeconds,
+        CancellationToken cancellationToken)
+    {
         if (envelope.Length < EnvelopeRate * 4 || envelope.Max() <= 1e-8d)
         {
             throw new InvalidDataException("La pista no contiene suficientes pulsos para estimar el tempo.");
@@ -84,8 +150,64 @@ public sealed class TempoAnalysisService
         var confidence = Math.Clamp(bestScore * 0.75d + distinctness * 0.25d, 0d, 1d);
         return new TempoAnalysisResult(
             Math.Round(bpm, 2),
-            firstOnset / (double)EnvelopeRate,
+            absoluteOffsetSeconds + firstOnset / (double)EnvelopeRate,
             confidence);
+    }
+
+    private static double ResolveHalfDoubleTempo(double? previousBpm, double candidateBpm)
+    {
+        if (previousBpm is null)
+        {
+            return candidateBpm;
+        }
+
+        var previous = previousBpm.Value;
+        if (Math.Abs(candidateBpm * 2d - previous) / previous <= 0.04d &&
+            candidateBpm * 2d <= MaximumBpm)
+        {
+            return candidateBpm * 2d;
+        }
+        if (Math.Abs(candidateBpm / 2d - previous) / previous <= 0.04d &&
+            candidateBpm / 2d >= MinimumBpm)
+        {
+            return candidateBpm / 2d;
+        }
+        return candidateBpm;
+    }
+
+    private static IReadOnlyList<TempoSegment> MergeStableWindows(
+        IReadOnlyList<TempoSegment> windows)
+    {
+        var result = new List<TempoSegment>();
+        foreach (var window in windows)
+        {
+            if (result.Count == 0)
+            {
+                result.Add(window with { StartSeconds = 0d });
+                continue;
+            }
+
+            var previous = result[^1];
+            var difference = Math.Abs(previous.Bpm - window.Bpm) /
+                             Math.Max(previous.Bpm, window.Bpm);
+            if (difference <= 0.025d)
+            {
+                var totalWeight = Math.Max(0.05d, previous.Confidence) +
+                                  Math.Max(0.05d, window.Confidence);
+                var bpm = ((previous.Bpm * Math.Max(0.05d, previous.Confidence)) +
+                           (window.Bpm * Math.Max(0.05d, window.Confidence))) /
+                          totalWeight;
+                result[^1] = previous with
+                {
+                    Bpm = Math.Round(bpm, 2),
+                    Confidence = Math.Max(previous.Confidence, window.Confidence)
+                };
+                continue;
+            }
+
+            result.Add(window);
+        }
+        return result;
     }
 
     private static int? EstimateOnsetInterval(

@@ -365,12 +365,13 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
     {
         var channels = WaveFormat.Channels;
         var frames = buffer.Length / channels;
-        var beatSeconds = 60d / settings.Bpm;
         const double clickDuration = 0.028d;
         for (var frame = 0; frame < frames; frame++)
         {
             var time = startSeconds + frame / (double)WaveFormat.SampleRate;
-            var relative = time - settings.FirstBeatSeconds;
+            var segment = settings.GetSegmentAt(time);
+            var beatSeconds = 60d / segment.Bpm;
+            var relative = time - segment.FirstBeatSeconds;
             if (relative < 0d)
             {
                 continue;
@@ -383,7 +384,7 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
                 continue;
             }
 
-            var accent = beatIndex % settings.BeatsPerBar == 0;
+            var accent = beatIndex % segment.BeatsPerBar == 0;
             var frequency = accent ? 1_760d : 1_180d;
             var envelope = Math.Exp(-phase * 105d);
             var click = Math.Sin(2d * Math.PI * frequency * phase) * envelope *

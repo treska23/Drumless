@@ -12,12 +12,18 @@ public sealed class AudioEngine : IDisposable
 
     private readonly DrumSamplerProvider _drums;
     private readonly TrackTransportProvider _track;
+    private readonly AudioEffectRackSampleProvider _trackEffects;
     private readonly MixingSampleProvider _mixer;
     private readonly OutputRecordingSink _recording = new();
     private readonly Vst3InstrumentHost _vstInstrument = new();
     private readonly object _youtubeCaptureGate = new();
     private DirectVst3Instrument? _directVstInstrument;
     private ProcessLoopbackSampleProvider? _youtubeAudio;
+    private AudioEffectRackSampleProvider? _youtubeEffectRack;
+    private AudioEffectSlotSetting[] _youtubeEffectSettings = [];
+    private AudioEffectSlotSetting[] _masterEffectSettings = [];
+    private bool _youtubeEffectsBypassed;
+    private bool _masterEffectsBypassed;
     private AudioOutputSession? _output;
     private int _youtubeCaptureVersion;
     private bool _disposed;
@@ -31,7 +37,8 @@ public sealed class AudioEngine : IDisposable
         var format = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, 2);
         _drums = new DrumSamplerProvider(format);
         _track = new TrackTransportProvider(format);
-        _mixer = new MixingSampleProvider([_track, _drums]) { ReadFully = true };
+        _trackEffects = new AudioEffectRackSampleProvider(_track);
+        _mixer = new MixingSampleProvider([_trackEffects, _drums]) { ReadFully = true };
         _vstInstrument.Exited += (_, message) => VstInstrumentExited?.Invoke(this, message);
         _vstInstrument.EditorClosed += (_, _) => VstEditorClosed?.Invoke(this, EventArgs.Empty);
 
@@ -57,6 +64,13 @@ public sealed class AudioEngine : IDisposable
     public IReadOnlyList<AudioInputMonitorSetting> AudioInputMonitorSettings =>
         _output?.InputMonitorSettings ?? [];
     public bool IsAudioInputMonitoringActive => _output?.IsInputMonitoringActive == true;
+    public string? AudioInputEffectWarning => _output?.InputEffectWarning;
+    public string? EffectBusWarning =>
+        _trackEffects.Warning ??
+        _youtubeEffectRack?.Warning ??
+        _output?.InputEffectWarning;
+    public int AudioInputEffectLatencyMilliseconds =>
+        _output?.InputEffectLatencyMilliseconds ?? 0;
     public IReadOnlyList<AudioInputChannelItem> AudioInputChannels =>
         _output?.InputChannels ?? [];
     public bool IsTrackPlaying => _track.IsPlaying;
@@ -190,7 +204,9 @@ public sealed class AudioEngine : IDisposable
                 _mixer,
                 deviceId,
                 inputMonitorSettings,
-                _recording);
+                _recording,
+                _masterEffectSettings,
+                _masterEffectsBypassed);
             replacement.Faulted += OnOutputFaulted;
             if (!exclusiveTransition)
             {
@@ -266,7 +282,9 @@ public sealed class AudioEngine : IDisposable
             .ToArray();
         var previousSettings = previous.InputMonitorSettings;
         if (previousSettings.Select(setting => setting.ChannelIndex)
-            .SequenceEqual(normalized.Select(setting => setting.ChannelIndex)))
+                .SequenceEqual(normalized.Select(setting => setting.ChannelIndex)) &&
+            previousSettings.Zip(normalized)
+                .All(pair => pair.First.EffectConfigurationEquals(pair.Second)))
         {
             foreach (var setting in normalized)
             {
@@ -283,7 +301,13 @@ public sealed class AudioEngine : IDisposable
         AudioOutputSession? replacement = null;
         try
         {
-            replacement = AudioOutputSession.Open(_mixer, deviceId, normalized, _recording);
+            replacement = AudioOutputSession.Open(
+                _mixer,
+                deviceId,
+                normalized,
+                _recording,
+                _masterEffectSettings,
+                _masterEffectsBypassed);
             replacement.Faulted += OnOutputFaulted;
             replacement.Play();
         }
@@ -292,7 +316,13 @@ public sealed class AudioEngine : IDisposable
             replacement?.Dispose();
             try
             {
-                replacement = AudioOutputSession.Open(_mixer, deviceId, previousSettings, _recording);
+                replacement = AudioOutputSession.Open(
+                    _mixer,
+                    deviceId,
+                    previousSettings,
+                    _recording,
+                    _masterEffectSettings,
+                    _masterEffectsBypassed);
                 replacement.Faulted += OnOutputFaulted;
                 replacement.Play();
                 _output = replacement;
@@ -331,6 +361,40 @@ public sealed class AudioEngine : IDisposable
 
     public void SetAudioInputProfile(int channelIndex, AudioInputProfileKind profile) =>
         _output?.SetInputProfile(channelIndex, profile);
+
+    public void SetAudioInputEffects(
+        int channelIndex,
+        IReadOnlyList<AudioEffectSlotSetting> effects,
+        bool bypassed) =>
+        _output?.SetInputEffects(channelIndex, effects, bypassed);
+
+    public void ConfigureEffectBus(
+        AudioEffectBusTarget target,
+        IReadOnlyList<AudioEffectSlotSetting> effects,
+        bool bypassed)
+    {
+        ArgumentNullException.ThrowIfNull(effects);
+        var normalized = effects
+            .Take(AudioEffectCatalog.MaximumSlots)
+            .Select(AudioEffectSlotSetting.Normalize)
+            .ToArray();
+        switch (target)
+        {
+            case AudioEffectBusTarget.Track:
+                _trackEffects.SetEffects(normalized, bypassed);
+                break;
+            case AudioEffectBusTarget.YouTube:
+                _youtubeEffectSettings = normalized;
+                _youtubeEffectsBypassed = bypassed;
+                _youtubeEffectRack?.SetEffects(normalized, bypassed);
+                break;
+            case AudioEffectBusTarget.Master:
+                _masterEffectSettings = normalized;
+                _masterEffectsBypassed = bypassed;
+                _output?.SetMasterEffects(normalized, bypassed);
+                break;
+        }
+    }
 
     public async Task LoadVstInstrumentAsync(
         Vst3InstrumentItem instrument,
@@ -453,22 +517,31 @@ public sealed class AudioEngine : IDisposable
             format);
 
         ProcessLoopbackSampleProvider? previous = null;
+        AudioEffectRackSampleProvider? previousRack = null;
+        var replacementRack = new AudioEffectRackSampleProvider(
+            replacement,
+            _youtubeEffectSettings,
+            _youtubeEffectsBypassed);
         lock (_youtubeCaptureGate)
         {
             if (_disposed || requestVersion != _youtubeCaptureVersion)
             {
+                replacementRack.Dispose();
                 replacement.Dispose();
                 return;
             }
 
             previous = _youtubeAudio;
+            previousRack = _youtubeEffectRack;
             _youtubeAudio = replacement;
-            _mixer.AddMixerInput(replacement);
-            if (previous is not null)
+            _youtubeEffectRack = replacementRack;
+            _mixer.AddMixerInput(replacementRack);
+            if (previousRack is not null)
             {
-                _mixer.RemoveMixerInput(previous);
+                _mixer.RemoveMixerInput(previousRack);
             }
         }
+        previousRack?.Dispose();
         previous?.Dispose();
     }
 
@@ -484,15 +557,19 @@ public sealed class AudioEngine : IDisposable
     {
         Interlocked.Increment(ref _youtubeCaptureVersion);
         ProcessLoopbackSampleProvider? capture;
+        AudioEffectRackSampleProvider? rack;
         lock (_youtubeCaptureGate)
         {
             capture = _youtubeAudio;
+            rack = _youtubeEffectRack;
             _youtubeAudio = null;
-            if (capture is not null)
+            _youtubeEffectRack = null;
+            if (rack is not null)
             {
-                _mixer.RemoveMixerInput(capture);
+                _mixer.RemoveMixerInput(rack);
             }
         }
+        rack?.Dispose();
         capture?.Dispose();
     }
 
@@ -607,6 +684,7 @@ public sealed class AudioEngine : IDisposable
         StopYouTubeAudioCapture();
         UnloadVstInstrument();
         _output?.Dispose();
+        _trackEffects.Dispose();
         _track.Dispose();
         _recording.Dispose();
     }

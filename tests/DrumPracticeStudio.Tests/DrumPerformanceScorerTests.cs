@@ -33,4 +33,33 @@ public sealed class DrumPerformanceScorerTests
         Assert.AreEqual(0d, TempoGrid.NearestGridErrorSeconds(0.375d, tempo), 1e-9d);
         Assert.AreEqual(0.030d, TempoGrid.NearestGridErrorSeconds(0.405d, tempo), 1e-9d);
     }
+
+    [TestMethod]
+    public void Reference_CountsMissedAndExtraHitsWithoutDoubleMatching()
+    {
+        var scorer = new DrumPerformanceScorer();
+        var reference = new DrumReferenceMap(
+            "ref-v1",
+            "drums.wav",
+            DateTimeOffset.UtcNow,
+            0.9d,
+            [1d, 2d, 3d]);
+        scorer.Start(
+            new TempoSettings(120d, 0d),
+            latencyCompensationMilliseconds: 0d,
+            reference);
+        scorer.Record(1.01d, 36, 100);
+        scorer.Record(2.09d, 38, 100);
+        scorer.Record(4d, 42, 100);
+
+        var result = scorer.Finish();
+
+        Assert.IsTrue(result.UsedReference);
+        Assert.AreEqual(3, result.ExpectedHits);
+        Assert.AreEqual(1, result.AccurateHits);
+        Assert.AreEqual(1, result.LateHits);
+        Assert.AreEqual(1, result.MissedHits);
+        Assert.AreEqual(1, result.ExtraHits);
+        Assert.AreEqual(25d, result.AccuracyPercent, 0.01d);
+    }
 }

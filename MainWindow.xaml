@@ -294,7 +294,18 @@
                             <Border Style="{StaticResource CardStyle}">
                                 <StackPanel>
                                     <TextBlock Text="VOLUMEN DE PISTA" FontSize="11" Foreground="{StaticResource TextSecondary}" />
-                                    <Slider Minimum="0" Maximum="1" Value="{Binding TrackVolume}" Margin="0,10,0,2" />
+                                    <Slider Style="{StaticResource MixerFader}"
+                                            Minimum="0" Maximum="1"
+                                            Value="{Binding TrackVolume}"
+                                            Margin="0,10,0,5"
+                                            HorizontalAlignment="Center"
+                                            PreviewMouseLeftButtonDown="OnMixerFaderPreviewMouseLeftButtonDown"
+                                            AutomationProperties.Name="Volumen de pista" />
+                                    <TextBlock Text="{Binding TrackVolume, StringFormat={}{0:P0}}"
+                                               HorizontalAlignment="Center"
+                                               Foreground="{StaticResource Accent}"
+                                               FontWeight="SemiBold"
+                                               Margin="0,0,0,7" />
                                     <TextBlock Text="La batería mantiene su nivel independiente."
                                                TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}" FontSize="11" />
                                 </StackPanel>
@@ -325,12 +336,148 @@
                                                      AutomationProperties.AutomationId="TempoFirstBeatTextBox" />
                                         </StackPanel>
                                     </Grid>
+                                    <Expander Header="Mapa de tempo por tramos" Margin="0,10,0,0"
+                                              IsExpanded="False"
+                                              AutomationProperties.AutomationId="TempoMapExpander">
+                                        <StackPanel Margin="0,8,0,0">
+                                            <ListBox ItemsSource="{Binding TempoSegments}"
+                                                     SelectedItem="{Binding SelectedTempoSegment}"
+                                                     MaxHeight="150"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                     AutomationProperties.AutomationId="TempoSegmentList">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding Summary}" TextWrapping="Wrap"
+                                                                   Foreground="{StaticResource TextPrimary}" />
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <Grid Margin="0,7,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="8" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="INICIO DEL TRAMO (s)"
+                                                               Foreground="{StaticResource TextSecondary}" FontSize="10" />
+                                                    <TextBox Text="{Binding SelectedTempoSegment.StartSeconds,
+                                                                           UpdateSourceTrigger=LostFocus}" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Text="COMPÁS (pulsos)"
+                                                               Foreground="{StaticResource TextSecondary}" FontSize="10" />
+                                                    <TextBox Text="{Binding SelectedTempoSegment.BeatsPerBar,
+                                                                           UpdateSourceTrigger=LostFocus}" />
+                                                </StackPanel>
+                                            </Grid>
+                                            <WrapPanel Margin="0,7,0,0">
+                                                <Button Style="{StaticResource SecondaryButton}" Content="Añadir tramo"
+                                                        Command="{Binding AddTempoSegmentCommand}" />
+                                                <Button Style="{StaticResource SecondaryButton}" Content="Quitar"
+                                                        Margin="6,0,0,0"
+                                                        Command="{Binding RemoveTempoSegmentCommand}" />
+                                                <Button Style="{StaticResource SecondaryButton}" Content="↑"
+                                                        Margin="6,0,0,0"
+                                                        Command="{Binding MoveTempoSegmentUpCommand}" />
+                                                <Button Style="{StaticResource SecondaryButton}" Content="↓"
+                                                        Margin="6,0,0,0"
+                                                        Command="{Binding MoveTempoSegmentDownCommand}" />
+                                            </WrapPanel>
+                                            <TextBlock Text="{Binding SelectedTempoSegment.SourceName,
+                                                                      StringFormat=Fuente: {0}}"
+                                                       Foreground="{StaticResource TextSecondary}" FontSize="10"
+                                                       Margin="0,6,0,0" TextWrapping="Wrap" />
+                                            <Button Style="{StaticResource SecondaryButton}" Content="Abrir fuente"
+                                                    Margin="0,6,0,0" HorizontalAlignment="Left"
+                                                    Command="{Binding OpenTempoSourceCommand}" />
+                                        </StackPanel>
+                                    </Expander>
+                                    <Border BorderBrush="{StaticResource Stroke}" BorderThickness="1"
+                                            CornerRadius="6" Padding="8" Margin="0,9,0,0"
+                                            Visibility="{Binding HasTempoProposal,
+                                                                 Converter={StaticResource BoolToVisibility}}">
+                                        <StackPanel>
+                                            <TextBlock Text="PROPUESTA DEL ANALIZADOR · NO APLICADA"
+                                                       Foreground="{StaticResource Accent}" FontSize="10"
+                                                       FontWeight="Bold" />
+                                            <ItemsControl ItemsSource="{Binding ProposedTempoSegments}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding Summary}" FontSize="10"
+                                                                   Foreground="{StaticResource TextSecondary}"
+                                                                   TextWrapping="Wrap" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <Button Style="{StaticResource PrimaryButton}" Content="Aplicar propuesta"
+                                                    Margin="0,7,0,0" HorizontalAlignment="Left"
+                                                    Command="{Binding ApplyTempoProposalCommand}"
+                                                    AutomationProperties.AutomationId="ApplyTempoProposalButton" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Expander Header="Buscar BPM en fuentes web" Margin="0,9,0,0"
+                                              AutomationProperties.AutomationId="TempoSourcesExpander">
+                                        <StackPanel Margin="0,8,0,0">
+                                            <WrapPanel>
+                                                <Button Style="{StaticResource SecondaryButton}" Content="Buscar fuentes"
+                                                        Command="{Binding SearchTempoSourcesCommand}"
+                                                        AutomationProperties.AutomationId="SearchTempoSourcesButton" />
+                                                <Button Style="{StaticResource SecondaryButton}"
+                                                        Content="Contrastar con Ollama"
+                                                        Margin="6,0,0,0"
+                                                        Command="{Binding ContrastTempoSourcesCommand}" />
+                                            </WrapPanel>
+                                            <ListBox ItemsSource="{Binding TempoSourceCandidates}"
+                                                     SelectedItem="{Binding SelectedTempoSourceCandidate}"
+                                                     MaxHeight="170" Margin="0,7,0,0"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="2,4">
+                                                            <TextBlock Text="{Binding Bpm, StringFormat={}{0:0.##} BPM}"
+                                                                       Foreground="{StaticResource Accent}"
+                                                                       FontWeight="SemiBold" />
+                                                            <TextBlock Text="{Binding Title}" TextWrapping="Wrap"
+                                                                       Foreground="{StaticResource TextPrimary}" />
+                                                            <TextBlock Text="{Binding Evidence}" TextWrapping="Wrap"
+                                                                       Foreground="{StaticResource TextSecondary}"
+                                                                       FontSize="10" />
+                                                            <TextBlock Text="{Binding OllamaAssessment}" TextWrapping="Wrap"
+                                                                       Foreground="{StaticResource TextSecondary}"
+                                                                       FontStyle="Italic" FontSize="10" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <WrapPanel Margin="0,7,0,0">
+                                                <Button Style="{StaticResource PrimaryButton}" Content="Aplicar al tramo"
+                                                        Command="{Binding ApplyTempoSourceCommand}" />
+                                                <Button Style="{StaticResource SecondaryButton}" Content="Abrir fuente"
+                                                        Margin="6,0,0,0"
+                                                        Command="{Binding OpenTempoSourceCommand}" />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Expander>
                                     <CheckBox Content="Activar claqueta sincronizada" Margin="0,10,0,5"
                                               IsChecked="{Binding MetronomeEnabled}"
                                               AutomationProperties.AutomationId="MetronomeEnabledCheckBox" />
                                     <TextBlock Text="VOLUMEN DE CLAQUETA" Foreground="{StaticResource TextSecondary}" FontSize="10" />
-                                    <Slider Minimum="0" Maximum="1" Value="{Binding MetronomeVolume}"
-                                            AutomationProperties.AutomationId="MetronomeVolumeSlider" />
+                                    <StackPanel Orientation="Horizontal"
+                                                HorizontalAlignment="Center"
+                                                Margin="0,8,0,2">
+                                        <Slider Style="{StaticResource MixerKnob}"
+                                                Minimum="0" Maximum="1"
+                                                Value="{Binding MetronomeVolume}"
+                                                ToolTip="Arrastra a izquierda o derecha"
+                                                AutomationProperties.AutomationId="MetronomeVolumeSlider" />
+                                        <TextBlock Text="{Binding MetronomeVolume, StringFormat={}{0:P0}}"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{StaticResource Accent}"
+                                                   FontSize="16"
+                                                   FontWeight="SemiBold"
+                                                   Margin="10,0,0,0" />
+                                    </StackPanel>
                                     <TextBlock Text="{Binding TempoStatus}" Foreground="{StaticResource TextSecondary}"
                                                TextWrapping="Wrap" FontSize="11" Margin="0,7,0,0" />
                                     <Button Style="{StaticResource SecondaryButton}" Content="Borrar análisis de esta pista"
@@ -347,6 +494,15 @@
                                     <TextBlock Text="Compensa la latencia total antes de puntuar. La rejilla usa semicorcheas."
                                                Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
                                                FontSize="11" Margin="0,7,0,7" />
+                                    <Button Style="{StaticResource SecondaryButton}"
+                                            Content="Analizar pista de batería de referencia"
+                                            IsEnabled="{Binding CanAnalyzeDrumReference}"
+                                            Command="{Binding AnalyzeDrumReferenceCommand}"
+                                            HorizontalAlignment="Left"
+                                            AutomationProperties.AutomationId="AnalyzeDrumReferenceButton" />
+                                    <TextBlock Text="{Binding DrumReferenceStatus}"
+                                               Foreground="{StaticResource TextSecondary}"
+                                               TextWrapping="Wrap" FontSize="10" Margin="0,5,0,8" />
                                     <TextBlock Text="COMPENSACIÓN (ms)" Foreground="{StaticResource TextSecondary}" FontSize="10" />
                                     <TextBox Text="{Binding PerformanceLatencyCompensationMs, UpdateSourceTrigger=LostFocus}"
                                              AutomationProperties.AutomationId="PerformanceLatencyTextBox" />
@@ -937,6 +1093,11 @@
                                 <TextBlock Text="Activa simultáneamente todas las entradas que necesites: guitarra, micrófono, módulo de batería u otras fuentes. Cada entrada tiene su propio nivel."
                                            Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
                                            Margin="0,5,0,0" />
+                                <Button Style="{StaticResource SecondaryButton}"
+                                        Content="Buscar efectos VST3 instalados"
+                                        HorizontalAlignment="Left" Margin="0,9,0,0"
+                                        Command="{Binding ScanVstEffectsCommand}"
+                                        AutomationProperties.AutomationId="ScanVstEffectsButton" />
                                 <Border BorderBrush="{StaticResource Stroke}" BorderThickness="1" CornerRadius="8"
                                         Margin="0,10,0,0" Padding="10">
                                     <ItemsControl ItemsSource="{Binding AudioInputMonitors}"
@@ -948,20 +1109,28 @@
                                                     <Grid.RowDefinitions>
                                                         <RowDefinition Height="Auto" />
                                                         <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
                                                     </Grid.RowDefinitions>
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="230" />
-                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="90" />
                                                         <ColumnDefinition Width="55" />
-                                                        <ColumnDefinition Width="190" />
+                                                        <ColumnDefinition Width="*" />
                                                     </Grid.ColumnDefinitions>
                                                     <CheckBox IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                               Content="{Binding DisplayName}" VerticalAlignment="Center"
                                                               AutomationProperties.Name="{Binding DisplayName}" />
-                                                    <Slider Grid.Column="1" Minimum="0" Maximum="1.5"
+                                                    <Slider Grid.Column="1"
+                                                            Style="{StaticResource MixerFader}"
+                                                            Minimum="0" Maximum="1.5"
                                                             Value="{Binding Gain, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                             IsEnabled="{Binding IsEnabled}"
-                                                            TickFrequency="0.05" Margin="12,0" />
+                                                            TickFrequency="0.05"
+                                                            Height="135"
+                                                            HorizontalAlignment="Center"
+                                                            PreviewMouseLeftButtonDown="OnMixerFaderPreviewMouseLeftButtonDown"
+                                                            AutomationProperties.Name="Ganancia de entrada" />
                                                     <TextBlock Grid.Column="2" Text="{Binding GainLabel}"
                                                                VerticalAlignment="Center" HorizontalAlignment="Right"
                                                                Foreground="{StaticResource Accent}" FontWeight="SemiBold" />
@@ -970,6 +1139,8 @@
                                                               SelectedValue="{Binding Profile, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                               SelectedValuePath="Kind"
                                                               IsEnabled="{Binding IsEnabled}"
+                                                              VerticalAlignment="Center"
+                                                              MaxHeight="42"
                                                               AutomationProperties.Name="Perfil de procesamiento">
                                                         <ComboBox.ItemTemplate>
                                                             <DataTemplate>
@@ -983,6 +1154,112 @@
                                                                Foreground="{StaticResource TextSecondary}"
                                                                FontSize="11" TextWrapping="Wrap"
                                                                Margin="12,4,0,0" />
+                                                    <WrapPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3"
+                                                               Margin="12,7,0,0">
+                                                        <CheckBox Content="Bypass A/B de toda la cadena"
+                                                                  IsChecked="{Binding EffectsBypassed,
+                                                                                      Mode=TwoWay,
+                                                                                      UpdateSourceTrigger=PropertyChanged}" />
+                                                        <Button Style="{StaticResource SecondaryButton}"
+                                                                Content="+ Slot" Margin="10,0,0,0"
+                                                                Command="{Binding DataContext.AddInputEffectSlotCommand,
+                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}" />
+                                                        <Button Style="{StaticResource SecondaryButton}"
+                                                                Content="Importar cadena" Margin="6,0,0,0"
+                                                                Command="{Binding DataContext.ImportInputEffectChainCommand,
+                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}" />
+                                                        <Button Style="{StaticResource SecondaryButton}"
+                                                                Content="Exportar" Margin="6,0,0,0"
+                                                                Command="{Binding DataContext.ExportInputEffectChainCommand,
+                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}" />
+                                                    </WrapPanel>
+                                                    <ItemsControl Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3"
+                                                                  ItemsSource="{Binding EffectSlots}"
+                                                                  Margin="12,6,0,0">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Grid Margin="0,3">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="24" />
+                                                                        <ColumnDefinition Width="185" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <CheckBox IsChecked="{Binding IsEnabled,
+                                                                                                  Mode=TwoWay,
+                                                                                                  UpdateSourceTrigger=PropertyChanged}"
+                                                                              VerticalAlignment="Center" />
+                                                                    <StackPanel Grid.Column="1" Margin="4,0">
+                                                                        <ComboBox ItemsSource="{Binding KindOptions}"
+                                                                                  SelectedValue="{Binding Kind,
+                                                                                                          Mode=TwoWay,
+                                                                                                          UpdateSourceTrigger=PropertyChanged}"
+                                                                                  SelectedValuePath="Kind"
+                                                                                  DisplayMemberPath="Label" />
+                                                                        <ComboBox ItemsSource="{Binding DataContext.Vst3Effects,
+                                                                                                        RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                  DisplayMemberPath="DisplayLabel"
+                                                                                  Tag="{Binding}"
+                                                                                  SelectionChanged="OnInputVst3EffectSelectionChanged"
+                                                                                  Visibility="{Binding IsExternal,
+                                                                                                       Converter={StaticResource BoolToVisibility}}"
+                                                                                  Margin="0,3,0,0"
+                                                                                  AutomationProperties.Name="Efecto VST3 externo" />
+                                                                        <TextBlock Text="{Binding ExternalVst3.Name}"
+                                                                                   Visibility="{Binding IsExternal,
+                                                                                                        Converter={StaticResource BoolToVisibility}}"
+                                                                                   Foreground="{StaticResource TextSecondary}"
+                                                                                   FontSize="9" TextWrapping="Wrap" />
+                                                                        <Button Style="{StaticResource SecondaryButton}"
+                                                                                Content="Preset VST3"
+                                                                                Visibility="{Binding IsExternal,
+                                                                                                     Converter={StaticResource BoolToVisibility}}"
+                                                                                Margin="0,3,0,0" HorizontalAlignment="Left"
+                                                                                Command="{Binding DataContext.ChooseVstEffectPresetCommand,
+                                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}" />
+                                                                    </StackPanel>
+                                                                    <StackPanel Grid.Column="2" Margin="6,0">
+                                                                        <TextBlock Text="CARÁCTER" FontSize="9"
+                                                                                   Foreground="{StaticResource TextSecondary}" />
+                                                                        <Slider Minimum="0" Maximum="1"
+                                                                                Value="{Binding Amount,
+                                                                                                Mode=TwoWay,
+                                                                                                UpdateSourceTrigger=PropertyChanged}" />
+                                                                    </StackPanel>
+                                                                    <StackPanel Grid.Column="3" Margin="6,0">
+                                                                        <TextBlock Text="MEZCLA" FontSize="9"
+                                                                                   Foreground="{StaticResource TextSecondary}" />
+                                                                        <Slider Minimum="0" Maximum="1"
+                                                                                Value="{Binding Mix,
+                                                                                                Mode=TwoWay,
+                                                                                                UpdateSourceTrigger=PropertyChanged}" />
+                                                                    </StackPanel>
+                                                                    <WrapPanel Grid.Column="4" VerticalAlignment="Center">
+                                                                        <Button Style="{StaticResource SecondaryButton}"
+                                                                                Content="↑" Padding="7,3"
+                                                                                Command="{Binding DataContext.MoveInputEffectSlotUpCommand,
+                                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}" />
+                                                                        <Button Style="{StaticResource SecondaryButton}"
+                                                                                Content="↓" Padding="7,3" Margin="3,0,0,0"
+                                                                                Command="{Binding DataContext.MoveInputEffectSlotDownCommand,
+                                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}" />
+                                                                        <Button Style="{StaticResource SecondaryButton}"
+                                                                                Content="×" Padding="7,3" Margin="3,0,0,0"
+                                                                                Command="{Binding DataContext.RemoveInputEffectSlotCommand,
+                                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}" />
+                                                                    </WrapPanel>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
@@ -993,6 +1270,135 @@
                                            TextWrapping="Wrap" Margin="0,7,0,0" />
                                 <TextBlock Text="{Binding AudioInputStatus}" Foreground="{StaticResource TextSecondary}"
                                            TextWrapping="Wrap" Margin="0,7,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,18">
+                            <StackPanel>
+                                <TextBlock Text="Efectos de pista, YouTube y bus maestro"
+                                           FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="Cada bus tiene hasta cuatro slots, bypass A/B y presets exportables. Los VST3 externos se ejecutan aislados."
+                                           Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
+                                           Margin="0,5,0,8" />
+                                <ItemsControl ItemsSource="{Binding AudioEffectBuses}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Expander Header="{Binding Name}" Margin="0,4,0,0"
+                                                      AutomationProperties.Name="{Binding Name}">
+                                                <StackPanel Margin="0,7,0,8">
+                                                    <TextBlock Text="{Binding Description}"
+                                                               Foreground="{StaticResource TextSecondary}"
+                                                               FontSize="11" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding Summary}"
+                                                               Foreground="{StaticResource Accent}"
+                                                               FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0" />
+                                                    <WrapPanel Margin="0,7,0,0">
+                                                        <CheckBox Content="Bypass A/B"
+                                                                  IsChecked="{Binding EffectsBypassed,
+                                                                                      Mode=TwoWay,
+                                                                                      UpdateSourceTrigger=PropertyChanged}" />
+                                                        <Button Style="{StaticResource SecondaryButton}" Content="+ Slot"
+                                                                Margin="9,0,0,0"
+                                                                Command="{Binding DataContext.AddBusEffectSlotCommand,
+                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}" />
+                                                        <Button Style="{StaticResource SecondaryButton}" Content="Importar"
+                                                                Margin="5,0,0,0"
+                                                                Command="{Binding DataContext.ImportBusEffectChainCommand,
+                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}" />
+                                                        <Button Style="{StaticResource SecondaryButton}" Content="Exportar"
+                                                                Margin="5,0,0,0"
+                                                                Command="{Binding DataContext.ExportBusEffectChainCommand,
+                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}" />
+                                                    </WrapPanel>
+                                                    <ItemsControl ItemsSource="{Binding EffectSlots}" Margin="0,5,0,0">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Grid Margin="0,3">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="24" />
+                                                                        <ColumnDefinition Width="210" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <CheckBox IsChecked="{Binding IsEnabled,
+                                                                                                  Mode=TwoWay,
+                                                                                                  UpdateSourceTrigger=PropertyChanged}"
+                                                                              VerticalAlignment="Center" />
+                                                                    <StackPanel Grid.Column="1" Margin="4,0">
+                                                                        <ComboBox ItemsSource="{Binding KindOptions}"
+                                                                                  SelectedValue="{Binding Kind,
+                                                                                                          Mode=TwoWay,
+                                                                                                          UpdateSourceTrigger=PropertyChanged}"
+                                                                                  SelectedValuePath="Kind"
+                                                                                  DisplayMemberPath="Label" />
+                                                                        <ComboBox ItemsSource="{Binding DataContext.Vst3Effects,
+                                                                                                        RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                  DisplayMemberPath="DisplayLabel"
+                                                                                  Tag="{Binding}"
+                                                                                  SelectionChanged="OnInputVst3EffectSelectionChanged"
+                                                                                  Visibility="{Binding IsExternal,
+                                                                                                       Converter={StaticResource BoolToVisibility}}"
+                                                                                  Margin="0,3,0,0" />
+                                                                        <TextBlock Text="{Binding ExternalVst3.Name}"
+                                                                                   Visibility="{Binding IsExternal,
+                                                                                                        Converter={StaticResource BoolToVisibility}}"
+                                                                                   Foreground="{StaticResource TextSecondary}"
+                                                                                   FontSize="9" TextWrapping="Wrap" />
+                                                                        <Button Style="{StaticResource SecondaryButton}"
+                                                                                Content="Preset VST3"
+                                                                                Visibility="{Binding IsExternal,
+                                                                                                     Converter={StaticResource BoolToVisibility}}"
+                                                                                Margin="0,3,0,0" HorizontalAlignment="Left"
+                                                                                Command="{Binding DataContext.ChooseVstEffectPresetCommand,
+                                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}" />
+                                                                    </StackPanel>
+                                                                    <StackPanel Grid.Column="2" Margin="6,0">
+                                                                        <TextBlock Text="CARÁCTER" FontSize="9"
+                                                                                   Foreground="{StaticResource TextSecondary}" />
+                                                                        <Slider Minimum="0" Maximum="1"
+                                                                                Value="{Binding Amount,
+                                                                                                Mode=TwoWay,
+                                                                                                UpdateSourceTrigger=PropertyChanged}" />
+                                                                    </StackPanel>
+                                                                    <StackPanel Grid.Column="3" Margin="6,0">
+                                                                        <TextBlock Text="MEZCLA" FontSize="9"
+                                                                                   Foreground="{StaticResource TextSecondary}" />
+                                                                        <Slider Minimum="0" Maximum="1"
+                                                                                Value="{Binding Mix,
+                                                                                                Mode=TwoWay,
+                                                                                                UpdateSourceTrigger=PropertyChanged}" />
+                                                                    </StackPanel>
+                                                                    <WrapPanel Grid.Column="4" VerticalAlignment="Center">
+                                                                        <Button Style="{StaticResource SecondaryButton}" Content="↑"
+                                                                                Padding="7,3"
+                                                                                Command="{Binding DataContext.MoveBusEffectSlotUpCommand,
+                                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}" />
+                                                                        <Button Style="{StaticResource SecondaryButton}" Content="↓"
+                                                                                Padding="7,3" Margin="3,0,0,0"
+                                                                                Command="{Binding DataContext.MoveBusEffectSlotDownCommand,
+                                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}" />
+                                                                        <Button Style="{StaticResource SecondaryButton}" Content="×"
+                                                                                Padding="7,3" Margin="3,0,0,0"
+                                                                                Command="{Binding DataContext.RemoveBusEffectSlotCommand,
+                                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}" />
+                                                                    </WrapPanel>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Expander>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </StackPanel>
                         </Border>
 

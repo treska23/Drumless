@@ -16,8 +16,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly UserKitStore _userKitStore = new();
     private readonly DrumLibraryImportService _libraryImport = new();
     private readonly Vst3InstrumentScanner _vstScanner = new();
+    private readonly Vst3EffectScanner _vstEffectScanner = new();
     private readonly Vst3PresetDiscoveryService _vstPresetDiscovery = new();
     private readonly AudioOutputDeviceService _audioOutputDevices = new();
+    private readonly AudioEffectPresetStore _audioEffectPresets = new();
     private readonly DrumRemovalService _drumRemoval = new();
     private readonly AudioEngine _audio = new();
     private readonly MidiInputService _midi = new();
@@ -27,6 +29,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _kitLoadCancellation;
     private CancellationTokenSource? _drumRemovalCancellation;
     private CancellationTokenSource? _vstLoadCancellation;
+    private CancellationTokenSource? _vstEffectScanCancellation;
     private int _kitLoadSequence;
     private bool _isSynchronizingKitSelection;
     private bool _hasScannedVstInstruments;
@@ -63,6 +66,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private Vst3ProgramItem? _selectedVstProgram;
     private string _vstStatus = "Pulsa «Buscar instrumentos» para localizar Addictive Drums y Groove Agent de forma aislada.";
     private bool _isScanningVst;
+    private bool _isScanningVstEffects;
     private string _audioOutputStatus = "Buscando salidas de audio…";
     private string _audioInputStatus = "Selecciona una salida ASIO para usar la entrada de audio.";
     private double _audioInputGain = 0.8d;
@@ -108,8 +112,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         AudioOutputDevices = [];
         AudioInputChannels = [];
         AudioInputMonitors = [];
+        AudioEffectBuses = [];
+        foreach (var target in Enum.GetValues<AudioEffectBusTarget>())
+        {
+            var bus = new AudioEffectBusItem(target);
+            bus.PropertyChanged += OnAudioEffectBusPropertyChanged;
+            AudioEffectBuses.Add(bus);
+        }
         MappingRows = [];
         Vst3Instruments = [];
+        Vst3Effects = [];
         Vst3Programs = [];
         Tracks = _trackLibrary.Tracks;
         Playlists = [];
@@ -158,11 +170,32 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CancelDrumRemovalCommand = new RelayCommand(CancelDrumRemoval);
         RefreshMidiCommand = new RelayCommand(RefreshMidiDevices);
         RefreshAudioOutputsCommand = new RelayCommand(RefreshAudioOutputDevices);
+        AddInputEffectSlotCommand = new RelayCommand<AudioInputMonitorItem>(AddInputEffectSlot);
+        RemoveInputEffectSlotCommand = new RelayCommand<AudioEffectSlotItem>(RemoveInputEffectSlot);
+        MoveInputEffectSlotUpCommand = new RelayCommand<AudioEffectSlotItem>(
+            slot => MoveInputEffectSlot(slot, -1));
+        MoveInputEffectSlotDownCommand = new RelayCommand<AudioEffectSlotItem>(
+            slot => MoveInputEffectSlot(slot, 1));
+        ExportInputEffectChainCommand = new RelayCommand<AudioInputMonitorItem>(
+            ExportInputEffectChain);
+        ImportInputEffectChainCommand = new RelayCommand<AudioInputMonitorItem>(
+            ImportInputEffectChain);
+        ChooseVstEffectPresetCommand = new RelayCommand<AudioEffectSlotItem>(
+            ChooseVstEffectPreset);
+        AddBusEffectSlotCommand = new RelayCommand<AudioEffectBusItem>(AddBusEffectSlot);
+        RemoveBusEffectSlotCommand = new RelayCommand<AudioEffectSlotItem>(RemoveBusEffectSlot);
+        MoveBusEffectSlotUpCommand = new RelayCommand<AudioEffectSlotItem>(
+            slot => MoveBusEffectSlot(slot, -1));
+        MoveBusEffectSlotDownCommand = new RelayCommand<AudioEffectSlotItem>(
+            slot => MoveBusEffectSlot(slot, 1));
+        ExportBusEffectChainCommand = new RelayCommand<AudioEffectBusItem>(ExportBusEffectChain);
+        ImportBusEffectChainCommand = new RelayCommand<AudioEffectBusItem>(ImportBusEffectChain);
         RetryAudioOutputCommand = new RelayCommand(
             () => _ = RetryAudioOutputAsync(),
             () => !_isAudioRecovering && _lastAudioFault is not null);
         DismissAudioAlertCommand = new RelayCommand(() => IsAudioAlertVisible = false);
         ScanVstInstrumentsCommand = new RelayCommand(() => _ = ScanVstInstrumentsAsync(force: true));
+        ScanVstEffectsCommand = new RelayCommand(() => _ = ScanVstEffectsAsync());
         LoadVstPresetCommand = new RelayCommand(LoadVstPreset);
         UseInternalDrumsCommand = new RelayCommand(UseInternalDrums);
         OpenVstEditorCommand = new RelayCommand(OpenVstEditor);
@@ -213,8 +246,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<AudioOutputDeviceItem> AudioOutputDevices { get; }
     public ObservableCollection<AudioInputChannelItem> AudioInputChannels { get; }
     public ObservableCollection<AudioInputMonitorItem> AudioInputMonitors { get; }
+    public ObservableCollection<AudioEffectBusItem> AudioEffectBuses { get; }
     public ObservableCollection<MidiMappingRow> MappingRows { get; }
     public ObservableCollection<Vst3InstrumentItem> Vst3Instruments { get; }
+    public ObservableCollection<Vst3EffectItem> Vst3Effects { get; }
     public ObservableCollection<Vst3ProgramItem> Vst3Programs { get; }
     public ObservableCollection<LocalTrack> Tracks { get; }
 
@@ -232,9 +267,23 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public RelayCommand CancelDrumRemovalCommand { get; }
     public RelayCommand RefreshMidiCommand { get; }
     public RelayCommand RefreshAudioOutputsCommand { get; }
+    public RelayCommand<AudioInputMonitorItem> AddInputEffectSlotCommand { get; }
+    public RelayCommand<AudioEffectSlotItem> RemoveInputEffectSlotCommand { get; }
+    public RelayCommand<AudioEffectSlotItem> MoveInputEffectSlotUpCommand { get; }
+    public RelayCommand<AudioEffectSlotItem> MoveInputEffectSlotDownCommand { get; }
+    public RelayCommand<AudioInputMonitorItem> ExportInputEffectChainCommand { get; }
+    public RelayCommand<AudioInputMonitorItem> ImportInputEffectChainCommand { get; }
+    public RelayCommand<AudioEffectSlotItem> ChooseVstEffectPresetCommand { get; }
+    public RelayCommand<AudioEffectBusItem> AddBusEffectSlotCommand { get; }
+    public RelayCommand<AudioEffectSlotItem> RemoveBusEffectSlotCommand { get; }
+    public RelayCommand<AudioEffectSlotItem> MoveBusEffectSlotUpCommand { get; }
+    public RelayCommand<AudioEffectSlotItem> MoveBusEffectSlotDownCommand { get; }
+    public RelayCommand<AudioEffectBusItem> ExportBusEffectChainCommand { get; }
+    public RelayCommand<AudioEffectBusItem> ImportBusEffectChainCommand { get; }
     public RelayCommand RetryAudioOutputCommand { get; }
     public RelayCommand DismissAudioAlertCommand { get; }
     public RelayCommand ScanVstInstrumentsCommand { get; }
+    public RelayCommand ScanVstEffectsCommand { get; }
     public RelayCommand LoadVstPresetCommand { get; }
     public RelayCommand UseInternalDrumsCommand { get; }
     public RelayCommand OpenVstEditorCommand { get; }
@@ -703,8 +752,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _drumRemovalCancellation?.Dispose();
         _tempoAnalysisCancellation?.Cancel();
         _tempoAnalysisCancellation?.Dispose();
+        _tempoSourceCancellation?.Cancel();
+        _tempoSourceCancellation?.Dispose();
         _vstLoadCancellation?.Cancel();
         _vstLoadCancellation?.Dispose();
+        _vstEffectScanCancellation?.Cancel();
+        _vstEffectScanCancellation?.Dispose();
         _audioRecoveryCancellation?.Cancel();
         _audioRecoveryCancellation?.Dispose();
         _trackLoadCancellation?.Cancel();
@@ -712,6 +765,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         FinalizeRecordingOnShutdown();
         DetachAllPlaylists();
         DetachAllAudioInputMonitors();
+        foreach (var bus in AudioEffectBuses)
+        {
+            bus.PropertyChanged -= OnAudioEffectBusPropertyChanged;
+        }
         SaveActiveVstState(silent: true);
         SaveTrackWorkspace(silent: true);
         _audio.VstInstrumentExited -= OnVstInstrumentExited;
@@ -721,6 +778,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _midi.NoteOffReceived -= OnMidiNoteOffReceived;
         _midi.ControlChangeReceived -= OnMidiControlChangeReceived;
         _midi.Dispose();
+        _tempoSourceSearch.Dispose();
         _audio.Dispose();
     }
 
@@ -1172,6 +1230,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void RefreshTransport()
     {
+        if (_audio.EffectBusWarning is { } effectWarning &&
+            !AudioInputStatus.Contains(effectWarning, StringComparison.Ordinal))
+        {
+            AudioInputStatus = effectWarning + " · La señal continúa sin ese plugin.";
+        }
+
         while (_audio.TryDequeueTrackEnded(out var ended))
         {
             if (_desiredTrackPlaying &&
@@ -1391,6 +1455,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         ? setting.Profile
                         : AudioInputProfileKind.Clean
                 };
+                if (activeSettings.TryGetValue(channelIndex, out setting))
+                {
+                    monitor.LoadEffects(setting.Effects, setting.EffectsBypassed);
+                }
                 monitor.PropertyChanged += OnAudioInputMonitorPropertyChanged;
                 AudioInputMonitors.Add(monitor);
             }
@@ -1429,15 +1497,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (eventArgs.PropertyName == nameof(AudioInputMonitorItem.Profile))
+        if (eventArgs.PropertyName is nameof(AudioInputMonitorItem.Profile) or
+            nameof(AudioInputMonitorItem.EffectSlots) or
+            nameof(AudioInputMonitorItem.EffectsBypassed))
         {
             if (monitor.IsEnabled)
             {
-                _audio.SetAudioInputProfile(monitor.ChannelIndex, monitor.Profile);
+                _audio.SetAudioInputEffects(
+                    monitor.ChannelIndex,
+                    monitor.EffectSlots.Select(slot => slot.ToSetting()).ToArray(),
+                    monitor.EffectsBypassed);
             }
             RememberAudioInputMonitors();
             AudioInputStatus =
-                $"{monitor.DisplayName}: perfil {AudioInputProfileCatalog.Get(monitor.Profile).Label} activo.";
+                $"{monitor.DisplayName}: cadena de {monitor.EffectSlots.Count} slot(s) " +
+                (monitor.EffectsBypassed ? "en bypass." : "activa.");
             ScheduleSettingsSave();
             return;
         }
@@ -1445,6 +1519,256 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (eventArgs.PropertyName == nameof(AudioInputMonitorItem.IsEnabled))
         {
             ApplyAudioInputMonitors();
+        }
+    }
+
+    public bool IsScanningVstEffects
+    {
+        get => _isScanningVstEffects;
+        private set => SetProperty(ref _isScanningVstEffects, value);
+    }
+
+    private void AddInputEffectSlot(AudioInputMonitorItem? monitor)
+    {
+        if (monitor is null)
+        {
+            return;
+        }
+        if (!monitor.AddEffect())
+        {
+            AudioInputStatus = $"Cada entrada admite como máximo {AudioEffectCatalog.MaximumSlots} slots.";
+        }
+    }
+
+    private void RemoveInputEffectSlot(AudioEffectSlotItem? slot)
+    {
+        var monitor = slot is null
+            ? null
+            : AudioInputMonitors.FirstOrDefault(item => item.EffectSlots.Contains(slot));
+        monitor?.RemoveEffect(slot!);
+    }
+
+    private void MoveInputEffectSlot(AudioEffectSlotItem? slot, int direction)
+    {
+        var monitor = slot is null
+            ? null
+            : AudioInputMonitors.FirstOrDefault(item => item.EffectSlots.Contains(slot));
+        monitor?.MoveEffect(slot!, direction);
+    }
+
+    private void ExportInputEffectChain(AudioInputMonitorItem? monitor)
+    {
+        if (monitor is null)
+        {
+            return;
+        }
+        var dialog = new SaveFileDialog
+        {
+            Title = $"Exportar cadena de {monitor.DisplayName}",
+            Filter = "Preset de Drum Practice Studio (*.dpsfx)|*.dpsfx",
+            FileName = $"{monitor.Name}-{AudioInputProfileCatalog.Get(monitor.Profile).Label}.dpsfx",
+            AddExtension = true,
+            DefaultExt = ".dpsfx"
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+        try
+        {
+            _audioEffectPresets.Save(
+                dialog.FileName,
+                new AudioEffectChainPreset(
+                    $"{monitor.DisplayName} · {AudioInputProfileCatalog.Get(monitor.Profile).Label}",
+                    monitor.EffectSlots.Select(slot => slot.ToSetting()).ToArray(),
+                    monitor.EffectsBypassed));
+            AudioInputStatus = $"Cadena exportada: {dialog.FileName}";
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            AudioInputStatus = $"No se pudo exportar la cadena: {exception.Message}";
+        }
+    }
+
+    private void ImportInputEffectChain(AudioInputMonitorItem? monitor)
+    {
+        if (monitor is null)
+        {
+            return;
+        }
+        var dialog = new OpenFileDialog
+        {
+            Title = $"Importar cadena para {monitor.DisplayName}",
+            Filter = "Preset de Drum Practice Studio (*.dpsfx)|*.dpsfx",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+        try
+        {
+            var preset = _audioEffectPresets.Load(dialog.FileName);
+            monitor.LoadEffects(preset.Effects, preset.EffectsBypassed);
+            AudioInputStatus = $"Cadena «{preset.Name}» aplicada a {monitor.DisplayName}.";
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            InvalidDataException or
+            System.Text.Json.JsonException or
+            NotSupportedException)
+        {
+            AudioInputStatus = $"No se pudo importar la cadena: {exception.Message}";
+        }
+    }
+
+    private void ChooseVstEffectPreset(AudioEffectSlotItem? slot)
+    {
+        if (slot?.ExternalVst3 is not { } effect)
+        {
+            AudioInputStatus = "Selecciona primero un efecto VST3 externo.";
+            return;
+        }
+        var dialog = new OpenFileDialog
+        {
+            Title = $"Cargar preset para {effect.Name}",
+            Filter = "Preset VST3 (*.vstpreset)|*.vstpreset|Todos los archivos (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog() == true)
+        {
+            slot.ExternalVst3 = effect with { PresetPath = dialog.FileName };
+            AudioInputStatus = $"Preset de {effect.Name} preparado; el proceso aislado se ha recargado.";
+        }
+    }
+
+    private void OnAudioEffectBusPropertyChanged(
+        object? sender,
+        System.ComponentModel.PropertyChangedEventArgs eventArgs)
+    {
+        if (_isInitializingTrackWorkspace || sender is not AudioEffectBusItem bus)
+        {
+            return;
+        }
+        if (eventArgs.PropertyName is not (
+                nameof(AudioEffectBusItem.EffectSlots) or
+                nameof(AudioEffectBusItem.EffectsBypassed)))
+        {
+            return;
+        }
+
+        var setting = bus.ToSetting();
+        _audio.ConfigureEffectBus(
+            setting.Target,
+            setting.EffectiveEffects,
+            setting.EffectsBypassed);
+        AudioInputStatus = $"{bus.Name}: {bus.Summary}.";
+        ScheduleSettingsSave();
+    }
+
+    private void AddBusEffectSlot(AudioEffectBusItem? bus)
+    {
+        if (bus is not null && !bus.AddEffect())
+        {
+            AudioInputStatus = $"Cada bus admite como máximo {AudioEffectCatalog.MaximumSlots} slots.";
+        }
+    }
+
+    private void RemoveBusEffectSlot(AudioEffectSlotItem? slot)
+    {
+        var bus = slot is null
+            ? null
+            : AudioEffectBuses.FirstOrDefault(item => item.EffectSlots.Contains(slot));
+        bus?.RemoveEffect(slot!);
+    }
+
+    private void MoveBusEffectSlot(AudioEffectSlotItem? slot, int direction)
+    {
+        var bus = slot is null
+            ? null
+            : AudioEffectBuses.FirstOrDefault(item => item.EffectSlots.Contains(slot));
+        bus?.MoveEffect(slot!, direction);
+    }
+
+    private void ExportBusEffectChain(AudioEffectBusItem? bus)
+    {
+        if (bus is null)
+        {
+            return;
+        }
+        var dialog = new SaveFileDialog
+        {
+            Title = $"Exportar cadena de {bus.Name}",
+            Filter = "Preset de Drum Practice Studio (*.dpsfx)|*.dpsfx",
+            FileName = $"{bus.Name}.dpsfx",
+            AddExtension = true,
+            DefaultExt = ".dpsfx"
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+        try
+        {
+            var setting = bus.ToSetting();
+            _audioEffectPresets.Save(
+                dialog.FileName,
+                new AudioEffectChainPreset(
+                    bus.Name,
+                    setting.EffectiveEffects,
+                    setting.EffectsBypassed));
+            AudioInputStatus = $"Cadena de {bus.Name} exportada.";
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            AudioInputStatus = $"No se pudo exportar la cadena: {exception.Message}";
+        }
+    }
+
+    private void ImportBusEffectChain(AudioEffectBusItem? bus)
+    {
+        if (bus is null)
+        {
+            return;
+        }
+        var dialog = new OpenFileDialog
+        {
+            Title = $"Importar cadena para {bus.Name}",
+            Filter = "Preset de Drum Practice Studio (*.dpsfx)|*.dpsfx",
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+        try
+        {
+            var preset = _audioEffectPresets.Load(dialog.FileName);
+            bus.Load(new AudioEffectBusSetting(
+                bus.Target,
+                preset.Effects,
+                preset.EffectsBypassed));
+            AudioInputStatus = $"Cadena «{preset.Name}» aplicada a {bus.Name}.";
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            InvalidDataException or
+            System.Text.Json.JsonException or
+            NotSupportedException)
+        {
+            AudioInputStatus = $"No se pudo importar la cadena: {exception.Message}";
         }
     }
 
@@ -1697,6 +2021,50 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnMidiControlChangeReceived(object? sender, MidiControlChangeMessage message) =>
         _audio.SendControlChange(message.Controller, message.Value);
+
+    private async Task ScanVstEffectsAsync()
+    {
+        if (IsScanningVstEffects)
+        {
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _vstEffectScanCancellation, cancellation);
+        previous?.Cancel();
+        previous?.Dispose();
+        try
+        {
+            IsScanningVstEffects = true;
+            AudioInputStatus = "Buscando efectos VST3 en procesos aislados…";
+            var result = await _vstEffectScanner.ScanAsync(cancellation.Token);
+            Vst3Effects.Clear();
+            foreach (var effect in result.Effects)
+            {
+                Vst3Effects.Add(effect);
+            }
+            AudioInputStatus = Vst3Effects.Count == 0
+                ? "No se encontraron efectos VST3 estéreo de 64 bits."
+                : $"{Vst3Effects.Count} efecto(s) VST3 encontrado(s)" +
+                  (result.FailedModules > 0
+                      ? $" · {result.FailedModules} módulo(s) omitido(s) de forma segura"
+                      : string.Empty);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            AudioInputStatus = "Búsqueda de efectos VST3 cancelada.";
+        }
+        catch (Exception exception)
+        {
+            AudioInputStatus = $"No se pudieron buscar efectos VST3: {exception.Message}";
+        }
+        finally
+        {
+            IsScanningVstEffects = false;
+            Interlocked.CompareExchange(ref _vstEffectScanCancellation, null, cancellation);
+            cancellation.Dispose();
+        }
+    }
 
     private async Task ScanVstInstrumentsAsync(bool force)
     {

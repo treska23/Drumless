@@ -1,8 +1,10 @@
 <Application x:Class="DrumPracticeStudio.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:infrastructure="clr-namespace:DrumPracticeStudio.Infrastructure">
     <Application.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <infrastructure:SliderValueToAngleConverter x:Key="SliderValueToAngle" />
 
         <SolidColorBrush x:Key="AppBackground" Color="#0B0D12" />
         <SolidColorBrush x:Key="PanelBackground" Color="#11141B" />
@@ -27,6 +29,18 @@
 
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Foreground,
+                                               RelativeSource={RelativeSource AncestorType={x:Type ComboBox}}}"
+                             Value="{StaticResource ComboForeground}">
+                    <Setter Property="Foreground" Value="{StaticResource ComboForeground}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Foreground,
+                                               RelativeSource={RelativeSource AncestorType={x:Type ComboBoxItem}}}"
+                             Value="{StaticResource ComboForeground}">
+                    <Setter Property="Foreground" Value="{StaticResource ComboForeground}" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <Style x:Key="CardStyle" TargetType="Border">
@@ -136,6 +150,152 @@
 
         <Style TargetType="Slider">
             <Setter Property="Foreground" Value="{StaticResource Accent}" />
+        </Style>
+
+        <Style x:Key="MixerFader" TargetType="Slider">
+            <Setter Property="Orientation" Value="Vertical" />
+            <Setter Property="IsDirectionReversed" Value="False" />
+            <Setter Property="IsMoveToPointEnabled" Value="True" />
+            <Setter Property="Height" Value="150" />
+            <Setter Property="Width" Value="48" />
+            <Setter Property="SmallChange" Value="0.01" />
+            <Setter Property="LargeChange" Value="0.05" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Border Background="#0F1218"
+                                BorderBrush="{StaticResource Stroke}"
+                                BorderThickness="1"
+                                CornerRadius="9"
+                                Padding="5">
+                            <Grid>
+                                <Border Width="6"
+                                        Margin="0,8"
+                                        Background="#303746"
+                                        CornerRadius="3"
+                                        HorizontalAlignment="Center" />
+                                <Track x:Name="PART_Track"
+                                       Margin="0,8"
+                                       Orientation="Vertical"
+                                       IsDirectionReversed="{TemplateBinding IsDirectionReversed}">
+                                    <Track.DecreaseRepeatButton>
+                                        <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                      Background="Transparent"
+                                                      BorderThickness="0"
+                                                      Focusable="False"
+                                                      Opacity="0" />
+                                    </Track.DecreaseRepeatButton>
+                                    <Track.Thumb>
+                                        <Thumb Width="36" Height="19">
+                                            <Thumb.Template>
+                                                <ControlTemplate TargetType="Thumb">
+                                                    <Border Background="#E8ECF4"
+                                                            BorderBrush="#727C8E"
+                                                            BorderThickness="1"
+                                                            CornerRadius="4">
+                                                        <Grid>
+                                                            <Border Height="2"
+                                                                    Margin="5,0"
+                                                                    Background="{StaticResource Accent}"
+                                                                    VerticalAlignment="Center"
+                                                                    CornerRadius="1" />
+                                                        </Grid>
+                                                    </Border>
+                                                </ControlTemplate>
+                                            </Thumb.Template>
+                                        </Thumb>
+                                    </Track.Thumb>
+                                    <Track.IncreaseRepeatButton>
+                                        <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                      Background="Transparent"
+                                                      BorderThickness="0"
+                                                      Focusable="False"
+                                                      Opacity="0" />
+                                    </Track.IncreaseRepeatButton>
+                                </Track>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter Property="BorderBrush" Value="{StaticResource Accent}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MixerKnob" TargetType="Slider">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="IsMoveToPointEnabled" Value="True" />
+            <Setter Property="Width" Value="68" />
+            <Setter Property="Height" Value="68" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Width="68" Height="68">
+                            <Ellipse Margin="4"
+                                     Fill="#171C25"
+                                     Stroke="#596170"
+                                     StrokeThickness="2" />
+                            <Ellipse Margin="11"
+                                     Fill="#222936"
+                                     Stroke="#303746"
+                                     StrokeThickness="1" />
+                            <Border Width="3"
+                                    Height="23"
+                                    Margin="0,8,0,0"
+                                    Background="{StaticResource Accent}"
+                                    CornerRadius="1.5"
+                                    VerticalAlignment="Top"
+                                    RenderTransformOrigin="0.5,1">
+                                <Border.RenderTransform>
+                                    <RotateTransform>
+                                        <RotateTransform.Angle>
+                                            <MultiBinding Converter="{StaticResource SliderValueToAngle}">
+                                                <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="Value" />
+                                                <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="Minimum" />
+                                                <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="Maximum" />
+                                            </MultiBinding>
+                                        </RotateTransform.Angle>
+                                    </RotateTransform>
+                                </Border.RenderTransform>
+                            </Border>
+                            <Ellipse Width="9" Height="9"
+                                     Fill="{StaticResource Accent}"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center" />
+                            <Track x:Name="PART_Track"
+                                   Margin="5,0"
+                                   Orientation="Horizontal"
+                                   Opacity="0">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  Background="Transparent"
+                                                  BorderThickness="0" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="12" Height="68" />
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  Background="Transparent"
+                                                  BorderThickness="0" />
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Application.Resources>
 </Application>

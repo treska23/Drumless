@@ -43,6 +43,7 @@ public sealed class StudioState
     public int? AudioInputChannelIndex { get; set; }
     public double AudioInputGain { get; set; } = 0.8d;
     public List<AudioInputMonitorSetting> AudioInputMonitors { get; set; } = [];
+    public List<AudioEffectBusSetting> AudioEffectBuses { get; set; } = [];
     public string? MidiDeviceName { get; set; }
     public int? MidiDeviceIndex { get; set; }
     public bool AutoConnectMidi { get; set; } = true;

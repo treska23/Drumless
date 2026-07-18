@@ -11,8 +11,9 @@ public static class TempoGrid
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(subdivisionsPerBeat, 1);
         tempo = TempoSettings.Normalize(tempo);
-        var step = 60d / tempo.Bpm / subdivisionsPerBeat;
-        var relative = positionSeconds - tempo.FirstBeatSeconds;
+        var segment = tempo.GetSegmentAt(positionSeconds);
+        var step = 60d / segment.Bpm / subdivisionsPerBeat;
+        var relative = positionSeconds - segment.FirstBeatSeconds;
         var nearest = Math.Round(relative / step, MidpointRounding.AwayFromZero);
         return relative - nearest * step;
     }

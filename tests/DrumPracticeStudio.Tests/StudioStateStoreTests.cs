@@ -26,8 +26,43 @@ public sealed class StudioStateStoreTests
             AudioInputGain = 0.73d,
             AudioInputMonitors =
             [
-                new AudioInputMonitorSetting(0, 0.55f, AudioInputProfileKind.Voice),
+                new AudioInputMonitorSetting(
+                    0,
+                    0.55f,
+                    AudioInputProfileKind.Voice,
+                    Effects:
+                    [
+                        AudioEffectSlotSetting.Create(AudioEffectKind.HighPass, 0.42d),
+                        AudioEffectSlotSetting.Create(
+                            AudioEffectKind.ExternalVst3,
+                            mix: 0.75d,
+                            externalVst3: new Vst3EffectReference(
+                                @"C:\Program Files\Common Files\VST3\Test Effect.vst3",
+                                "Test Effect",
+                                "ABCDEF0123456789ABCDEF0123456789",
+                                "Audio Module Class",
+                                "Test Effect",
+                                "Test Vendor",
+                                "1.0",
+                                "VST 3.7",
+                                "Fx",
+                                @"C:\Presets\Test.vstpreset"))
+                    ],
+                    EffectsBypassed: true),
                 new AudioInputMonitorSetting(1, 0.73f, AudioInputProfileKind.GuitarDrive)
+            ],
+            AudioEffectBuses =
+            [
+                new AudioEffectBusSetting(
+                    AudioEffectBusTarget.Track,
+                    [
+                        AudioEffectSlotSetting.Create(AudioEffectKind.Equalizer, 0.61d),
+                        AudioEffectSlotSetting.Create(AudioEffectKind.Compressor, 0.44d)
+                    ]),
+                new AudioEffectBusSetting(
+                    AudioEffectBusTarget.Master,
+                    [AudioEffectSlotSetting.Create(AudioEffectKind.Saturation, 0.18d, 0.3d)],
+                    EffectsBypassed: true)
             ],
             MidiDeviceName = "MPK mini 3",
             MidiDeviceIndex = 2,
@@ -55,7 +90,23 @@ public sealed class StudioStateStoreTests
                         4,
                         MetronomeEnabled: true,
                         MetronomeVolume: 0.42d,
-                        AnalysisConfidence: 0.81d)
+                        AnalysisConfidence: 0.81d,
+                        Segments:
+                        [
+                            TempoSegment.Create(
+                                0d,
+                                127.5d,
+                                0.375d,
+                                confidence: 0.81d,
+                                sourceName: "example.test",
+                                sourceUrl: "https://example.test/tempo"),
+                            TempoSegment.Create(
+                                62d,
+                                132d,
+                                62.1d,
+                                confidence: 0.7d,
+                                sourceName: "Edición manual")
+                        ])
                 },
                 new TrackRecord
                 {
@@ -107,6 +158,12 @@ public sealed class StudioStateStoreTests
             Tempo = state.Tracks[0].Tempo,
             TempoOrigin = TempoAnalysisOrigin.ManuallyAdjusted,
             TempoUpdatedAtUtc = new DateTimeOffset(2026, 7, 16, 8, 0, 0, TimeSpan.Zero),
+            DrumReference = new DrumReferenceMap(
+                "reference-v1",
+                originalPath,
+                new DateTimeOffset(2026, 7, 16, 8, 1, 0, TimeSpan.Zero),
+                0.87d,
+                [0.5d, 1d, 1.5d]),
             PerformanceSessions =
             [
                 new DrumPerformanceSession(
@@ -120,7 +177,11 @@ public sealed class StudioStateStoreTests
                     3,
                     92.1875d,
                     17.4d,
-                    61d)
+                    61d,
+                    ExpectedHits: 66,
+                    MissedHits: 2,
+                    ExtraHits: 1,
+                    ReferenceVersion: "reference-v1")
             ]
         });
 
@@ -139,9 +200,25 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(0, loaded.AudioInputMonitors[0].ChannelIndex);
         Assert.AreEqual(0.55f, loaded.AudioInputMonitors[0].Gain);
         Assert.AreEqual(AudioInputProfileKind.Voice, loaded.AudioInputMonitors[0].Profile);
+        Assert.IsTrue(loaded.AudioInputMonitors[0].EffectsBypassed);
+        Assert.AreEqual(2, loaded.AudioInputMonitors[0].EffectiveEffects.Count);
+        Assert.AreEqual(
+            AudioEffectKind.ExternalVst3,
+            loaded.AudioInputMonitors[0].EffectiveEffects[1].Kind);
+        Assert.AreEqual(
+            "Test Effect",
+            loaded.AudioInputMonitors[0].EffectiveEffects[1].ExternalVst3?.Name);
+        Assert.AreEqual(
+            @"C:\Presets\Test.vstpreset",
+            loaded.AudioInputMonitors[0].EffectiveEffects[1].ExternalVst3?.PresetPath);
         Assert.AreEqual(1, loaded.AudioInputMonitors[1].ChannelIndex);
         Assert.AreEqual(0.73f, loaded.AudioInputMonitors[1].Gain);
         Assert.AreEqual(AudioInputProfileKind.GuitarDrive, loaded.AudioInputMonitors[1].Profile);
+        Assert.AreEqual(2, loaded.AudioEffectBuses.Count);
+        Assert.AreEqual(AudioEffectBusTarget.Track, loaded.AudioEffectBuses[0].Target);
+        Assert.AreEqual(2, loaded.AudioEffectBuses[0].EffectiveEffects.Count);
+        Assert.AreEqual(AudioEffectBusTarget.Master, loaded.AudioEffectBuses[1].Target);
+        Assert.IsTrue(loaded.AudioEffectBuses[1].EffectsBypassed);
         Assert.AreEqual("MPK mini 3", loaded.MidiDeviceName);
         Assert.AreEqual(2, loaded.MidiDeviceIndex.GetValueOrDefault());
         Assert.IsTrue(loaded.AutoConnectMidi);
@@ -166,6 +243,9 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(0.375d, loadedTempo.FirstBeatSeconds);
         Assert.IsTrue(loadedTempo.MetronomeEnabled);
         Assert.AreEqual(0.42d, loadedTempo.MetronomeVolume);
+        Assert.AreEqual(2, loadedTempo.EffectiveSegments.Count);
+        Assert.AreEqual(132d, loadedTempo.EffectiveSegments[1].Bpm);
+        Assert.AreEqual("https://example.test/tempo", loadedTempo.EffectiveSegments[0].SourceUrl);
         Assert.AreEqual("track-drumless", loaded.Tracks[1].Id);
         Assert.AreEqual(TrackVariant.GeneratedDrumless, loaded.Tracks[1].Variant);
         Assert.AreEqual(1, loaded.Playlists.Count);
@@ -188,8 +268,13 @@ public sealed class StudioStateStoreTests
             record.MediaKey == "local:track-original");
         Assert.AreEqual(TempoAnalysisOrigin.ManuallyAdjusted, loadedAnalysis.TempoOrigin);
         Assert.AreEqual(1, loadedAnalysis.PerformanceSessions.Count);
+        Assert.IsNotNull(loadedAnalysis.DrumReference);
+        Assert.AreEqual("reference-v1", loadedAnalysis.DrumReference.Version);
+        Assert.AreEqual(3, loadedAnalysis.DrumReference.HitTimesSeconds.Count);
         Assert.AreEqual(92.1875d, loadedAnalysis.PerformanceSessions[0].AccuracyPercent);
         Assert.IsTrue(loadedAnalysis.PerformanceSessions[0].FinishedAtNaturalEnd);
+        Assert.AreEqual(2, loadedAnalysis.PerformanceSessions[0].MissedHits);
+        Assert.AreEqual("reference-v1", loadedAnalysis.PerformanceSessions[0].ReferenceVersion);
     }
 
     [TestMethod]

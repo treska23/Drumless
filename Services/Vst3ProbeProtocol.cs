@@ -10,7 +10,8 @@ internal sealed record Vst3ProbedClass(
     string Vendor,
     string Version,
     string SdkVersion,
-    string SubCategories);
+    string SubCategories,
+    bool IsInstrument);
 
 internal static class Vst3ProbeProtocol
 {
@@ -22,7 +23,7 @@ internal static class Vst3ProbeProtocol
         {
             using var module = Vst3Module.Load(modulePath);
             var classes = module.GetClasses()
-                .Where(candidate => candidate.IsInstrument)
+                .Where(candidate => candidate.IsAudioModule)
                 .Select(candidate => new Vst3ProbedClass(
                     candidate.ClassId,
                     candidate.Category,
@@ -30,7 +31,8 @@ internal static class Vst3ProbeProtocol
                     candidate.Vendor,
                     candidate.Version,
                     candidate.SdkVersion,
-                    candidate.SubCategories))
+                    candidate.SubCategories,
+                    candidate.IsInstrument))
                 .ToArray();
             File.WriteAllText(outputPath, JsonSerializer.Serialize(classes));
             return 0;

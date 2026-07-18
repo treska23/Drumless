@@ -39,6 +39,15 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 2 &&
+            string.Equals(e.Args[0], Vst3EffectRuntimeProtocol.Argument, StringComparison.Ordinal))
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var exitCode = Vst3EffectRuntimeProtocol.Execute(e.Args[1]);
+            Shutdown(exitCode);
+            return;
+        }
+
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         var mainWindow = new MainWindow();

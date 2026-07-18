@@ -16,6 +16,7 @@ public static class AppPaths
     public static string SeparationWork { get; } = Path.Combine(Root, "Work", "Separation");
     public static string RecordingWork { get; } = Path.Combine(Root, "Work", "Recording");
     public static string VstStates { get; } = Path.Combine(Root, "VstStates");
+    public static string Vst3Logs { get; } = Path.Combine(Root, "Logs", "Vst3");
     public static string YouTubeWebViewData { get; } = Path.Combine(Root, "WebView2", "YouTube");
     public static string AudioDiagnosticsPath { get; } = Path.Combine(Root, "Logs", "audio.log");
 
@@ -30,6 +31,7 @@ public static class AppPaths
         Directory.CreateDirectory(SeparationWork);
         Directory.CreateDirectory(RecordingWork);
         Directory.CreateDirectory(VstStates);
+        Directory.CreateDirectory(Vst3Logs);
         Directory.CreateDirectory(YouTubeWebViewData);
     }
 

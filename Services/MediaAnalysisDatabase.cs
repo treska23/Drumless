@@ -66,6 +66,15 @@ public sealed class MediaAnalysisDatabase
         }
     }
 
+    public void SetDrumReference(string mediaKey, DrumReferenceMap? reference)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mediaKey);
+        var record = GetOrCreate(mediaKey);
+        record.DrumReference = reference is null
+            ? null
+            : DrumReferenceMap.Normalize(reference);
+    }
+
     public bool Remove(string? mediaKey) =>
         !string.IsNullOrWhiteSpace(mediaKey) && _records.Remove(mediaKey);
 
@@ -92,6 +101,9 @@ public sealed class MediaAnalysisDatabase
         Tempo = record.Tempo is null ? null : TempoSettings.Normalize(record.Tempo),
         TempoOrigin = record.TempoOrigin,
         TempoUpdatedAtUtc = record.TempoUpdatedAtUtc,
+        DrumReference = record.DrumReference is null
+            ? null
+            : DrumReferenceMap.Normalize(record.DrumReference),
         PerformanceSessions = record.PerformanceSessions.ToList()
     };
 }

@@ -187,6 +187,17 @@ public sealed partial class MainViewModel
             _audioInputGain = Math.Clamp(state.AudioInputGain, 0d, 1.5d);
             _preferredAudioInputMonitors.Clear();
             _preferredAudioInputMonitors.AddRange(state.AudioInputMonitors);
+            foreach (var bus in AudioEffectBuses)
+            {
+                var saved = state.AudioEffectBuses.FirstOrDefault(
+                    setting => setting.Target == bus.Target);
+                bus.Load(saved ?? new AudioEffectBusSetting(bus.Target));
+                var setting = bus.ToSetting();
+                _audio.ConfigureEffectBus(
+                    setting.Target,
+                    setting.EffectiveEffects,
+                    setting.EffectsBypassed);
+            }
             _preferredMidiDeviceName = state.MidiDeviceName;
             _preferredMidiDeviceIndex = state.MidiDeviceIndex;
             _autoConnectMidi = state.AutoConnectMidi;
@@ -842,6 +853,8 @@ public sealed partial class MainViewModel
             return;
         }
 
+        FinishPerformanceEvaluation(naturalEnd: true);
+
         var nextId = _playbackNavigator.NextAutomatic();
         if (nextId is null)
         {
@@ -1080,6 +1093,9 @@ public sealed partial class MainViewModel
                         .Select(monitor => monitor.ToSetting())
                         .ToList()
                     : _preferredAudioInputMonitors.ToList(),
+                AudioEffectBuses = AudioEffectBuses
+                    .Select(bus => bus.ToSetting())
+                    .ToList(),
                 MidiDeviceName = _preferredMidiDeviceName,
                 MidiDeviceIndex = _preferredMidiDeviceIndex,
                 AutoConnectMidi = _autoConnectMidi,
