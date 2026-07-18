@@ -26,8 +26,8 @@ public sealed class StudioStateStoreTests
             AudioInputGain = 0.73d,
             AudioInputMonitors =
             [
-                new AudioInputMonitorSetting(0, 0.55f),
-                new AudioInputMonitorSetting(1, 0.73f)
+                new AudioInputMonitorSetting(0, 0.55f, AudioInputProfileKind.Voice),
+                new AudioInputMonitorSetting(1, 0.73f, AudioInputProfileKind.GuitarDrive)
             ],
             MidiDeviceName = "MPK mini 3",
             MidiDeviceIndex = 2,
@@ -138,8 +138,10 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(2, loaded.AudioInputMonitors.Count);
         Assert.AreEqual(0, loaded.AudioInputMonitors[0].ChannelIndex);
         Assert.AreEqual(0.55f, loaded.AudioInputMonitors[0].Gain);
+        Assert.AreEqual(AudioInputProfileKind.Voice, loaded.AudioInputMonitors[0].Profile);
         Assert.AreEqual(1, loaded.AudioInputMonitors[1].ChannelIndex);
         Assert.AreEqual(0.73f, loaded.AudioInputMonitors[1].Gain);
+        Assert.AreEqual(AudioInputProfileKind.GuitarDrive, loaded.AudioInputMonitors[1].Profile);
         Assert.AreEqual("MPK mini 3", loaded.MidiDeviceName);
         Assert.AreEqual(2, loaded.MidiDeviceIndex.GetValueOrDefault());
         Assert.IsTrue(loaded.AutoConnectMidi);
@@ -272,6 +274,37 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(1, loaded.Playlists[0].Items.Count);
         Assert.AreEqual(PlaylistItemKind.LocalTrack, loaded.Playlists[0].Items[0].Kind);
         Assert.AreEqual("track-a", loaded.Playlists[0].Items[0].TrackId);
+    }
+
+    [TestMethod]
+    public void Load_VersionThreeInputMonitorWithoutProfile_DefaultsToClean()
+    {
+        using var temporary = new TemporaryDirectory();
+        var statePath = temporary.Combine("studio-state.json");
+        File.WriteAllText(
+            statePath,
+            """
+            {
+              "schemaVersion": 3,
+              "outputFolder": "C:\\Audio",
+              "audioInputMonitors": [
+                {
+                  "channelIndex": 2,
+                  "gain": 0.65
+                }
+              ],
+              "playbackMode": "sequential"
+            }
+            """);
+        var store = new StudioStateStore(statePath);
+
+        var loaded = store.Load();
+
+        Assert.IsNull(store.LastLoadWarning);
+        Assert.AreEqual(1, loaded.AudioInputMonitors.Count);
+        Assert.AreEqual(2, loaded.AudioInputMonitors[0].ChannelIndex);
+        Assert.AreEqual(0.65f, loaded.AudioInputMonitors[0].Gain);
+        Assert.AreEqual(AudioInputProfileKind.Clean, loaded.AudioInputMonitors[0].Profile);
     }
 
     [TestMethod]

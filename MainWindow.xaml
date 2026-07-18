@@ -67,6 +67,7 @@
         <Grid Grid.Column="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="70" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
@@ -92,7 +93,31 @@
                 </Grid>
             </Border>
 
-            <ScrollViewer Grid.Row="1" Background="{StaticResource AppBackground}"
+            <Border Grid.Row="1" Background="#3B2A12" BorderBrush="{StaticResource Accent}"
+                    BorderThickness="0,0,0,1" Padding="18,10"
+                    Visibility="{Binding IsAudioAlertVisible, Converter={StaticResource BoolToVisibility}}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="{Binding AudioAlertMessage}" Foreground="{StaticResource Accent}"
+                                   FontWeight="SemiBold" FontSize="13" />
+                        <TextBlock Text="{Binding AudioAlertDetails}" Foreground="#F4D7A4"
+                                   TextWrapping="Wrap" FontSize="11" Margin="0,3,12,0" />
+                    </StackPanel>
+                    <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                        <Button Style="{StaticResource SecondaryButton}" Content="Reintentar"
+                                Command="{Binding RetryAudioOutputCommand}" Margin="0,0,8,0"
+                                AutomationProperties.AutomationId="RetryAudioOutputButton" />
+                        <Button Style="{StaticResource SecondaryButton}" Content="Ocultar"
+                                Command="{Binding DismissAudioAlertCommand}" />
+                    </WrapPanel>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="2" Background="{StaticResource AppBackground}"
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           CanContentScroll="False">
                 <Grid Margin="30,26,30,36">
@@ -909,11 +934,16 @@
                                                   AutomationProperties.AutomationId="AudioInputMonitorList">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Grid Margin="0,5">
+                                                <Grid Margin="0,7">
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
                                                     <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="250" />
+                                                        <ColumnDefinition Width="230" />
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="55" />
+                                                        <ColumnDefinition Width="190" />
                                                     </Grid.ColumnDefinitions>
                                                     <CheckBox IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                               Content="{Binding DisplayName}" VerticalAlignment="Center"
@@ -925,6 +955,18 @@
                                                     <TextBlock Grid.Column="2" Text="{Binding GainLabel}"
                                                                VerticalAlignment="Center" HorizontalAlignment="Right"
                                                                Foreground="{StaticResource Accent}" FontWeight="SemiBold" />
+                                                    <ComboBox Grid.Column="3" Margin="12,0,0,0"
+                                                              ItemsSource="{Binding ProfileOptions}"
+                                                              SelectedValue="{Binding Profile, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              SelectedValuePath="Kind"
+                                                              DisplayMemberPath="Label"
+                                                              IsEnabled="{Binding IsEnabled}"
+                                                              AutomationProperties.Name="Perfil de procesamiento" />
+                                                    <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3"
+                                                               Text="{Binding ProcessingLabel}"
+                                                               Foreground="{StaticResource TextSecondary}"
+                                                               FontSize="11" TextWrapping="Wrap"
+                                                               Margin="12,4,0,0" />
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>

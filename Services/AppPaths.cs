@@ -17,6 +17,7 @@ public static class AppPaths
     public static string RecordingWork { get; } = Path.Combine(Root, "Work", "Recording");
     public static string VstStates { get; } = Path.Combine(Root, "VstStates");
     public static string YouTubeWebViewData { get; } = Path.Combine(Root, "WebView2", "YouTube");
+    public static string AudioDiagnosticsPath { get; } = Path.Combine(Root, "Logs", "audio.log");
 
     public static void EnsureCreated()
     {

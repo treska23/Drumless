@@ -66,6 +66,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string _audioOutputStatus = "Buscando salidas de audio…";
     private string _audioInputStatus = "Selecciona una salida ASIO para usar la entrada de audio.";
     private double _audioInputGain = 0.8d;
+    private bool _isAudioAlertVisible;
+    private bool _isAudioRecovering;
+    private string _audioAlertMessage = string.Empty;
+    private string _audioAlertDetails = string.Empty;
+    private AudioOutputFault? _lastAudioFault;
+    private CancellationTokenSource? _audioRecoveryCancellation;
     private double _midiVelocitySensitivity = MidiVelocityCurve.DefaultSensitivity;
     private string _midiVelocityMonitor = "Toca un pad para comprobar la velocidad recibida.";
     private string? _preferredAudioOutputDeviceId;
@@ -152,6 +158,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CancelDrumRemovalCommand = new RelayCommand(CancelDrumRemoval);
         RefreshMidiCommand = new RelayCommand(RefreshMidiDevices);
         RefreshAudioOutputsCommand = new RelayCommand(RefreshAudioOutputDevices);
+        RetryAudioOutputCommand = new RelayCommand(
+            () => _ = RetryAudioOutputAsync(),
+            () => !_isAudioRecovering && _lastAudioFault is not null);
+        DismissAudioAlertCommand = new RelayCommand(() => IsAudioAlertVisible = false);
         ScanVstInstrumentsCommand = new RelayCommand(() => _ = ScanVstInstrumentsAsync(force: true));
         LoadVstPresetCommand = new RelayCommand(LoadVstPreset);
         UseInternalDrumsCommand = new RelayCommand(UseInternalDrums);
@@ -167,6 +177,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _midi.Error += (_, message) => PostStatus($"MIDI: {message}");
         _audio.VstInstrumentExited += OnVstInstrumentExited;
         _audio.VstEditorClosed += OnVstEditorClosed;
+        _audio.OutputFaulted += OnAudioOutputFaulted;
 
         _transportTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _transportTimer.Tick += (_, _) => RefreshTransport();
@@ -221,6 +232,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public RelayCommand CancelDrumRemovalCommand { get; }
     public RelayCommand RefreshMidiCommand { get; }
     public RelayCommand RefreshAudioOutputsCommand { get; }
+    public RelayCommand RetryAudioOutputCommand { get; }
+    public RelayCommand DismissAudioAlertCommand { get; }
     public RelayCommand ScanVstInstrumentsCommand { get; }
     public RelayCommand LoadVstPresetCommand { get; }
     public RelayCommand UseInternalDrumsCommand { get; }
@@ -300,6 +313,36 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         get => _audioOutputStatus;
         private set => SetProperty(ref _audioOutputStatus, value);
+    }
+
+    public bool IsAudioAlertVisible
+    {
+        get => _isAudioAlertVisible;
+        private set => SetProperty(ref _isAudioAlertVisible, value);
+    }
+
+    public bool IsAudioRecovering
+    {
+        get => _isAudioRecovering;
+        private set
+        {
+            if (SetProperty(ref _isAudioRecovering, value))
+            {
+                RetryAudioOutputCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string AudioAlertMessage
+    {
+        get => _audioAlertMessage;
+        private set => SetProperty(ref _audioAlertMessage, value);
+    }
+
+    public string AudioAlertDetails
+    {
+        get => _audioAlertDetails;
+        private set => SetProperty(ref _audioAlertDetails, value);
     }
 
     public AudioInputChannelItem? SelectedAudioInputChannel
@@ -662,6 +705,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _tempoAnalysisCancellation?.Dispose();
         _vstLoadCancellation?.Cancel();
         _vstLoadCancellation?.Dispose();
+        _audioRecoveryCancellation?.Cancel();
+        _audioRecoveryCancellation?.Dispose();
         _trackLoadCancellation?.Cancel();
         _trackLoadCancellation?.Dispose();
         FinalizeRecordingOnShutdown();
@@ -671,6 +716,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SaveTrackWorkspace(silent: true);
         _audio.VstInstrumentExited -= OnVstInstrumentExited;
         _audio.VstEditorClosed -= OnVstEditorClosed;
+        _audio.OutputFaulted -= OnAudioOutputFaulted;
         _midi.NoteReceived -= OnMidiNoteReceived;
         _midi.NoteOffReceived -= OnMidiNoteOffReceived;
         _midi.ControlChangeReceived -= OnMidiControlChangeReceived;
@@ -1340,7 +1386,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     IsEnabled = activeSettings.ContainsKey(channelIndex),
                     Gain = activeSettings.TryGetValue(channelIndex, out var setting)
                         ? setting.Gain
-                        : 0.8d
+                        : 0.8d,
+                    Profile = activeSettings.TryGetValue(channelIndex, out setting)
+                        ? setting.Profile
+                        : AudioInputProfileKind.Clean
                 };
                 monitor.PropertyChanged += OnAudioInputMonitorPropertyChanged;
                 AudioInputMonitors.Add(monitor);
@@ -1376,6 +1425,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             _audio.SetAudioInputGain(monitor.ChannelIndex, (float)monitor.Gain);
             RememberAudioInputMonitors();
+            ScheduleSettingsSave();
+            return;
+        }
+
+        if (eventArgs.PropertyName == nameof(AudioInputMonitorItem.Profile))
+        {
+            if (monitor.IsEnabled)
+            {
+                _audio.SetAudioInputProfile(monitor.ChannelIndex, monitor.Profile);
+            }
+            RememberAudioInputMonitors();
+            AudioInputStatus =
+                $"{monitor.DisplayName}: perfil {AudioInputProfileCatalog.Get(monitor.Profile).Label} activo.";
             ScheduleSettingsSave();
             return;
         }
@@ -1481,6 +1543,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         bool showDialog,
         bool remember)
     {
+        if (showDialog)
+        {
+            _audioRecoveryCancellation?.Cancel();
+        }
+
         var reloadVst = AudioOutputTransitionPolicy.RequiresVstReload(
             selected.IsAsio,
             _audio.IsVstInstrumentLoaded,
@@ -1511,6 +1578,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (!applied)
         {
             RestoreActiveAudioOutputSelection();
+        }
+        else if (showDialog && _lastAudioFault is not null)
+        {
+            AudioAlertMessage = $"Audio recuperado: {selected.Name}";
+            AudioAlertDetails = "La salida seleccionada está activa. La reproducción permanece pausada.";
+            _lastAudioFault = null;
+            RetryAudioOutputCommand.RaiseCanExecuteChanged();
         }
 
         if (instrumentToReload is not null)
@@ -2035,6 +2109,116 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private static string GetAutomaticVstStatePath(string classId) =>
         Path.Combine(AppPaths.VstStates, $"{classId}.vstpreset");
+
+    private void OnAudioOutputFaulted(object? sender, AudioOutputFault fault)
+    {
+        AudioDiagnosticLog.Append(fault);
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = HandleAudioOutputFaultAsync(fault)));
+    }
+
+    private async Task HandleAudioOutputFaultAsync(AudioOutputFault fault)
+    {
+        _lastAudioFault = fault;
+        RetryAudioOutputCommand.RaiseCanExecuteChanged();
+        IsAudioAlertVisible = true;
+        AudioAlertMessage = $"Se perdió el audio de {fault.DeviceName}";
+        AudioAlertDetails =
+            $"{fault.Backend} · {fault.ExceptionType} {fault.ErrorCode} · {fault.Message}";
+        AudioOutputStatus = $"Salida interrumpida: {fault.Message}";
+        StatusMessage = "La salida de audio se ha detenido; intentando recuperarla…";
+
+        if (_audio.IsTrackPlaying)
+        {
+            _audio.PauseTrack();
+            PlayButtonLabel = "Reproducir";
+        }
+
+        if (IsRecordingOutput)
+        {
+            await StopOutputRecordingAsync();
+            AudioAlertDetails += " · La grabación activa se cerró para conservarla.";
+        }
+
+        await RecoverAudioOutputAsync(fault, automaticAttempts: 3);
+    }
+
+    private Task RetryAudioOutputAsync()
+    {
+        if (_lastAudioFault is not { } fault || IsAudioRecovering)
+        {
+            return Task.CompletedTask;
+        }
+
+        return RecoverAudioOutputAsync(fault, automaticAttempts: 1);
+    }
+
+    private async Task RecoverAudioOutputAsync(
+        AudioOutputFault fault,
+        int automaticAttempts)
+    {
+        var cancellation = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _audioRecoveryCancellation, cancellation);
+        previous?.Cancel();
+        previous?.Dispose();
+        IsAudioRecovering = true;
+        Exception? lastException = null;
+        try
+        {
+            for (var attempt = 1; attempt <= automaticAttempts; attempt++)
+            {
+                var delay = attempt switch
+                {
+                    1 => 600,
+                    2 => 1_500,
+                    _ => 3_000
+                };
+                AudioAlertMessage =
+                    $"Reconectando {fault.DeviceName} · intento {attempt}/{automaticAttempts}";
+                await Task.Delay(delay, cancellation.Token);
+                try
+                {
+                    _audio.RecoverOutputDevice();
+                    AudioOutputStatus = _audio.Status;
+                    AudioAlertMessage = $"Audio recuperado: {fault.DeviceName}";
+                    AudioAlertDetails =
+                        $"La tarjeta volvió a conectarse por {fault.Backend}. " +
+                        "La reproducción permanece pausada para que decidas cuándo continuar.";
+                    StatusMessage = $"Audio recuperado · {_audio.Status}";
+                    AudioDiagnosticLog.Append(fault, $"recuperado en intento {attempt}");
+                    _lastAudioFault = null;
+                    RetryAudioOutputCommand.RaiseCanExecuteChanged();
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    lastException = exception;
+                    AudioAlertDetails =
+                        $"{fault.Backend} · {fault.ErrorCode} · intento {attempt}: {exception.Message}";
+                }
+            }
+
+            AudioAlertMessage = $"No se pudo recuperar {fault.DeviceName}";
+            AudioAlertDetails =
+                $"{lastException?.Message ?? fault.Message} · Pulsa «Reintentar» o elige otra salida en Dispositivos.";
+            AudioOutputStatus = $"Audio no disponible: {lastException?.Message ?? fault.Message}";
+            StatusMessage = "La aplicación sigue abierta, pero la salida de audio necesita atención.";
+            AudioDiagnosticLog.Append(fault, $"recuperación fallida: {lastException?.Message}");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(
+                    Interlocked.CompareExchange(ref _audioRecoveryCancellation, null, cancellation),
+                    cancellation))
+            {
+                cancellation.Dispose();
+            }
+            IsAudioRecovering = false;
+        }
+    }
 
     private void Navigate(string page)
     {

@@ -1,8 +1,18 @@
+using NAudio;
 using NAudio.CoreAudioApi;
 using DrumPracticeStudio.Models;
 using NAudio.Wave;
 
 namespace DrumPracticeStudio.Audio;
+
+public sealed record AudioOutputFault(
+    string DeviceId,
+    string DeviceName,
+    string Backend,
+    string Message,
+    string ExceptionType,
+    string ErrorCode,
+    DateTimeOffset OccurredAtUtc);
 
 internal sealed class AudioOutputSession : IDisposable
 {
@@ -14,6 +24,9 @@ internal sealed class AudioOutputSession : IDisposable
     private readonly IReadOnlyList<AudioInputChannelItem> _inputChannels = [];
     private readonly bool _rawModeActive;
     private readonly int _latencyMilliseconds;
+    private int _expectedStops;
+    private int _faultReported;
+    private int _isStarted;
     private bool _disposed;
 
     private AudioOutputSession(
@@ -29,6 +42,7 @@ internal sealed class AudioOutputSession : IDisposable
         _latencyMilliseconds = player.LatencyMilliseconds;
         DeviceId = device.ID;
         DeviceName = device.FriendlyName;
+        player.PlaybackStopped += OnWasapiPlaybackStopped;
     }
 
     private AudioOutputSession(
@@ -55,6 +69,10 @@ internal sealed class AudioOutputSession : IDisposable
                 1,
                 (int)Math.Ceiling(device.InputLatencySamples * 1_000d / sampleRate));
         }
+        device.Stopped += OnAsioStopped;
+        device.DriverResetRequest += (_, _) => ReportFault(
+            new InvalidOperationException(
+                "El controlador ASIO solicitó reiniciar su configuración."));
     }
 
     public string DeviceId { get; }
@@ -72,6 +90,7 @@ internal sealed class AudioOutputSession : IDisposable
     public bool IsInputMonitoringActive => InputMonitorSettings.Count > 0;
     public IReadOnlyList<AudioInputChannelItem> InputChannels => _inputChannels;
     public string? LowLatencyUnavailableReason => _wasapiPlayer?.LowLatencyUnavailableReason;
+    public event EventHandler<AudioOutputFault>? Faulted;
 
     public static AudioOutputSession Open(
         ISampleProvider provider,
@@ -260,17 +279,31 @@ internal sealed class AudioOutputSession : IDisposable
 
     public void Play()
     {
-        if (_asioDevice is not null)
+        if (Volatile.Read(ref _isStarted) != 0)
         {
-            _asioDevice.Start();
             return;
         }
 
-        _wasapiPlayer!.Play();
+        if (_asioDevice is not null)
+        {
+            _asioDevice.Start();
+        }
+        else
+        {
+            _wasapiPlayer!.Play();
+        }
+        Volatile.Write(ref _isStarted, 1);
+        Interlocked.Exchange(ref _faultReported, 0);
     }
 
     public void Stop()
     {
+        if (Interlocked.Exchange(ref _isStarted, 0) == 0)
+        {
+            return;
+        }
+
+        Interlocked.Increment(ref _expectedStops);
         try
         {
             if (_asioDevice is not null)
@@ -284,6 +317,7 @@ internal sealed class AudioOutputSession : IDisposable
         }
         catch
         {
+            ConsumeExpectedStop();
             // El dispositivo puede haberse desconectado físicamente.
         }
     }
@@ -305,6 +339,9 @@ internal sealed class AudioOutputSession : IDisposable
     public void SetInputGain(int channelIndex, float gain) =>
         _asioDuplexRenderer?.SetGain(channelIndex, gain);
 
+    public void SetInputProfile(int channelIndex, AudioInputProfileKind profile) =>
+        _asioDuplexRenderer?.SetProfile(channelIndex, profile);
+
     public void Dispose()
     {
         if (_disposed)
@@ -320,12 +357,69 @@ internal sealed class AudioOutputSession : IDisposable
         _enumerator?.Dispose();
     }
 
+    private void OnWasapiPlaybackStopped(object? sender, StoppedEventArgs eventArgs) =>
+        OnBackendStopped("WASAPI", eventArgs.Exception);
+
+    private void OnAsioStopped(object? sender, StoppedEventArgs eventArgs) =>
+        OnBackendStopped("ASIO", eventArgs.Exception);
+
+    private void OnBackendStopped(string backend, Exception? exception)
+    {
+        if (_disposed || ConsumeExpectedStop())
+        {
+            return;
+        }
+
+        Volatile.Write(ref _isStarted, 0);
+        ReportFault(exception ?? new InvalidOperationException(
+            $"La salida {backend} se detuvo sin que el usuario lo solicitara."));
+    }
+
+    private bool ConsumeExpectedStop()
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _expectedStops);
+            if (current <= 0)
+            {
+                return false;
+            }
+            if (Interlocked.CompareExchange(ref _expectedStops, current - 1, current) == current)
+            {
+                return true;
+            }
+        }
+    }
+
+    private void ReportFault(Exception exception)
+    {
+        if (_disposed || Interlocked.Exchange(ref _faultReported, 1) != 0)
+        {
+            return;
+        }
+
+        Faulted?.Invoke(this, new AudioOutputFault(
+            DeviceId,
+            DeviceName,
+            IsAsio ? "ASIO" : "WASAPI",
+            exception.Message,
+            exception.GetType().Name,
+            GetDiagnosticErrorCode(exception),
+            DateTimeOffset.UtcNow));
+    }
+
+    private static string GetDiagnosticErrorCode(Exception exception) =>
+        exception is MmException multimedia
+            ? $"{multimedia.Result} · 0x{exception.HResult:X8}"
+            : $"0x{exception.HResult:X8}";
+
     private sealed class AsioDuplexRenderer
     {
         private readonly ISampleProvider _provider;
         private readonly float[] _interleavedOutput;
         private readonly int[] _channelIndexes;
         private readonly float[] _gains;
+        private readonly AudioInputProfileProcessor[] _processors;
         private readonly OutputRecordingSink? _recordingSink;
 
         public AsioDuplexRenderer(
@@ -339,6 +433,11 @@ internal sealed class AudioOutputSession : IDisposable
                 Math.Max(1, maximumFrames) * provider.WaveFormat.Channels];
             _channelIndexes = settings.Select(setting => setting.ChannelIndex).ToArray();
             _gains = settings.Select(setting => Math.Clamp(setting.Gain, 0f, 2f)).ToArray();
+            _processors = settings
+                .Select(setting => new AudioInputProfileProcessor(
+                    provider.WaveFormat.SampleRate,
+                    setting.Profile))
+                .ToArray();
             _recordingSink = recordingSink;
         }
 
@@ -348,6 +447,15 @@ internal sealed class AudioOutputSession : IDisposable
             if (position >= 0)
             {
                 Volatile.Write(ref _gains[position], Math.Clamp(gain, 0f, 2f));
+            }
+        }
+
+        public void SetProfile(int channelIndex, AudioInputProfileKind profile)
+        {
+            var position = Array.IndexOf(_channelIndexes, channelIndex);
+            if (position >= 0)
+            {
+                _processors[position].Profile = profile;
             }
         }
 
@@ -368,7 +476,8 @@ internal sealed class AudioOutputSession : IDisposable
             {
                 for (var inputIndex = 0; inputIndex < _channelIndexes.Length; inputIndex++)
                 {
-                    samples[inputIndex] = buffers.GetInput(inputIndex)[frame];
+                    samples[inputIndex] = _processors[inputIndex].Process(
+                        buffers.GetInput(inputIndex)[frame]);
                     gains[inputIndex] = Volatile.Read(ref _gains[inputIndex]);
                 }
                 var monitored = AudioInputMixMath.MixFrame(samples, gains);

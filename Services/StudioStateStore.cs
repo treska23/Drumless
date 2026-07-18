@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -177,7 +177,10 @@ public sealed class StudioStateStore
             {
                 state.AudioInputMonitors.Add(new AudioInputMonitorSetting(
                     monitor.ChannelIndex.Value,
-                    (float)Math.Clamp(monitor.Gain ?? 0.8d, 0d, 1.5d)));
+                    (float)Math.Clamp(monitor.Gain ?? 0.8d, 0d, 1.5d),
+                    monitor.Profile is { } profile && Enum.IsDefined(profile)
+                        ? profile
+                        : AudioInputProfileKind.Clean));
             }
         }
         if (state.AudioInputMonitors.Count == 0 && state.AudioInputChannelIndex is { } legacyChannel)
@@ -295,7 +298,8 @@ public sealed class StudioStateStore
         AudioInputMonitors = state.AudioInputMonitors.Select(monitor => new AudioInputMonitorDto
         {
             ChannelIndex = monitor.ChannelIndex,
-            Gain = Math.Clamp(monitor.Gain, 0f, 1.5f)
+            Gain = Math.Clamp(monitor.Gain, 0f, 1.5f),
+            Profile = monitor.Profile
         }).ToList(),
         MidiDeviceName = state.MidiDeviceName,
         MidiDeviceIndex = state.MidiDeviceIndex,
@@ -651,6 +655,7 @@ public sealed class StudioStateStore
     {
         public int? ChannelIndex { get; set; }
         public double? Gain { get; set; }
+        public AudioInputProfileKind? Profile { get; set; }
     }
 
     private sealed class MediaAnalysisDto

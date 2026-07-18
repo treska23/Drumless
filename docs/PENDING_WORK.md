@@ -1,5 +1,30 @@
 # Trabajo pendiente acordado
 
+## Fiabilidad de la interfaz de audio
+
+- Implementado el 18 de julio de 2026:
+  - escucha de paradas inesperadas de WASAPI y ASIO, incluidas solicitudes de reinicio ASIO;
+  - aviso persistente dentro de la aplicación con backend, tipo y código del error;
+  - pausa segura de la pista y cierre de una grabación activa antes de recuperar;
+  - tres intentos escalonados de reconexión a la misma salida, sin reanudar la música por sorpresa;
+  - registro diagnóstico en `Logs/audio.log` y posibilidad de reintentar o elegir otra salida.
+- Pendiente: prueba física prolongada desconectando o reiniciando la interfaz real y comprobando
+  distintos fallos del driver. No se debe cambiar silenciosamente a otra tarjeta.
+
+## Central de audio y efectos por entrada
+
+- Implementado el 18 de julio de 2026:
+  - perfil independiente y persistente para cada entrada ASIO;
+  - perfiles Limpio, Voz, Guitarra limpia, Guitarra con distorsión, Bajo y Batería;
+  - cadenas incorporadas de cuatro procesos como máximo, ejecutadas antes de mezclar la entrada;
+  - cambio de perfil en tiempo real y descripción visible de la cadena aplicada.
+- Pendiente:
+  - controles avanzados para editar, reordenar, omitir y guardar variantes de los cuatro slots;
+  - cadenas separadas para pista local, YouTube y bus maestro;
+  - carga de efectos VST3 externos, aislados para que un plugin defectuoso no detenga el motor;
+  - compensación de latencia, presets personalizados y comparación con y sin efectos;
+  - prueba física de todos los perfiles con voz, guitarra, bajo y módulo de batería.
+
 Estado guardado el 16 de julio de 2026 para continuar a partir del día 23.
 
 ## YouTube

@@ -43,6 +43,7 @@ public sealed class AudioEngine : IDisposable
 
     public event EventHandler<string>? VstInstrumentExited;
     public event EventHandler? VstEditorClosed;
+    public event EventHandler<AudioOutputFault>? OutputFaulted;
 
     public bool IsAvailable { get; private set; }
     public string Status { get; private set; } = "Audio no inicializado";
@@ -176,6 +177,7 @@ public sealed class AudioEngine : IDisposable
                 deviceId,
                 inputMonitorSettings,
                 _recording);
+            replacement.Faulted += OnOutputFaulted;
             if (!exclusiveTransition)
             {
                 previous?.Stop();
@@ -184,8 +186,22 @@ public sealed class AudioEngine : IDisposable
         }
         catch
         {
+            if (replacement is not null)
+            {
+                replacement.Faulted -= OnOutputFaulted;
+            }
             replacement?.Dispose();
-            previous?.Play();
+            try
+            {
+                if (IsAvailable)
+                {
+                    previous?.Play();
+                }
+            }
+            catch
+            {
+                IsAvailable = false;
+            }
             throw;
         }
 
@@ -201,6 +217,10 @@ public sealed class AudioEngine : IDisposable
         if (_vstInstrument.IsLoaded)
         {
             _vstInstrument.SetOutputDevice(activeOutput.DeviceId);
+        }
+        if (previous is not null)
+        {
+            previous.Faulted -= OnOutputFaulted;
         }
         previous?.Dispose();
     }
@@ -237,6 +257,7 @@ public sealed class AudioEngine : IDisposable
             foreach (var setting in normalized)
             {
                 previous.SetInputGain(setting.ChannelIndex, setting.Gain);
+                previous.SetInputProfile(setting.ChannelIndex, setting.Profile);
             }
             return;
         }
@@ -249,6 +270,7 @@ public sealed class AudioEngine : IDisposable
         try
         {
             replacement = AudioOutputSession.Open(_mixer, deviceId, normalized, _recording);
+            replacement.Faulted += OnOutputFaulted;
             replacement.Play();
         }
         catch
@@ -257,6 +279,7 @@ public sealed class AudioEngine : IDisposable
             try
             {
                 replacement = AudioOutputSession.Open(_mixer, deviceId, previousSettings, _recording);
+                replacement.Faulted += OnOutputFaulted;
                 replacement.Play();
                 _output = replacement;
                 Status = DescribeOutput(
@@ -279,11 +302,21 @@ public sealed class AudioEngine : IDisposable
         IsAvailable = true;
     }
 
+    public void RecoverOutputDevice()
+    {
+        var deviceId = OutputDeviceId;
+        var settings = AudioInputMonitorSettings.ToArray();
+        SelectOutputDevice(deviceId, settings);
+    }
+
     public void SetAudioInputGain(float gain) =>
         _output?.SetInputGain(gain);
 
     public void SetAudioInputGain(int channelIndex, float gain) =>
         _output?.SetInputGain(channelIndex, gain);
+
+    public void SetAudioInputProfile(int channelIndex, AudioInputProfileKind profile) =>
+        _output?.SetInputProfile(channelIndex, profile);
 
     public async Task LoadVstInstrumentAsync(
         Vst3InstrumentItem instrument,
@@ -504,6 +537,18 @@ public sealed class AudioEngine : IDisposable
 
     private void OnDirectVstEditorClosed(object? sender, EventArgs e) =>
         VstEditorClosed?.Invoke(this, EventArgs.Empty);
+
+    private void OnOutputFaulted(object? sender, AudioOutputFault fault)
+    {
+        if (!ReferenceEquals(sender, _output))
+        {
+            return;
+        }
+
+        IsAvailable = false;
+        Status = $"Audio interrumpido · {fault.DeviceName} · {fault.Message}";
+        OutputFaulted?.Invoke(this, fault);
+    }
 
     private static void TryDeleteRecordingJob(string jobRoot)
     {
