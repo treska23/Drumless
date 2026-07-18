@@ -6,7 +6,12 @@
 - Playlist central, reordenación por arrastre y ventana flotante.
 - Mezclas libres de seis stems de Demucs: batería, bajo, voz, guitarra, piano/teclados y otros.
 - Monitorización simultánea de todas las entradas ASIO con ganancia independiente.
-- Grabación WAV de la mezcla local, incluidas entradas monitorizadas y batería interna/VST.
+- Perfiles independientes Limpio, Voz, Guitarra limpia, Guitarra con distorsión, Bajo y
+  Batería, con cadenas incorporadas de hasta cuatro procesos.
+- Grabación WAV de la mezcla local o YouTube, incluidas entradas monitorizadas y
+  batería interna/VST.
+- Sesión persistente de YouTube, importación de playlists completas, reproducción oculta
+  desde cualquier pantalla y audio dirigido al mezclador/salida elegidos.
 - Tempo y primer pulso bajo demanda, claqueta local y claqueta manual sincronizada con
   el reloj del vídeo de YouTube.
 - Evaluación de golpes MIDI con compensación de latencia e historial persistente por pista.
@@ -40,8 +45,7 @@
 ## Ampliaciones posteriores
 
 - Mapas de tempo para canciones con acelerando, ritardando o cambios de BPM.
+- Editor avanzado de slots y efectos VST3 externos aislados por entrada y buses.
+- Búsqueda de tempo con fuentes verificables y contraste opcional mediante Ollama local.
 - Transcripción de una batería de referencia para distinguir golpes omitidos de silencios
   intencionados. La versión actual puntúa la colocación temporal de los golpes ejecutados.
-- Captura de audio de YouTube: WebView2 reproduce fuera del mezclador local/ASIO, por lo
-  que la grabación directa se limita deliberadamente a pistas locales para no generar una
-  toma silenciosa o incompleta.

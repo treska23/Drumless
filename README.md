@@ -22,9 +22,11 @@ Prototipo Windows de una aplicación de práctica para batería electrónica y t
   voz, guitarra, piano/teclados y otros;
   nunca modifica ni mueve el archivo original.
 - Monitorización simultánea de todas las entradas de una interfaz ASIO, cada una con
-  activación y ganancia independientes.
-- Grabación WAV de la mezcla final de pistas locales: pista, batería interna/VST y
-  todas las entradas ASIO monitorizadas; cada toma se registra en la biblioteca.
+  activación, ganancia y perfil independiente. Incluye presets Limpio, Voz, Guitarra
+  limpia, Guitarra con distorsión, Bajo y Batería, con cadenas de hasta cuatro procesos.
+- Grabación WAV de la mezcla final de pistas locales o YouTube: pista/vídeo,
+  batería interna/VST y todas las entradas ASIO monitorizadas; cada toma se registra
+  inmediatamente en la biblioteca.
 - Análisis de tempo bajo demanda, BPM y primer pulso editables, claqueta ligada a la
   posición exacta del transporte y evaluación temporal de golpes de batería MIDI.
 - Base de datos JSON local y versionada para conservar el tempo, origen y confianza del
@@ -32,7 +34,9 @@ Prototipo Windows de una aplicación de práctica para batería electrónica y t
   Quitar un elemento de una playlist conserva esos datos; quitar una pista de la biblioteca
   los borra sin eliminar el archivo de audio.
 - Búsqueda y reproducción de YouTube dentro de la aplicación mediante el sitio oficial
-  integrado con WebView2, sin claves de API guardadas.
+  integrado con WebView2, sesión persistente e importación de playlists completas.
+  La reproducción iniciada desde una playlist no cambia de pantalla y su audio se captura
+  de forma aislada, entra en el mezclador y usa la salida WASAPI/ASIO elegida.
 
 ## Ejecutar
 
@@ -52,8 +56,8 @@ dotnet test DrumPracticeStudio.sln
 ```
 
 La batería cubre persistencia y migración de análisis, escaneo y desaparecidos, playlists
-y reordenación, reproducción secuencial/aleatoria y las garantías de concurrencia del
-transporte.
+y reordenación, reproducción secuencial/aleatoria, transporte, perfiles de entrada y el
+protocolo del capturador aislado de YouTube.
 
 ## Límites actuales
 
@@ -63,4 +67,6 @@ demostración usan sonidos sintetizados al iniciar y el usuario puede sustituirl
 sus propios WAV. El alojamiento VST3 de NAudio 3 todavía es una función preview; un
 plugin defectuoso puede cerrar el proceso porque los instrumentos se cargan dentro de
 la propia aplicación. Groove Agent SE puede estar limitado a anfitriones Steinberg;
-Groove Agent completo y Addictive Drums 2 son los objetivos principales.
+Groove Agent completo y Addictive Drums 2 son los objetivos principales. Los VST3 de
+efecto externos por entrada y los mapas de tempo variables siguen en la hoja de ruta;
+los perfiles de efecto incorporados y el BPM global editable ya son funcionales.
