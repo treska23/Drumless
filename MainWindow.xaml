@@ -748,42 +748,57 @@
                                     <ListBox x:Name="TrackLibraryList" ItemsSource="{Binding Tracks}"
                                              SelectedItem="{Binding SelectedLibraryTrack}"
                                              MaxHeight="430" AutomationProperties.AutomationId="TrackLibraryList"
+                                             HorizontalContentAlignment="Stretch"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                              PreviewMouseLeftButtonDown="OnLibraryDragStart"
                                              PreviewMouseMove="OnLibraryPreviewMouseMove">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="0" />
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="4,10">
                                                     <Grid>
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <StackPanel Margin="0,0,12,0">
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                                                <TextBlock Text=" · ARCHIVO NO ENCONTRADO" Foreground="#FF7B7B" FontSize="10" FontWeight="Bold" Margin="7,2,0,0"
-                                                                           Visibility="{Binding IsMissing, Converter={StaticResource BoolToVisibility}}"
-                                                                           AutomationProperties.AutomationId="MissingTrackBadge" />
-                                                            </StackPanel>
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                        </Grid.RowDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding Title}"
+                                                                       FontWeight="SemiBold"
+                                                                       TextTrimming="CharacterEllipsis"
+                                                                       ToolTip="{Binding Title}" />
+                                                            <TextBlock Text="ARCHIVO NO ENCONTRADO"
+                                                                       Foreground="#FF7B7B"
+                                                                       FontSize="10"
+                                                                       FontWeight="Bold"
+                                                                       Margin="0,3,0,0"
+                                                                       Visibility="{Binding IsMissing, Converter={StaticResource BoolToVisibility}}"
+                                                                       AutomationProperties.AutomationId="MissingTrackBadge" />
                                                             <TextBlock Text="{Binding VariantLabel}" Foreground="{StaticResource Accent}" FontSize="11" Margin="0,3,0,0" />
                                                             <TextBlock Text="{Binding Path}" Foreground="{StaticResource TextSecondary}" FontSize="10"
                                                                        TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" />
                                                         </StackPanel>
-                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="Cargar" Padding="10,7" Margin="0,0,6,0"
+                                                        <WrapPanel Grid.Row="1"
+                                                                   Margin="0,8,0,0"
+                                                                   HorizontalAlignment="Left">
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="Cargar" Padding="9,6" Margin="0,0,6,0"
                                                                     Command="{Binding DataContext.LoadTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                     CommandParameter="{Binding}" IsEnabled="{Binding IsAvailable}" />
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="+ Playlist" Padding="10,7"
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="+ Playlist" Padding="9,6"
                                                                     Command="{Binding DataContext.AddTrackToPlaylistCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                     CommandParameter="{Binding}"
                                                                     AutomationProperties.AutomationId="AddTrackToPlaylistButton" />
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="Quitar registro" Padding="10,7"
+                                                            <Button Style="{StaticResource SecondaryButton}" Content="Quitar registro" Padding="9,6"
                                                                     Margin="6,0,0,0"
                                                                     ToolTip="Quita la pista de la biblioteca y borra su análisis; no elimina el archivo"
                                                                     Command="{Binding DataContext.RemoveLibraryTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                     CommandParameter="{Binding}"
                                                                     AutomationProperties.AutomationId="RemoveLibraryTrackButton" />
-                                                        </StackPanel>
+                                                        </WrapPanel>
                                                     </Grid>
                                                 </Border>
                                             </DataTemplate>
