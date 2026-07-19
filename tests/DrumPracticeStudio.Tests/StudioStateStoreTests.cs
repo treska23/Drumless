@@ -29,6 +29,20 @@ public sealed class StudioStateStoreTests
             [
                 @"D:\Audio\VST3 personalizados"
             ],
+            Vst3EffectCatalog =
+            [
+                new Vst3EffectReference(
+                    @"C:\Program Files\Common Files\VST3\Guitar Rig 7.vst3",
+                    "Guitar Rig 7",
+                    "4E545356246967547569746172207269",
+                    "Audio Module Class",
+                    "Guitar Rig 7",
+                    "Native Instruments",
+                    "7.0",
+                    "VST 3.7",
+                    "Fx|Guitar")
+            ],
+            HasScannedVst3Effects = true,
             AudioInputMonitors =
             [
                 new AudioInputMonitorSetting(
@@ -262,6 +276,12 @@ public sealed class StudioStateStoreTests
         CollectionAssert.AreEqual(
             new[] { @"D:\Audio\VST3 personalizados" },
             loaded.Vst3EffectFolders);
+        Assert.IsTrue(loaded.HasScannedVst3Effects);
+        Assert.AreEqual(1, loaded.Vst3EffectCatalog.Count);
+        Assert.AreEqual("Guitar Rig 7", loaded.Vst3EffectCatalog[0].Name);
+        Assert.AreEqual(
+            "4E545356246967547569746172207269",
+            loaded.Vst3EffectCatalog[0].ClassId);
         Assert.AreEqual("MPK mini 3", loaded.MidiDeviceName);
         Assert.AreEqual(2, loaded.MidiDeviceIndex.GetValueOrDefault());
         Assert.IsTrue(loaded.AutoConnectMidi);

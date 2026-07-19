@@ -83,6 +83,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private int? _preferredAudioInputChannelIndex;
     private readonly List<AudioInputMonitorSetting> _preferredAudioInputMonitors = [];
     private readonly List<string> _vst3EffectFolders = [];
+    private bool _hasScannedVst3Effects;
     private string? _preferredMidiDeviceName;
     private int? _preferredMidiDeviceIndex;
     private bool _autoConnectMidi = true;
@@ -211,6 +212,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ScanVstInstrumentsCommand = new RelayCommand(() => _ = ScanVstInstrumentsAsync(force: true));
         ScanVstEffectsCommand = new RelayCommand(() => _ = ScanVstEffectsAsync());
         ChooseVstEffectFolderCommand = new RelayCommand(ChooseVstEffectFolder);
+        RemoveVstEffectFromCatalogCommand = new RelayCommand<Vst3EffectItem>(
+            RemoveVstEffectFromCatalog);
         LoadVstPresetCommand = new RelayCommand(LoadVstPreset);
         UseInternalDrumsCommand = new RelayCommand(UseInternalDrums);
         OpenVstEditorCommand = new RelayCommand(OpenVstEditor);
@@ -243,6 +246,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         RefreshAudioOutputDevices();
         RestoreInternalKitConfiguration();
         _ = RestoreVstConfigurationAsync();
+        if (!_hasScannedVst3Effects)
+        {
+            _ = ScanVstEffectsAsync();
+        }
 
         StatusMessage = _audio.IsAvailable
             ? $"Listo · {_audio.Status}"
@@ -302,6 +309,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public RelayCommand ScanVstInstrumentsCommand { get; }
     public RelayCommand ScanVstEffectsCommand { get; }
     public RelayCommand ChooseVstEffectFolderCommand { get; }
+    public RelayCommand<Vst3EffectItem> RemoveVstEffectFromCatalogCommand { get; }
     public RelayCommand LoadVstPresetCommand { get; }
     public RelayCommand UseInternalDrumsCommand { get; }
     public RelayCommand OpenVstEditorCommand { get; }
@@ -1559,6 +1567,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ? $"Carpeta adicional: {_vst3EffectFolders[0]}"
             : $"{_vst3EffectFolders.Count} carpetas VST3 adicionales configuradas";
 
+    public string Vst3EffectCatalogLabel => Vst3Effects.Count switch
+    {
+        0 => "Catálogo vacío",
+        1 => "1 plugin guardado y disponible",
+        _ => $"{Vst3Effects.Count} plugins guardados y disponibles"
+    };
+
     private void AddInputEffectSlot(AudioInputMonitorItem? monitor)
     {
         if (monitor is null)
@@ -2108,6 +2123,47 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void OnMidiControlChangeReceived(object? sender, MidiControlChangeMessage message) =>
         _audio.SendControlChange(message.Controller, message.Value);
 
+    private void RestoreVst3EffectCatalog(StudioState state)
+    {
+        var referencedEffects = state.AudioInputMonitors
+            .SelectMany(monitor => monitor.EffectiveEffects)
+            .Concat(state.AudioEffectBuses.SelectMany(bus => bus.EffectiveEffects))
+            .Select(effect => effect.ExternalVst3)
+            .OfType<Vst3EffectReference>();
+        var restored = state.Vst3EffectCatalog
+            .Concat(referencedEffects)
+            .Where(effect => Path.Exists(effect.ModulePath))
+            .GroupBy(
+                effect => Vst3EffectItem.GetCatalogId(
+                    effect.ModulePath,
+                    effect.ClassId),
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => Vst3EffectItem.FromReference(group.First()))
+            .OrderBy(effect => effect.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(effect => effect.Vendor, StringComparer.OrdinalIgnoreCase);
+
+        Vst3Effects.Clear();
+        foreach (var effect in restored)
+        {
+            Vst3Effects.Add(effect);
+        }
+        OnPropertyChanged(nameof(Vst3EffectCatalogLabel));
+    }
+
+    private void RemoveVstEffectFromCatalog(Vst3EffectItem? effect)
+    {
+        if (effect is null || !Vst3Effects.Remove(effect))
+        {
+            return;
+        }
+
+        _hasScannedVst3Effects = true;
+        OnPropertyChanged(nameof(Vst3EffectCatalogLabel));
+        AudioInputStatus =
+            $"{effect.DisplayName} se quitó del catálogo. No se desinstaló ni se modificaron las cadenas existentes.";
+        ScheduleSettingsSave();
+    }
+
     private async Task ScanVstEffectsAsync()
     {
         if (IsScanningVstEffects)
@@ -2132,8 +2188,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 Vst3Effects.Add(effect);
             }
+            _hasScannedVst3Effects = true;
+            OnPropertyChanged(nameof(Vst3EffectCatalogLabel));
+            ScheduleSettingsSave();
             AudioInputStatus = Vst3Effects.Count == 0
-                ? "No se encontraron efectos VST3 estéreo de 64 bits."
+                ? "No se encontraron efectos VST3 de 64 bits."
                 : $"{Vst3Effects.Count} efecto(s) VST3 encontrado(s)" +
                   (result.FailedModules > 0
                       ? $" · {result.FailedModules} módulo(s) omitido(s) de forma segura"

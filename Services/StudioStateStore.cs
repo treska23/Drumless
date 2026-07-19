@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 9;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -138,6 +138,17 @@ public sealed class StudioStateStore
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList(),
+            Vst3EffectCatalog = (document.Vst3EffectCatalog ?? [])
+                .Select(TryCreateVst3EffectReference)
+                .OfType<Vst3EffectReference>()
+                .GroupBy(
+                    effect => Vst3EffectItem.GetCatalogId(
+                        effect.ModulePath,
+                        effect.ClassId),
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList(),
+            HasScannedVst3Effects = document.HasScannedVst3Effects ?? false,
             MidiDeviceName = string.IsNullOrWhiteSpace(document.MidiDeviceName)
                 ? null
                 : document.MidiDeviceName,
@@ -339,6 +350,15 @@ public sealed class StudioStateStore
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList(),
+        Vst3EffectCatalog = state.Vst3EffectCatalog
+            .GroupBy(
+                effect => Vst3EffectItem.GetCatalogId(
+                    effect.ModulePath,
+                    effect.ClassId),
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => ToVst3EffectReferenceDto(group.First()))
+            .ToList(),
+        HasScannedVst3Effects = state.HasScannedVst3Effects,
         AudioInputMonitors = state.AudioInputMonitors.Select(monitor => new AudioInputMonitorDto
         {
             ChannelIndex = monitor.ChannelIndex,
@@ -824,25 +844,11 @@ public sealed class StudioStateStore
         Vst3EffectReference? external = null;
         if (dto.Kind == AudioEffectKind.ExternalVst3)
         {
-            var vst = dto.ExternalVst3;
-            if (vst is null ||
-                string.IsNullOrWhiteSpace(vst.ModulePath) ||
-                string.IsNullOrWhiteSpace(vst.ClassId) ||
-                string.IsNullOrWhiteSpace(vst.Name))
+            external = TryCreateVst3EffectReference(dto.ExternalVst3);
+            if (external is null)
             {
                 return null;
             }
-            external = new Vst3EffectReference(
-                vst.ModulePath,
-                vst.ModuleName ?? Path.GetFileNameWithoutExtension(vst.ModulePath),
-                vst.ClassId,
-                vst.Category ?? "Audio Module Class",
-                vst.Name,
-                vst.Vendor ?? string.Empty,
-                vst.Version ?? string.Empty,
-                vst.SdkVersion ?? string.Empty,
-                vst.SubCategories ?? string.Empty,
-                vst.PresetPath);
         }
 
         return AudioEffectSlotSetting.Normalize(new AudioEffectSlotSetting(
@@ -863,19 +869,59 @@ public sealed class StudioStateStore
         Mix = effect.Mix,
         ExternalVst3 = effect.ExternalVst3 is null
             ? null
-            : new Vst3EffectReferenceDto
-            {
-                ModulePath = effect.ExternalVst3.ModulePath,
-                ModuleName = effect.ExternalVst3.ModuleName,
-                ClassId = effect.ExternalVst3.ClassId,
-                Category = effect.ExternalVst3.Category,
-                Name = effect.ExternalVst3.Name,
-                Vendor = effect.ExternalVst3.Vendor,
-                Version = effect.ExternalVst3.Version,
-                SdkVersion = effect.ExternalVst3.SdkVersion,
-                SubCategories = effect.ExternalVst3.SubCategories,
-                PresetPath = effect.ExternalVst3.PresetPath
-            }
+            : ToVst3EffectReferenceDto(effect.ExternalVst3)
+    };
+
+    private static Vst3EffectReference? TryCreateVst3EffectReference(
+        Vst3EffectReferenceDto? vst)
+    {
+        if (vst is null ||
+            string.IsNullOrWhiteSpace(vst.ModulePath) ||
+            string.IsNullOrWhiteSpace(vst.ClassId) ||
+            string.IsNullOrWhiteSpace(vst.Name))
+        {
+            return null;
+        }
+
+        try
+        {
+            var modulePath = Path.GetFullPath(vst.ModulePath);
+            return new Vst3EffectReference(
+                modulePath,
+                string.IsNullOrWhiteSpace(vst.ModuleName)
+                    ? Path.GetFileNameWithoutExtension(modulePath)
+                    : vst.ModuleName,
+                vst.ClassId.Trim(),
+                vst.Category ?? "Audio Module Class",
+                vst.Name,
+                vst.Vendor ?? string.Empty,
+                vst.Version ?? string.Empty,
+                vst.SdkVersion ?? string.Empty,
+                vst.SubCategories ?? string.Empty,
+                vst.PresetPath);
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or
+            NotSupportedException or
+            PathTooLongException)
+        {
+            return null;
+        }
+    }
+
+    private static Vst3EffectReferenceDto ToVst3EffectReferenceDto(
+        Vst3EffectReference effect) => new()
+    {
+        ModulePath = effect.ModulePath,
+        ModuleName = effect.ModuleName,
+        ClassId = effect.ClassId,
+        Category = effect.Category,
+        Name = effect.Name,
+        Vendor = effect.Vendor,
+        Version = effect.Version,
+        SdkVersion = effect.SdkVersion,
+        SubCategories = effect.SubCategories,
+        PresetPath = effect.PresetPath
     };
 
     private static StemSelection NormalizeStemSelection(
@@ -923,6 +969,8 @@ public sealed class StudioStateStore
         public List<AudioInputMonitorDto>? AudioInputMonitors { get; set; }
         public List<AudioEffectBusDto>? AudioEffectBuses { get; set; }
         public List<string>? Vst3EffectFolders { get; set; }
+        public List<Vst3EffectReferenceDto>? Vst3EffectCatalog { get; set; }
+        public bool? HasScannedVst3Effects { get; set; }
         public string? MidiDeviceName { get; set; }
         public int? MidiDeviceIndex { get; set; }
         public bool? AutoConnectMidi { get; set; }

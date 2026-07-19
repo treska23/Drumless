@@ -371,24 +371,14 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             {
             }
         }
-        else
-        {
-            try
-            {
-                _writer.Write(0);
-                _writer.Flush();
-            }
-            catch
-            {
-            }
-        }
         while (_output.TryDequeue(out var packet))
         {
             ArrayPool<float>.Shared.Return(packet.Buffer);
         }
-        _writer.Dispose();
-        _reader.Dispose();
-        _bridgeStream.Dispose();
+        // Do not dispose BinaryWriter here: its Dispose() flushes and therefore deliberately throws
+        // when a plug-in has already closed its pipe. Closing the owned stream is sufficient and
+        // avoids surfacing a first-chance broken-pipe exception while replacing a slot.
+        DisposeIgnoringErrors(_bridgeStream);
         try
         {
             if (!_process.HasExited && !_process.WaitForExit(3_000))
@@ -402,6 +392,20 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         _process.Dispose();
         _watchdog.Dispose();
         _cancellation.Dispose();
+    }
+
+    internal static void DisposeIgnoringErrors(IDisposable? disposable)
+    {
+        try
+        {
+            disposable?.Dispose();
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            ObjectDisposedException or
+            InvalidOperationException)
+        {
+        }
     }
 
     private async Task BridgeAsync()

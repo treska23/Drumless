@@ -34,6 +34,19 @@ public sealed class Vst3EffectItemTests
         Assert.IsFalse(item.MatchesSearch("reverb"));
     }
 
+    [TestMethod]
+    public void Reference_RestoresCatalogItemWithoutProbingPluginAgain()
+    {
+        var original = Create("Guitar Rig 7", "Native Instruments", "Fx|Guitar");
+
+        var restored = Vst3EffectItem.FromReference(original.ToReference());
+
+        Assert.AreEqual(original.CatalogId, restored.CatalogId);
+        Assert.AreEqual("Guitar Rig 7", restored.DisplayName);
+        Assert.AreEqual("Native Instruments", restored.Vendor);
+        Assert.AreEqual("Guitar", restored.EffectType);
+    }
+
     private static Vst3EffectItem Create(string name, string vendor, string subCategories) =>
         new(
             new Vst3ModuleInfo(@"C:\VST3\Test.vst3", "Test"),

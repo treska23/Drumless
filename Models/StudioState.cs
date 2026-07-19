@@ -45,6 +45,8 @@ public sealed class StudioState
     public List<AudioInputMonitorSetting> AudioInputMonitors { get; set; } = [];
     public List<AudioEffectBusSetting> AudioEffectBuses { get; set; } = [];
     public List<string> Vst3EffectFolders { get; set; } = [];
+    public List<Vst3EffectReference> Vst3EffectCatalog { get; set; } = [];
+    public bool HasScannedVst3Effects { get; set; }
     public string? MidiDeviceName { get; set; }
     public int? MidiDeviceIndex { get; set; }
     public bool AutoConnectMidi { get; set; } = true;

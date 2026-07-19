@@ -1213,6 +1213,33 @@
                                            Foreground="{StaticResource TextSecondary}"
                                            TextWrapping="Wrap" Margin="0,7,0,0"
                                            AutomationProperties.AutomationId="AudioInputStatusText" />
+                                <Grid Margin="0,9,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Vst3EffectCatalogLabel}"
+                                                   Foreground="{StaticResource TextSecondary}"
+                                                   FontSize="11" Margin="0,0,0,4" />
+                                        <ComboBox x:Name="Vst3CatalogPicker"
+                                                  ItemsSource="{Binding Vst3Effects}"
+                                                  DisplayMemberPath="DisplayLabel"
+                                                  MinWidth="320"
+                                                  MaxDropDownHeight="430"
+                                                  AutomationProperties.AutomationId="Vst3EffectCatalogPicker"
+                                                  AutomationProperties.Name="Plugins VST3 guardados" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Content="Quitar del catálogo"
+                                            Margin="8,20,0,0"
+                                            VerticalAlignment="Top"
+                                            Command="{Binding RemoveVstEffectFromCatalogCommand}"
+                                            CommandParameter="{Binding SelectedItem,
+                                                                       ElementName=Vst3CatalogPicker}"
+                                            AutomationProperties.AutomationId="RemoveVstEffectFromCatalogButton" />
+                                </Grid>
                                 <Border BorderBrush="{StaticResource Stroke}" BorderThickness="1" CornerRadius="8"
                                         Margin="0,10,0,0" Padding="10">
                                     <ItemsControl ItemsSource="{Binding AudioInputMonitors}"

@@ -2,7 +2,8 @@ param(
     [string] $ProcessName = "DrumPracticeStudio",
     [int] $ProcessId = 0,
     [switch] $VerifyVstScanIndicator,
-    [switch] $SkipAudioTrigger
+    [switch] $SkipAudioTrigger,
+    [int] $ExpectedVstCatalogMinimum = 0
 )
 
 Add-Type -AssemblyName UIAutomationClient
@@ -238,6 +239,27 @@ if (-not (Find-ElementByAutomationId "ScanVstEffectsButton") -or
     -not (Find-ElementByAutomationId "ChooseVstEffectFolderButton")) {
     throw "La página de dispositivos no expuso la búsqueda e importación de plugins VST3."
 }
+if (-not (Find-ElementByAutomationId "Vst3EffectCatalogPicker") -or
+    -not (Find-ElementByAutomationId "RemoveVstEffectFromCatalogButton")) {
+    throw "La página de dispositivos no expuso el catálogo VST3 persistente."
+}
+$catalogPicker = Find-ElementByAutomationId "Vst3EffectCatalogPicker"
+$catalogItems = @()
+if ($ExpectedVstCatalogMinimum -gt 0) {
+    $expandPattern = $catalogPicker.GetCurrentPattern(
+        [System.Windows.Automation.ExpandCollapsePattern]::Pattern
+    )
+    $expandPattern.Expand()
+    Start-Sleep -Milliseconds 300
+    $catalogItems = @($catalogPicker.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $listItemCondition
+    ) | ForEach-Object { $_.Current.Name })
+    $expandPattern.Collapse()
+    if ($catalogItems.Count -lt $ExpectedVstCatalogMinimum) {
+        throw "El catálogo VST3 restauró $($catalogItems.Count) plugins; se esperaban al menos $ExpectedVstCatalogMinimum."
+    }
+}
 if (-not (Find-ElementByAutomationId "AudioInputStatusText")) {
     throw "La página de dispositivos no expuso el estado de búsqueda de plugins VST3."
 }
@@ -322,6 +344,7 @@ $padResult = if ($SkipAudioTrigger) { "Omitido" } else { $kick.Current.Name }
     YouTubeControlsVerified = $requiredYouTubeControls.Count
     InputFaderRailClickValue = $inputFaderRailClickValue
     InputFaderDraggedValue = $inputFaderDraggedValue
+    VstCatalogItems = $catalogItems -join " | "
     VstScanIndicatorVerified = $vstScanIndicatorVerified
     MidiProfileVerified = $mapping.Current.Name
 }

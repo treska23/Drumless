@@ -248,6 +248,8 @@ public sealed partial class MainViewModel
             _preferredAudioInputMonitors.AddRange(state.AudioInputMonitors);
             _vst3EffectFolders.Clear();
             _vst3EffectFolders.AddRange(state.Vst3EffectFolders);
+            _hasScannedVst3Effects = state.HasScannedVst3Effects;
+            RestoreVst3EffectCatalog(state);
             OnPropertyChanged(nameof(Vst3EffectFoldersLabel));
             foreach (var bus in AudioEffectBuses)
             {
@@ -1349,6 +1351,10 @@ public sealed partial class MainViewModel
                     .Select(bus => bus.ToSetting())
                     .ToList(),
                 Vst3EffectFolders = _vst3EffectFolders.ToList(),
+                Vst3EffectCatalog = Vst3Effects
+                    .Select(effect => effect.ToReference())
+                    .ToList(),
+                HasScannedVst3Effects = _hasScannedVst3Effects,
                 MidiDeviceName = _preferredMidiDeviceName,
                 MidiDeviceIndex = _preferredMidiDeviceIndex,
                 AutoConnectMidi = _autoConnectMidi,

@@ -25,6 +25,7 @@ public sealed class Vst3EffectItem(
         ? "Fabricante desconocido"
         : PluginClass.Vendor;
     public string DisplayLabel => $"{DisplayName} · {Vendor}";
+    public string CatalogId => GetCatalogId(Module.Path, PluginClass.ClassId);
     public string EffectType =>
         PluginClass.SubCategoryList
             .LastOrDefault(category => !GenericSubCategories.Contains(category))
@@ -56,4 +57,18 @@ public sealed class Vst3EffectItem(
         PluginClass.SdkVersion,
         PluginClass.SubCategories,
         presetPath);
+
+    public static Vst3EffectItem FromReference(Vst3EffectReference reference) => new(
+        new Vst3ModuleInfo(reference.ModulePath, reference.ModuleName),
+        new Vst3ClassInfo(
+            reference.ClassId,
+            reference.Category,
+            reference.Name,
+            reference.Vendor,
+            reference.Version,
+            reference.SdkVersion,
+            reference.SubCategories));
+
+    public static string GetCatalogId(string modulePath, string classId) =>
+        $"{Path.GetFullPath(modulePath)}|{classId.Trim()}";
 }

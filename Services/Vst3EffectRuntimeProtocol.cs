@@ -141,7 +141,18 @@ internal static class Vst3EffectRuntimeProtocol
         var isFirstAudioBlock = true;
         while (true)
         {
-            var message = reader.ReadInt32();
+            int message;
+            try
+            {
+                message = reader.ReadInt32();
+            }
+            catch (Exception exception) when (exception is
+                EndOfStreamException or
+                IOException)
+            {
+                // The owning application closes the pipe to shut down or replace the slot.
+                break;
+            }
             if (message == 0)
             {
                 break;
