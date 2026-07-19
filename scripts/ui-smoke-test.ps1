@@ -1,6 +1,7 @@
 param(
     [string] $ProcessName = "DrumPracticeStudio",
-    [int] $ProcessId = 0
+    [int] $ProcessId = 0,
+    [switch] $VerifyVstScanIndicator
 )
 
 Add-Type -AssemblyName UIAutomationClient
@@ -233,6 +234,28 @@ if (-not (Find-ElementByAutomationId "ScanVstEffectsButton") -or
     -not (Find-ElementByAutomationId "ChooseVstEffectFolderButton")) {
     throw "La página de dispositivos no expuso la búsqueda e importación de plugins VST3."
 }
+if (-not (Find-ElementByAutomationId "AudioInputStatusText")) {
+    throw "La página de dispositivos no expuso el estado de búsqueda de plugins VST3."
+}
+
+$vstScanIndicatorVerified = $false
+if ($VerifyVstScanIndicator) {
+    Invoke-Element (Find-ElementByAutomationId "ScanVstEffectsButton")
+    $deadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        $scanStatus = Find-ElementByAutomationId "VstEffectSearchStatusText"
+        $scanProgress = Find-ElementByAutomationId "VstEffectSearchProgress"
+        if ($scanStatus -and $scanProgress) {
+            $vstScanIndicatorVerified = $true
+            break
+        }
+        Start-Sleep -Milliseconds 80
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if (-not $vstScanIndicatorVerified) {
+        throw "La búsqueda VST3 no mostró su indicador de progreso."
+    }
+}
 
 $allElements = $root.FindAll(
     [System.Windows.Automation.TreeScope]::Descendants,
@@ -255,5 +278,6 @@ if (-not $mapping) {
     LibraryRowsBeforeSearch = $initialLibraryItems
     LibraryRowsWithoutMatches = $filteredLibraryItems
     YouTubeControlsVerified = $requiredYouTubeControls.Count
+    VstScanIndicatorVerified = $vstScanIndicatorVerified
     MidiProfileVerified = $mapping.Current.Name
 }

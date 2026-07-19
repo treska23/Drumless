@@ -1,3 +1,4 @@
+using System.Collections;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -7,6 +8,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Data;
 using DrumPracticeStudio.Infrastructure;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
@@ -35,6 +37,7 @@ public partial class MainWindow : Window
     private int _youtubeAudioRoutingInProgress;
     private YouTubePlaybackRequest? _pendingYouTubePlayback;
     private PlaylistWindow? _playlistWindow;
+    private readonly HashSet<ComboBox> _configuredVstEffectPickers = [];
 
     private void OnMixerFaderPreviewMouseLeftButtonDown(
         object sender,
@@ -1096,6 +1099,75 @@ public partial class MainWindow : Window
             })
         {
             slot.ExternalVst3 = effect.ToReference();
+        }
+    }
+
+    private void OnVst3EffectPickerLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ComboBox comboBox ||
+            !_configuredVstEffectPickers.Add(comboBox) ||
+            comboBox.ItemsSource is not IList effects)
+        {
+            return;
+        }
+
+        var view = new ListCollectionView(effects);
+        view.SortDescriptions.Add(
+            new SortDescription(nameof(Vst3EffectItem.Vendor), ListSortDirection.Ascending));
+        view.SortDescriptions.Add(
+            new SortDescription(nameof(Vst3EffectItem.EffectType), ListSortDirection.Ascending));
+        view.SortDescriptions.Add(
+            new SortDescription(nameof(Vst3EffectItem.DisplayName), ListSortDirection.Ascending));
+        view.GroupDescriptions.Add(
+            new PropertyGroupDescription(nameof(Vst3EffectItem.Vendor)));
+        view.GroupDescriptions.Add(
+            new PropertyGroupDescription(nameof(Vst3EffectItem.EffectType)));
+        comboBox.ItemsSource = view;
+
+        if (comboBox.Template.FindName("PART_EditableTextBox", comboBox) is TextBox searchBox)
+        {
+            searchBox.TextChanged += (_, _) =>
+            {
+                var query = searchBox.Text;
+                view.Filter = item =>
+                    item is Vst3EffectItem effect &&
+                    effect.MatchesSearch(query);
+                view.Refresh();
+                if (!comboBox.IsDropDownOpen && searchBox.IsKeyboardFocusWithin)
+                {
+                    comboBox.IsDropDownOpen = true;
+                }
+            };
+        }
+    }
+
+    private void OnVst3EffectPickerDropDownOpened(object sender, EventArgs e)
+    {
+        if (sender is not ComboBox
+            {
+                ItemsSource: ListCollectionView view
+            } comboBox)
+        {
+            return;
+        }
+
+        if (comboBox.Template.FindName("PART_EditableTextBox", comboBox) is TextBox searchBox)
+        {
+            if (comboBox.SelectedItem is Vst3EffectItem selectedEffect &&
+                string.Equals(
+                    searchBox.Text,
+                    selectedEffect.DisplayLabel,
+                    StringComparison.CurrentCulture))
+            {
+                view.Filter = null;
+                view.Refresh();
+                searchBox.SelectAll();
+            }
+            else if (string.IsNullOrWhiteSpace(searchBox.Text))
+            {
+                view.Filter = null;
+                view.Refresh();
+            }
         }
     }
 

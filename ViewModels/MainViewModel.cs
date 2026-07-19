@@ -2083,6 +2083,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var indicatorShownAt = DateTime.UtcNow;
         var cancellation = new CancellationTokenSource();
         var previous = Interlocked.Exchange(ref _vstEffectScanCancellation, cancellation);
         previous?.Cancel();
@@ -2116,6 +2117,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            var indicatorVisibleFor = DateTime.UtcNow - indicatorShownAt;
+            var minimumIndicatorTime = TimeSpan.FromMilliseconds(750);
+            if (indicatorVisibleFor < minimumIndicatorTime)
+            {
+                await Task.Delay(minimumIndicatorTime - indicatorVisibleFor);
+            }
             IsScanningVstEffects = false;
             Interlocked.CompareExchange(ref _vstEffectScanCancellation, null, cancellation);
             cancellation.Dispose();
