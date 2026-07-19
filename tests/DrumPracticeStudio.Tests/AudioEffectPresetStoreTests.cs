@@ -35,8 +35,8 @@ public sealed class AudioEffectPresetStoreTests
 
         Assert.AreEqual("Voz personal", loaded.Name);
         Assert.IsTrue(loaded.EffectsBypassed);
-        Assert.AreEqual(2, loaded.Effects.Count);
-        Assert.AreEqual(AudioEffectKind.Compressor, loaded.Effects[0].Kind);
-        Assert.AreEqual("Test FX", loaded.Effects[1].ExternalVst3?.Name);
+        Assert.AreEqual(1, loaded.Effects.Count);
+        Assert.AreEqual(AudioEffectKind.ExternalVst3, loaded.Effects[0].Kind);
+        Assert.AreEqual("Test FX", loaded.Effects[0].ExternalVst3?.Name);
     }
 }

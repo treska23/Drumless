@@ -12,8 +12,7 @@ Estado revisado el 18 de julio de 2026.
   por final natural con protección ante cargas rápidas.
 - Demucs de seis stems con selección libre de qué instrumentos conservar.
 - Todas las entradas ASIO utilizables simultáneamente, con ganancia y perfil persistentes.
-- Presets de entrada Limpio, Voz, Guitarra limpia, Guitarra con distorsión, Bajo y Batería;
-  sus cadenas incorporadas usan hasta cuatro procesos antes de mezclar.
+- Etiquetas de entrada Limpio, Voz, Guitarra, Bajo y Batería sin efectos automáticos.
 - Grabación de la mezcla final con pista local o YouTube, batería/VST e inputs monitorizados.
 - WebView2 con sesión persistente, búsqueda, importación de playlist completa y reproducción
   desde la playlist sin abandonar la pantalla actual.
@@ -22,8 +21,8 @@ Estado revisado el 18 de julio de 2026.
 - Aviso y recuperación ante parada inesperada de WASAPI/ASIO, con diagnóstico persistente.
 - BPM y primer pulso bajo demanda, edición manual, claqueta sincronizada y puntuación MIDI
   persistente por pista o vídeo.
-- Editor de cuatro slots por entrada y buses de pista, YouTube y maestro: orden, bypass,
-  parámetros, A/B y presets importables/exportables.
+- Editor de cuatro plugins VST3 instalados por entrada y buses de pista, YouTube y maestro:
+  búsqueda estándar, carpetas adicionales persistentes, orden, mezcla, bypass y presets.
 - Efectos VST3 externos aislados, compensación de latencia y bypass automático ante fallo.
 - Mapa persistente de segmentos con inicio, BPM, compás, fase, confianza y fuente; editor,
   propuesta automática por ventanas y sincronización al pausar, buscar o cambiar de tramo.

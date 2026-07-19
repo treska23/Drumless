@@ -82,6 +82,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string? _preferredAudioInputOutputDeviceId;
     private int? _preferredAudioInputChannelIndex;
     private readonly List<AudioInputMonitorSetting> _preferredAudioInputMonitors = [];
+    private readonly List<string> _vst3EffectFolders = [];
     private string? _preferredMidiDeviceName;
     private int? _preferredMidiDeviceIndex;
     private bool _autoConnectMidi = true;
@@ -207,6 +208,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         DismissAudioAlertCommand = new RelayCommand(() => IsAudioAlertVisible = false);
         ScanVstInstrumentsCommand = new RelayCommand(() => _ = ScanVstInstrumentsAsync(force: true));
         ScanVstEffectsCommand = new RelayCommand(() => _ = ScanVstEffectsAsync());
+        ChooseVstEffectFolderCommand = new RelayCommand(ChooseVstEffectFolder);
         LoadVstPresetCommand = new RelayCommand(LoadVstPreset);
         UseInternalDrumsCommand = new RelayCommand(UseInternalDrums);
         OpenVstEditorCommand = new RelayCommand(OpenVstEditor);
@@ -295,6 +297,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public RelayCommand DismissAudioAlertCommand { get; }
     public RelayCommand ScanVstInstrumentsCommand { get; }
     public RelayCommand ScanVstEffectsCommand { get; }
+    public RelayCommand ChooseVstEffectFolderCommand { get; }
     public RelayCommand LoadVstPresetCommand { get; }
     public RelayCommand UseInternalDrumsCommand { get; }
     public RelayCommand OpenVstEditorCommand { get; }
@@ -1539,6 +1542,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _isScanningVstEffects, value);
     }
 
+    public string Vst3EffectFoldersLabel => _vst3EffectFolders.Count == 0
+        ? "Además de las carpetas VST3 estándar, puedes añadir cualquier carpeta del PC."
+        : _vst3EffectFolders.Count == 1
+            ? $"Carpeta adicional: {_vst3EffectFolders[0]}"
+            : $"{_vst3EffectFolders.Count} carpetas VST3 adicionales configuradas";
+
     private void AddInputEffectSlot(AudioInputMonitorItem? monitor)
     {
         if (monitor is null)
@@ -1548,7 +1557,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (!monitor.AddEffect())
         {
             AudioInputStatus = $"Cada entrada admite como máximo {AudioEffectCatalog.MaximumSlots} slots.";
+            return;
         }
+        AudioInputStatus = Vst3Effects.Count == 0
+            ? "Slot VST3 creado. Busca los plugins instalados o añade su carpeta."
+            : "Slot VST3 creado. Selecciona un plugin instalado.";
     }
 
     private void RemoveInputEffectSlot(AudioEffectSlotItem? slot)
@@ -1686,10 +1699,40 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void AddBusEffectSlot(AudioEffectBusItem? bus)
     {
-        if (bus is not null && !bus.AddEffect())
+        if (bus is null)
+        {
+            return;
+        }
+        if (!bus.AddEffect())
         {
             AudioInputStatus = $"Cada bus admite como máximo {AudioEffectCatalog.MaximumSlots} slots.";
+            return;
         }
+        AudioInputStatus = Vst3Effects.Count == 0
+            ? "Slot VST3 creado. Busca los plugins instalados o añade su carpeta."
+            : $"Slot VST3 creado en {bus.Name}.";
+    }
+
+    private void ChooseVstEffectFolder()
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Elegir carpeta que contiene plugins VST3",
+            Multiselect = false
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var folder = Path.GetFullPath(dialog.FolderName);
+        if (!_vst3EffectFolders.Contains(folder, StringComparer.OrdinalIgnoreCase))
+        {
+            _vst3EffectFolders.Add(folder);
+            OnPropertyChanged(nameof(Vst3EffectFoldersLabel));
+            ScheduleSettingsSave();
+        }
+        _ = ScanVstEffectsAsync();
     }
 
     private void RemoveBusEffectSlot(AudioEffectSlotItem? slot)
@@ -2048,7 +2091,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             IsScanningVstEffects = true;
             AudioInputStatus = "Buscando efectos VST3 en procesos aislados…";
-            var result = await _vstEffectScanner.ScanAsync(cancellation.Token);
+            var result = await _vstEffectScanner.ScanAsync(
+                _vst3EffectFolders,
+                cancellation.Token);
             Vst3Effects.Clear();
             foreach (var effect in result.Effects)
             {

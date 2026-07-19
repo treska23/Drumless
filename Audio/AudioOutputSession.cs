@@ -402,9 +402,7 @@ internal sealed class AudioOutputSession : IDisposable
             .Select(setting => setting.ChannelIndex == channelIndex
                 ? setting with
                 {
-                    Profile = profile,
-                    Effects = AudioInputEffectPresetCatalog.Create(profile),
-                    EffectsBypassed = false
+                    Profile = profile
                 }
                 : setting)
             .ToArray();

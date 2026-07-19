@@ -7,8 +7,6 @@ internal sealed class AudioEffectRackProcessor : IDisposable
 {
     private readonly object _gate = new();
     private readonly int _sampleRate;
-    private readonly AudioInputProfileProcessor _left;
-    private readonly AudioInputProfileProcessor _right;
     private List<ExternalEffect> _external = [];
     private string _externalSignature = string.Empty;
     private bool _bypassed;
@@ -20,8 +18,6 @@ internal sealed class AudioEffectRackProcessor : IDisposable
         bool bypassed = false)
     {
         _sampleRate = sampleRate;
-        _left = new AudioInputProfileProcessor(sampleRate, AudioInputProfileKind.Clean);
-        _right = new AudioInputProfileProcessor(sampleRate, AudioInputProfileKind.Clean);
         SetEffects(effects ?? [], bypassed);
     }
 
@@ -43,17 +39,15 @@ internal sealed class AudioEffectRackProcessor : IDisposable
         bool bypassed)
     {
         var normalized = effects
+            .Where(effect =>
+                effect.Kind == AudioEffectKind.ExternalVst3 &&
+                effect.ExternalVst3 is not null)
             .Take(AudioEffectCatalog.MaximumSlots)
             .Select(AudioEffectSlotSetting.Normalize)
-            .ToArray();
-        var builtIn = normalized
-            .Where(effect => effect.Kind != AudioEffectKind.ExternalVst3)
             .ToArray();
         lock (_gate)
         {
             _bypassed = bypassed;
-            _left.SetEffects(builtIn, bypassed, configureExternal: false);
-            _right.SetEffects(builtIn, bypassed, configureExternal: false);
             ConfigureExternal(normalized);
         }
     }
@@ -70,11 +64,6 @@ internal sealed class AudioEffectRackProcessor : IDisposable
             if (_bypassed)
             {
                 return;
-            }
-            for (var frame = 0; frame < frames; frame++)
-            {
-                interleaved[frame * 2] = _left.Process(interleaved[frame * 2]);
-                interleaved[(frame * 2) + 1] = _right.Process(interleaved[(frame * 2) + 1]);
             }
             foreach (var effect in _external)
             {
@@ -96,8 +85,6 @@ internal sealed class AudioEffectRackProcessor : IDisposable
                 effect.Processor.Dispose();
             }
             _external.Clear();
-            _left.Dispose();
-            _right.Dispose();
         }
     }
 

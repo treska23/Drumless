@@ -24,7 +24,7 @@ public sealed class AudioInputChannelItemTests
     }
 
     [TestMethod]
-    public void Monitor_ProfileBuildsEditablePersistentFourSlotChain()
+    public void Monitor_ProfilesStayCleanAndOnlyConfiguredVst3SlotsPersist()
     {
         var monitor = new AudioInputMonitorItem
         {
@@ -34,9 +34,18 @@ public sealed class AudioInputChannelItemTests
             IsEnabled = true
         };
 
-        Assert.AreEqual(4, monitor.EffectSlots.Count);
+        Assert.AreEqual(0, monitor.EffectSlots.Count);
+        for (var index = 0; index < AudioEffectCatalog.MaximumSlots; index++)
+        {
+            Assert.IsTrue(monitor.AddEffect());
+            monitor.EffectSlots[index].ExternalVst3 = Effect($"FX {index}");
+        }
         Assert.IsFalse(monitor.AddEffect());
-        monitor.MoveEffect(monitor.EffectSlots[3], -1);
+        var last = monitor.EffectSlots[3];
+        Assert.IsTrue(monitor.MoveEffect(last, -1));
+        Assert.AreSame(last, monitor.EffectSlots[0]);
+        Assert.IsTrue(monitor.MoveEffectTo(last, 2));
+        Assert.AreSame(last, monitor.EffectSlots[2]);
         monitor.EffectSlots[0].IsEnabled = false;
         monitor.EffectsBypassed = true;
 
@@ -44,5 +53,19 @@ public sealed class AudioInputChannelItemTests
         Assert.AreEqual(4, setting.EffectiveEffects.Count);
         Assert.IsTrue(setting.EffectsBypassed);
         Assert.IsFalse(setting.EffectiveEffects[0].IsEnabled);
+
+        monitor.Profile = AudioInputProfileKind.Bass;
+        Assert.AreEqual(4, monitor.EffectSlots.Count, "Cambiar la etiqueta no debe borrar los VST3 elegidos.");
     }
+
+    private static Vst3EffectReference Effect(string name) => new(
+        $@"C:\VST3\{name}.vst3",
+        name,
+        Guid.NewGuid().ToString("N").ToUpperInvariant(),
+        "Audio Module Class",
+        name,
+        "Vendor",
+        "1",
+        "3.7",
+        "Fx");
 }

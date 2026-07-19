@@ -300,7 +300,8 @@
                                             Margin="0,10,0,5"
                                             HorizontalAlignment="Center"
                                             PreviewMouseLeftButtonDown="OnMixerFaderPreviewMouseLeftButtonDown"
-                                            AutomationProperties.Name="Volumen de pista" />
+                                            AutomationProperties.Name="Volumen de pista"
+                                            AutomationProperties.AutomationId="TrackVolumeFader" />
                                     <TextBlock Text="{Binding TrackVolume, StringFormat={}{0:P0}}"
                                                HorizontalAlignment="Center"
                                                Foreground="{StaticResource Accent}"
@@ -1166,11 +1167,20 @@
                                 <TextBlock Text="Activa simultáneamente todas las entradas que necesites: guitarra, micrófono, módulo de batería u otras fuentes. Cada entrada tiene su propio nivel."
                                            Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
                                            Margin="0,5,0,0" />
-                                <Button Style="{StaticResource SecondaryButton}"
-                                        Content="Buscar efectos VST3 instalados"
-                                        HorizontalAlignment="Left" Margin="0,9,0,0"
-                                        Command="{Binding ScanVstEffectsCommand}"
-                                        AutomationProperties.AutomationId="ScanVstEffectsButton" />
+                                <WrapPanel Margin="0,9,0,0">
+                                    <Button Style="{StaticResource SecondaryButton}"
+                                            Content="Buscar VST3 instalados"
+                                            Command="{Binding ScanVstEffectsCommand}"
+                                            AutomationProperties.AutomationId="ScanVstEffectsButton" />
+                                    <Button Style="{StaticResource SecondaryButton}"
+                                            Content="Añadir carpeta VST3"
+                                            Margin="7,0,0,0"
+                                            Command="{Binding ChooseVstEffectFolderCommand}"
+                                            AutomationProperties.AutomationId="ChooseVstEffectFolderButton" />
+                                </WrapPanel>
+                                <TextBlock Text="{Binding Vst3EffectFoldersLabel}"
+                                           Foreground="{StaticResource TextSecondary}" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,5,0,0" />
                                 <Border BorderBrush="{StaticResource Stroke}" BorderThickness="1" CornerRadius="8"
                                         Margin="0,10,0,0" Padding="10">
                                     <ItemsControl ItemsSource="{Binding AudioInputMonitors}"
@@ -1203,7 +1213,8 @@
                                                             Height="135"
                                                             HorizontalAlignment="Center"
                                                             PreviewMouseLeftButtonDown="OnMixerFaderPreviewMouseLeftButtonDown"
-                                                            AutomationProperties.Name="Ganancia de entrada" />
+                                                            AutomationProperties.Name="Ganancia de entrada"
+                                                            AutomationProperties.AutomationId="AudioInputGainFader" />
                                                     <TextBlock Grid.Column="2" Text="{Binding GainLabel}"
                                                                VerticalAlignment="Center" HorizontalAlignment="Right"
                                                                Foreground="{StaticResource Accent}" FontWeight="SemiBold" />
@@ -1234,7 +1245,7 @@
                                                                                       Mode=TwoWay,
                                                                                       UpdateSourceTrigger=PropertyChanged}" />
                                                         <Button Style="{StaticResource SecondaryButton}"
-                                                                Content="+ Slot" Margin="10,0,0,0"
+                                                                Content="+ VST3" Margin="10,0,0,0"
                                                                 Command="{Binding DataContext.AddInputEffectSlotCommand,
                                                                                   RelativeSource={RelativeSource AncestorType=Window}}"
                                                                 CommandParameter="{Binding}" />
@@ -1251,60 +1262,51 @@
                                                     </WrapPanel>
                                                     <ItemsControl Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3"
                                                                   ItemsSource="{Binding EffectSlots}"
-                                                                  Margin="12,6,0,0">
+                                                                  Margin="12,6,0,0"
+                                                                  AllowDrop="True"
+                                                                  PreviewMouseMove="OnEffectSlotPreviewMouseMove"
+                                                                  Drop="OnEffectSlotDrop">
                                                         <ItemsControl.ItemTemplate>
                                                             <DataTemplate>
                                                                 <Grid Margin="0,3">
                                                                     <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="24" />
-                                                                        <ColumnDefinition Width="185" />
-                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="38" />
+                                                                        <ColumnDefinition Width="300" />
                                                                         <ColumnDefinition Width="*" />
                                                                         <ColumnDefinition Width="Auto" />
                                                                     </Grid.ColumnDefinitions>
-                                                                    <CheckBox IsChecked="{Binding IsEnabled,
-                                                                                                  Mode=TwoWay,
-                                                                                                  UpdateSourceTrigger=PropertyChanged}"
-                                                                              VerticalAlignment="Center" />
+                                                                    <StackPanel VerticalAlignment="Center">
+                                                                        <TextBlock Text="☰" FontSize="15"
+                                                                                   Foreground="{StaticResource TextSecondary}"
+                                                                                   HorizontalAlignment="Center"
+                                                                                   Cursor="SizeAll"
+                                                                                   PreviewMouseLeftButtonDown="OnEffectSlotDragStart"
+                                                                                   ToolTip="Arrastra para reordenar" />
+                                                                        <CheckBox IsChecked="{Binding IsEnabled,
+                                                                                                      Mode=TwoWay,
+                                                                                                      UpdateSourceTrigger=PropertyChanged}"
+                                                                                  HorizontalAlignment="Center"
+                                                                                  ToolTip="Activar o poner este plugin en bypass" />
+                                                                    </StackPanel>
                                                                     <StackPanel Grid.Column="1" Margin="4,0">
-                                                                        <ComboBox ItemsSource="{Binding KindOptions}"
-                                                                                  SelectedValue="{Binding Kind,
-                                                                                                          Mode=TwoWay,
-                                                                                                          UpdateSourceTrigger=PropertyChanged}"
-                                                                                  SelectedValuePath="Kind"
-                                                                                  DisplayMemberPath="Label" />
                                                                         <ComboBox ItemsSource="{Binding DataContext.Vst3Effects,
                                                                                                         RelativeSource={RelativeSource AncestorType=Window}}"
                                                                                   DisplayMemberPath="DisplayLabel"
                                                                                   Tag="{Binding}"
                                                                                   SelectionChanged="OnInputVst3EffectSelectionChanged"
-                                                                                  Visibility="{Binding IsExternal,
-                                                                                                       Converter={StaticResource BoolToVisibility}}"
-                                                                                  Margin="0,3,0,0"
+                                                                                  ToolTip="Plugins VST3 encontrados en el PC"
                                                                                   AutomationProperties.Name="Efecto VST3 externo" />
                                                                         <TextBlock Text="{Binding ExternalVst3.Name}"
-                                                                                   Visibility="{Binding IsExternal,
-                                                                                                        Converter={StaticResource BoolToVisibility}}"
                                                                                    Foreground="{StaticResource TextSecondary}"
                                                                                    FontSize="9" TextWrapping="Wrap" />
                                                                         <Button Style="{StaticResource SecondaryButton}"
                                                                                 Content="Preset VST3"
-                                                                                Visibility="{Binding IsExternal,
-                                                                                                     Converter={StaticResource BoolToVisibility}}"
                                                                                 Margin="0,3,0,0" HorizontalAlignment="Left"
                                                                                 Command="{Binding DataContext.ChooseVstEffectPresetCommand,
                                                                                                   RelativeSource={RelativeSource AncestorType=Window}}"
                                                                                 CommandParameter="{Binding}" />
                                                                     </StackPanel>
                                                                     <StackPanel Grid.Column="2" Margin="6,0">
-                                                                        <TextBlock Text="CARÁCTER" FontSize="9"
-                                                                                   Foreground="{StaticResource TextSecondary}" />
-                                                                        <Slider Minimum="0" Maximum="1"
-                                                                                Value="{Binding Amount,
-                                                                                                Mode=TwoWay,
-                                                                                                UpdateSourceTrigger=PropertyChanged}" />
-                                                                    </StackPanel>
-                                                                    <StackPanel Grid.Column="3" Margin="6,0">
                                                                         <TextBlock Text="MEZCLA" FontSize="9"
                                                                                    Foreground="{StaticResource TextSecondary}" />
                                                                         <Slider Minimum="0" Maximum="1"
@@ -1312,14 +1314,16 @@
                                                                                                 Mode=TwoWay,
                                                                                                 UpdateSourceTrigger=PropertyChanged}" />
                                                                     </StackPanel>
-                                                                    <WrapPanel Grid.Column="4" VerticalAlignment="Center">
+                                                                    <WrapPanel Grid.Column="3" VerticalAlignment="Center">
                                                                         <Button Style="{StaticResource SecondaryButton}"
-                                                                                Content="↑" Padding="7,3"
+                                                                                Content="⇈" Padding="7,3"
+                                                                                ToolTip="Mover al principio de la cadena"
                                                                                 Command="{Binding DataContext.MoveInputEffectSlotUpCommand,
                                                                                                   RelativeSource={RelativeSource AncestorType=Window}}"
                                                                                 CommandParameter="{Binding}" />
                                                                         <Button Style="{StaticResource SecondaryButton}"
-                                                                                Content="↓" Padding="7,3" Margin="3,0,0,0"
+                                                                                Content="⇊" Padding="7,3" Margin="3,0,0,0"
+                                                                                ToolTip="Mover al final de la cadena"
                                                                                 Command="{Binding DataContext.MoveInputEffectSlotDownCommand,
                                                                                                   RelativeSource={RelativeSource AncestorType=Window}}"
                                                                                 CommandParameter="{Binding}" />
@@ -1350,7 +1354,7 @@
                             <StackPanel>
                                 <TextBlock Text="Efectos de pista, YouTube y bus maestro"
                                            FontSize="16" FontWeight="SemiBold" />
-                                <TextBlock Text="Cada bus tiene hasta cuatro slots, bypass A/B y presets exportables. Los VST3 externos se ejecutan aislados."
+                                <TextBlock Text="Cada bus admite hasta cuatro plugins VST3 instalados en tu PC. No se aplican efectos internos ni cadenas predeterminadas."
                                            Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
                                            Margin="0,5,0,8" />
                                 <ItemsControl ItemsSource="{Binding AudioEffectBuses}">
@@ -1370,7 +1374,7 @@
                                                                   IsChecked="{Binding EffectsBypassed,
                                                                                       Mode=TwoWay,
                                                                                       UpdateSourceTrigger=PropertyChanged}" />
-                                                        <Button Style="{StaticResource SecondaryButton}" Content="+ Slot"
+                                                        <Button Style="{StaticResource SecondaryButton}" Content="+ VST3"
                                                                 Margin="9,0,0,0"
                                                                 Command="{Binding DataContext.AddBusEffectSlotCommand,
                                                                                   RelativeSource={RelativeSource AncestorType=Window}}"
@@ -1386,59 +1390,50 @@
                                                                                   RelativeSource={RelativeSource AncestorType=Window}}"
                                                                 CommandParameter="{Binding}" />
                                                     </WrapPanel>
-                                                    <ItemsControl ItemsSource="{Binding EffectSlots}" Margin="0,5,0,0">
+                                                    <ItemsControl ItemsSource="{Binding EffectSlots}" Margin="0,5,0,0"
+                                                                  AllowDrop="True"
+                                                                  PreviewMouseMove="OnEffectSlotPreviewMouseMove"
+                                                                  Drop="OnEffectSlotDrop">
                                                         <ItemsControl.ItemTemplate>
                                                             <DataTemplate>
                                                                 <Grid Margin="0,3">
                                                                     <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="24" />
-                                                                        <ColumnDefinition Width="210" />
-                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="38" />
+                                                                        <ColumnDefinition Width="300" />
                                                                         <ColumnDefinition Width="*" />
                                                                         <ColumnDefinition Width="Auto" />
                                                                     </Grid.ColumnDefinitions>
-                                                                    <CheckBox IsChecked="{Binding IsEnabled,
-                                                                                                  Mode=TwoWay,
-                                                                                                  UpdateSourceTrigger=PropertyChanged}"
-                                                                              VerticalAlignment="Center" />
+                                                                    <StackPanel VerticalAlignment="Center">
+                                                                        <TextBlock Text="☰" FontSize="15"
+                                                                                   Foreground="{StaticResource TextSecondary}"
+                                                                                   HorizontalAlignment="Center"
+                                                                                   Cursor="SizeAll"
+                                                                                   PreviewMouseLeftButtonDown="OnEffectSlotDragStart"
+                                                                                   ToolTip="Arrastra para reordenar" />
+                                                                        <CheckBox IsChecked="{Binding IsEnabled,
+                                                                                                      Mode=TwoWay,
+                                                                                                      UpdateSourceTrigger=PropertyChanged}"
+                                                                                  HorizontalAlignment="Center"
+                                                                                  ToolTip="Activar o poner este plugin en bypass" />
+                                                                    </StackPanel>
                                                                     <StackPanel Grid.Column="1" Margin="4,0">
-                                                                        <ComboBox ItemsSource="{Binding KindOptions}"
-                                                                                  SelectedValue="{Binding Kind,
-                                                                                                          Mode=TwoWay,
-                                                                                                          UpdateSourceTrigger=PropertyChanged}"
-                                                                                  SelectedValuePath="Kind"
-                                                                                  DisplayMemberPath="Label" />
                                                                         <ComboBox ItemsSource="{Binding DataContext.Vst3Effects,
                                                                                                         RelativeSource={RelativeSource AncestorType=Window}}"
                                                                                   DisplayMemberPath="DisplayLabel"
                                                                                   Tag="{Binding}"
                                                                                   SelectionChanged="OnInputVst3EffectSelectionChanged"
-                                                                                  Visibility="{Binding IsExternal,
-                                                                                                       Converter={StaticResource BoolToVisibility}}"
-                                                                                  Margin="0,3,0,0" />
+                                                                                  ToolTip="Plugins VST3 encontrados en el PC" />
                                                                         <TextBlock Text="{Binding ExternalVst3.Name}"
-                                                                                   Visibility="{Binding IsExternal,
-                                                                                                        Converter={StaticResource BoolToVisibility}}"
                                                                                    Foreground="{StaticResource TextSecondary}"
                                                                                    FontSize="9" TextWrapping="Wrap" />
                                                                         <Button Style="{StaticResource SecondaryButton}"
                                                                                 Content="Preset VST3"
-                                                                                Visibility="{Binding IsExternal,
-                                                                                                     Converter={StaticResource BoolToVisibility}}"
                                                                                 Margin="0,3,0,0" HorizontalAlignment="Left"
                                                                                 Command="{Binding DataContext.ChooseVstEffectPresetCommand,
                                                                                                   RelativeSource={RelativeSource AncestorType=Window}}"
                                                                                 CommandParameter="{Binding}" />
                                                                     </StackPanel>
                                                                     <StackPanel Grid.Column="2" Margin="6,0">
-                                                                        <TextBlock Text="CARÁCTER" FontSize="9"
-                                                                                   Foreground="{StaticResource TextSecondary}" />
-                                                                        <Slider Minimum="0" Maximum="1"
-                                                                                Value="{Binding Amount,
-                                                                                                Mode=TwoWay,
-                                                                                                UpdateSourceTrigger=PropertyChanged}" />
-                                                                    </StackPanel>
-                                                                    <StackPanel Grid.Column="3" Margin="6,0">
                                                                         <TextBlock Text="MEZCLA" FontSize="9"
                                                                                    Foreground="{StaticResource TextSecondary}" />
                                                                         <Slider Minimum="0" Maximum="1"
@@ -1446,14 +1441,16 @@
                                                                                                 Mode=TwoWay,
                                                                                                 UpdateSourceTrigger=PropertyChanged}" />
                                                                     </StackPanel>
-                                                                    <WrapPanel Grid.Column="4" VerticalAlignment="Center">
-                                                                        <Button Style="{StaticResource SecondaryButton}" Content="↑"
+                                                                    <WrapPanel Grid.Column="3" VerticalAlignment="Center">
+                                                                        <Button Style="{StaticResource SecondaryButton}" Content="⇈"
                                                                                 Padding="7,3"
+                                                                                ToolTip="Mover al principio de la cadena"
                                                                                 Command="{Binding DataContext.MoveBusEffectSlotUpCommand,
                                                                                                   RelativeSource={RelativeSource AncestorType=Window}}"
                                                                                 CommandParameter="{Binding}" />
-                                                                        <Button Style="{StaticResource SecondaryButton}" Content="↓"
+                                                                        <Button Style="{StaticResource SecondaryButton}" Content="⇊"
                                                                                 Padding="7,3" Margin="3,0,0,0"
+                                                                                ToolTip="Mover al final de la cadena"
                                                                                 Command="{Binding DataContext.MoveBusEffectSlotDownCommand,
                                                                                                   RelativeSource={RelativeSource AncestorType=Window}}"
                                                                                 CommandParameter="{Binding}" />

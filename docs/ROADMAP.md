@@ -6,8 +6,7 @@
 - Playlist central, reordenación por arrastre y ventana flotante.
 - Mezclas libres de seis stems de Demucs: batería, bajo, voz, guitarra, piano/teclados y otros.
 - Monitorización simultánea de todas las entradas ASIO con ganancia independiente.
-- Perfiles independientes Limpio, Voz, Guitarra limpia, Guitarra con distorsión, Bajo y
-  Batería, con cadenas incorporadas de hasta cuatro procesos.
+- Etiquetas independientes Limpio, Voz, Guitarra, Bajo y Batería, sin cadenas automáticas.
 - Grabación WAV de la mezcla local o YouTube, incluidas entradas monitorizadas y
   batería interna/VST.
 - Sesión persistente de YouTube, importación de playlists completas, reproducción oculta
@@ -17,8 +16,9 @@
 - Evaluación de golpes MIDI con compensación de latencia e historial persistente por pista.
 - Base de datos JSON versionada para análisis y sesiones; una misma clave de vídeo comparte
   datos entre playlists.
-- Cadenas editables de cuatro slots por entrada y por buses de pista, YouTube y maestro,
-  con bypass A/B, reordenación, parámetros y presets importables/exportables.
+- Cadenas editables de cuatro plugins VST3 instalados por entrada y por buses de pista,
+  YouTube y maestro, con carpetas adicionales persistentes, bypass, mezcla, reordenación
+  y presets importables/exportables.
 - Efectos VST3 externos aislados; un fallo deja el slot en bypass sin detener el audio.
 - Mapas de tempo persistentes por tramos, editor manual, propuesta automática por ventanas
   y claqueta/puntuación con cambio de tempo y fase continua.

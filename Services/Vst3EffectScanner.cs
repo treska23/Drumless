@@ -9,11 +9,22 @@ public sealed record Vst3EffectScanResult(
 
 public sealed class Vst3EffectScanner
 {
+    public Task<Vst3EffectScanResult> ScanAsync(
+        CancellationToken cancellationToken = default) =>
+        ScanAsync([], cancellationToken);
+
     public async Task<Vst3EffectScanResult> ScanAsync(
+        IEnumerable<string> additionalFolders,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(additionalFolders);
+        var folders = additionalFolders
+            .Where(folder => !string.IsNullOrWhiteSpace(folder))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var modules = await Task.Run(
             () => Vst3PluginScanner.EnumerateInstalled()
+                .Concat(folders.SelectMany(Vst3PluginScanner.EnumerateIn))
                 .GroupBy(module => module.Path, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .ToArray(),

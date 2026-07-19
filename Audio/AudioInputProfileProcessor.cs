@@ -3,9 +3,8 @@ using DrumPracticeStudio.Models;
 namespace DrumPracticeStudio.Audio;
 
 /// <summary>
-/// Cadena de procesamiento mono y sin asignaciones para una entrada ASIO.
-/// Los perfiles son puntos de partida seguros; el nivel de entrada continúa
-/// controlándose de forma independiente en el mezclador.
+/// Cadena mono para plugins VST3 externos de una entrada ASIO.
+/// Las etiquetas de perfil no insertan procesamiento automático.
 /// </summary>
 internal sealed class AudioInputProfileProcessor : IDisposable
 {
@@ -39,7 +38,6 @@ internal sealed class AudioInputProfileProcessor : IDisposable
         set
         {
             _profile = Enum.IsDefined(value) ? value : AudioInputProfileKind.Clean;
-            SetEffects(AudioInputEffectPresetCatalog.Create(_profile), bypassed: false);
         }
     }
 
@@ -48,7 +46,10 @@ internal sealed class AudioInputProfileProcessor : IDisposable
         bool bypassed,
         bool configureExternal = true)
     {
-        var normalized = (effects ?? AudioInputEffectPresetCatalog.Create(Profile))
+        var normalized = (effects ?? [])
+            .Where(effect =>
+                effect.Kind == AudioEffectKind.ExternalVst3 &&
+                effect.ExternalVst3 is not null)
             .Take(AudioEffectCatalog.MaximumSlots)
             .Select(AudioEffectSlotSetting.Normalize)
             .ToArray();

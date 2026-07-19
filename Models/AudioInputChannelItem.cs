@@ -23,12 +23,12 @@ public static class AudioInputProfileCatalog
 {
     public static IReadOnlyList<AudioInputProfileOption> Options { get; } =
     [
-        new(AudioInputProfileKind.Clean, "Limpio", "Sin efectos · solamente ganancia"),
-        new(AudioInputProfileKind.Voice, "Voz", "Filtro de graves · EQ · compresor · reverb"),
-        new(AudioInputProfileKind.GuitarClean, "Guitarra limpia", "Filtro · compresor · EQ · saturación suave"),
-        new(AudioInputProfileKind.GuitarDrive, "Guitarra con distorsión", "Puerta · distorsión · EQ · compresor"),
-        new(AudioInputProfileKind.Bass, "Bajo", "Filtro subsónico · compresor · EQ · saturación"),
-        new(AudioInputProfileKind.Drums, "Batería", "Filtro · puerta · transitorios · compresor")
+        new(AudioInputProfileKind.Clean, "Limpio", "Sin plugins automáticos"),
+        new(AudioInputProfileKind.Voice, "Voz", "Etiqueta de voz · añade tus plugins VST3"),
+        new(AudioInputProfileKind.GuitarClean, "Guitarra limpia", "Etiqueta de guitarra · añade tus plugins VST3"),
+        new(AudioInputProfileKind.GuitarDrive, "Guitarra con efectos", "Etiqueta de guitarra · añade tus plugins VST3"),
+        new(AudioInputProfileKind.Bass, "Bajo", "Etiqueta de bajo · añade tus plugins VST3"),
+        new(AudioInputProfileKind.Drums, "Batería", "Etiqueta de batería · añade tus plugins VST3")
     ];
 
     public static AudioInputProfileOption Get(AudioInputProfileKind kind) =>
@@ -55,14 +55,7 @@ public static class AudioEffectCatalog
 
     public static IReadOnlyList<AudioEffectKindOption> Options { get; } =
     [
-        new(AudioEffectKind.HighPass, "Filtro de graves"),
-        new(AudioEffectKind.Gate, "Puerta"),
-        new(AudioEffectKind.Equalizer, "Ecualizador"),
-        new(AudioEffectKind.Compressor, "Compresor"),
-        new(AudioEffectKind.Saturation, "Saturación / distorsión"),
-        new(AudioEffectKind.Reverb, "Reverb"),
-        new(AudioEffectKind.Transient, "Transitorios"),
-        new(AudioEffectKind.ExternalVst3, "Plugin VST3 externo")
+        new(AudioEffectKind.ExternalVst3, "Plugin VST3 instalado")
     ];
 
     public static string GetLabel(AudioEffectKind kind) =>
@@ -106,7 +99,7 @@ public sealed record AudioEffectSlotSetting(
         Id = string.IsNullOrWhiteSpace(setting.Id)
             ? Guid.NewGuid().ToString("N")
             : setting.Id,
-        Kind = Enum.IsDefined(setting.Kind) ? setting.Kind : AudioEffectKind.Equalizer,
+        Kind = Enum.IsDefined(setting.Kind) ? setting.Kind : AudioEffectKind.ExternalVst3,
         Amount = double.IsFinite(setting.Amount) ? Math.Clamp(setting.Amount, 0d, 1d) : 0.5d,
         Mix = double.IsFinite(setting.Mix) ? Math.Clamp(setting.Mix, 0d, 1d) : 1d,
         ExternalVst3 = setting.Kind == AudioEffectKind.ExternalVst3
@@ -117,46 +110,7 @@ public sealed record AudioEffectSlotSetting(
 
 public static class AudioInputEffectPresetCatalog
 {
-    public static IReadOnlyList<AudioEffectSlotSetting> Create(AudioInputProfileKind profile) =>
-        profile switch
-        {
-            AudioInputProfileKind.Voice =>
-            [
-                AudioEffectSlotSetting.Create(AudioEffectKind.HighPass, 0.38d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Equalizer, 0.62d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Compressor, 0.58d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Reverb, 0.22d, 0.35d)
-            ],
-            AudioInputProfileKind.GuitarClean =>
-            [
-                AudioEffectSlotSetting.Create(AudioEffectKind.HighPass, 0.28d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Compressor, 0.38d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Equalizer, 0.55d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Saturation, 0.2d, 0.45d)
-            ],
-            AudioInputProfileKind.GuitarDrive =>
-            [
-                AudioEffectSlotSetting.Create(AudioEffectKind.Gate, 0.45d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Saturation, 0.82d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Equalizer, 0.62d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Compressor, 0.38d)
-            ],
-            AudioInputProfileKind.Bass =>
-            [
-                AudioEffectSlotSetting.Create(AudioEffectKind.HighPass, 0.08d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Compressor, 0.68d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Equalizer, 0.32d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Saturation, 0.25d, 0.5d)
-            ],
-            AudioInputProfileKind.Drums =>
-            [
-                AudioEffectSlotSetting.Create(AudioEffectKind.HighPass, 0.05d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Gate, 0.25d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Transient, 0.55d),
-                AudioEffectSlotSetting.Create(AudioEffectKind.Compressor, 0.45d)
-            ],
-            _ => []
-        };
+    public static IReadOnlyList<AudioEffectSlotSetting> Create(AudioInputProfileKind profile) => [];
 }
 
 public sealed record AudioInputMonitorSetting(
@@ -168,6 +122,9 @@ public sealed record AudioInputMonitorSetting(
 {
     public IReadOnlyList<AudioEffectSlotSetting> EffectiveEffects =>
         (Effects ?? AudioInputEffectPresetCatalog.Create(Profile))
+        .Where(effect =>
+            effect.Kind == AudioEffectKind.ExternalVst3 &&
+            effect.ExternalVst3 is not null)
         .Take(AudioEffectCatalog.MaximumSlots)
         .Select(AudioEffectSlotSetting.Normalize)
         .ToArray();
@@ -233,7 +190,6 @@ public sealed class AudioInputMonitorItem : ObservableObject
             if (_profile != value)
             {
                 _profile = value;
-                ReplaceEffects(AudioInputEffectPresetCatalog.Create(value));
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(ProcessingLabel));
             }
@@ -290,7 +246,11 @@ public sealed class AudioInputMonitorItem : ObservableObject
             item.PropertyChanged -= OnEffectSlotPropertyChanged;
         }
         EffectSlots.Clear();
-        foreach (var effect in effects.Take(AudioEffectCatalog.MaximumSlots))
+        foreach (var effect in effects
+                     .Where(effect =>
+                         effect.Kind == AudioEffectKind.ExternalVst3 &&
+                         effect.ExternalVst3 is not null)
+                     .Take(AudioEffectCatalog.MaximumSlots))
         {
             var item = new AudioEffectSlotItem(effect);
             item.PropertyChanged += OnEffectSlotPropertyChanged;
@@ -300,7 +260,7 @@ public sealed class AudioInputMonitorItem : ObservableObject
         OnPropertyChanged(nameof(ProcessingLabel));
     }
 
-    public bool AddEffect(AudioEffectKind kind = AudioEffectKind.Equalizer)
+    public bool AddEffect(AudioEffectKind kind = AudioEffectKind.ExternalVst3)
     {
         if (EffectSlots.Count >= AudioEffectCatalog.MaximumSlots)
         {
@@ -329,8 +289,23 @@ public sealed class AudioInputMonitorItem : ObservableObject
     public bool MoveEffect(AudioEffectSlotItem item, int direction)
     {
         var index = EffectSlots.IndexOf(item);
-        var target = Math.Clamp(index + Math.Sign(direction), 0, EffectSlots.Count - 1);
+        var target = direction < 0 ? 0 : EffectSlots.Count - 1;
         if (index < 0 || target == index)
+        {
+            return false;
+        }
+        return MoveEffectTo(item, target);
+    }
+
+    public bool MoveEffectTo(AudioEffectSlotItem item, int targetIndex)
+    {
+        var index = EffectSlots.IndexOf(item);
+        if (index < 0)
+        {
+            return false;
+        }
+        var target = Math.Clamp(targetIndex, 0, EffectSlots.Count - 1);
+        if (target == index)
         {
             return false;
         }

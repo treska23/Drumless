@@ -246,6 +246,9 @@ public sealed partial class MainViewModel
             _audioInputGain = Math.Clamp(state.AudioInputGain, 0d, 1.5d);
             _preferredAudioInputMonitors.Clear();
             _preferredAudioInputMonitors.AddRange(state.AudioInputMonitors);
+            _vst3EffectFolders.Clear();
+            _vst3EffectFolders.AddRange(state.Vst3EffectFolders);
+            OnPropertyChanged(nameof(Vst3EffectFoldersLabel));
             foreach (var bus in AudioEffectBuses)
             {
                 var saved = state.AudioEffectBuses.FirstOrDefault(
@@ -1345,6 +1348,7 @@ public sealed partial class MainViewModel
                 AudioEffectBuses = AudioEffectBuses
                     .Select(bus => bus.ToSetting())
                     .ToList(),
+                Vst3EffectFolders = _vst3EffectFolders.ToList(),
                 MidiDeviceName = _preferredMidiDeviceName,
                 MidiDeviceIndex = _preferredMidiDeviceIndex,
                 AutoConnectMidi = _autoConnectMidi,

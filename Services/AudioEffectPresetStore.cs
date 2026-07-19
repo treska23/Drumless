@@ -77,7 +77,12 @@ public sealed class AudioEffectPresetStore
             ? "Cadena personal"
             : preset.Name.Trim();
         var effects = preset.Effects
-            .Where(effect => effect is not null)
+            .Where(effect =>
+                effect is
+                {
+                    Kind: AudioEffectKind.ExternalVst3,
+                    ExternalVst3: not null
+                })
             .Take(AudioEffectCatalog.MaximumSlots)
             .Select(AudioEffectSlotSetting.Normalize)
             .ToArray();

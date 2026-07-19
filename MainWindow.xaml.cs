@@ -7,6 +7,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using DrumPracticeStudio.Infrastructure;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
 using DrumPracticeStudio.ViewModels;
@@ -40,29 +41,33 @@ public partial class MainWindow : Window
         MouseButtonEventArgs eventArgs)
     {
         if (sender is not Slider slider ||
-            eventArgs.OriginalSource is Thumb ||
             slider.Template.FindName("PART_Track", slider) is not Track track ||
             track.ActualHeight <= 0)
         {
             return;
         }
 
+        if (track.Thumb?.IsMouseOver == true)
+        {
+            // El Thumb recibe el gesto completo para que WPF pueda capturarlo y arrastrarlo.
+            return;
+        }
+
         var thumbHeight = track.Thumb?.ActualHeight ?? 0d;
-        var usableHeight = Math.Max(1d, track.ActualHeight - thumbHeight);
         var point = eventArgs.GetPosition(track);
-        var centeredPosition = Math.Clamp(
-            point.Y - (thumbHeight / 2d),
-            0d,
-            usableHeight);
-        var ratio = 1d - (centeredPosition / usableHeight);
-        slider.Value = Math.Clamp(
-            slider.Minimum + (ratio * (slider.Maximum - slider.Minimum)),
+        slider.Value = MixerFaderMath.ValueFromVerticalPoint(
             slider.Minimum,
-            slider.Maximum);
+            slider.Maximum,
+            track.ActualHeight,
+            thumbHeight,
+            point.Y);
+        slider.Focus();
         eventArgs.Handled = true;
     }
     private Point? _libraryDragOrigin;
     private Point? _playlistDragOrigin;
+    private Point? _effectSlotDragOrigin;
+    private EffectSlotDragData? _effectSlotDragCandidate;
     private bool _closeAfterRecording;
 
     public MainWindow()
@@ -1094,6 +1099,76 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnEffectSlotDragStart(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement
+            {
+                DataContext: AudioEffectSlotItem slot
+            } handle ||
+            FindVisualParent<ItemsControl>(handle) is not { } owner ||
+            owner.DataContext is null)
+        {
+            return;
+        }
+
+        _effectSlotDragOrigin = e.GetPosition(owner);
+        _effectSlotDragCandidate = new EffectSlotDragData(owner.DataContext, slot);
+    }
+
+    private void OnEffectSlotPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            _effectSlotDragOrigin = null;
+            _effectSlotDragCandidate = null;
+            return;
+        }
+
+        if (sender is not ItemsControl owner ||
+            _effectSlotDragOrigin is not { } origin ||
+            _effectSlotDragCandidate is not { } candidate ||
+            !ReferenceEquals(owner.DataContext, candidate.Owner) ||
+            !ExceededDragThreshold(origin, e.GetPosition(owner)))
+        {
+            return;
+        }
+
+        _effectSlotDragOrigin = null;
+        _effectSlotDragCandidate = null;
+        DragDrop.DoDragDrop(owner, candidate, DragDropEffects.Move);
+    }
+
+    private void OnEffectSlotDrop(object sender, DragEventArgs e)
+    {
+        if (sender is not ItemsControl owner ||
+            e.Data.GetData(typeof(EffectSlotDragData)) is not EffectSlotDragData dragged ||
+            !ReferenceEquals(owner.DataContext, dragged.Owner))
+        {
+            return;
+        }
+
+        var target = FindItemFromSource<AudioEffectSlotItem>(owner, e.OriginalSource);
+        switch (dragged.Owner)
+        {
+            case AudioInputMonitorItem monitor:
+                monitor.MoveEffectTo(
+                    dragged.Slot,
+                    target is null
+                        ? monitor.EffectSlots.Count - 1
+                        : monitor.EffectSlots.IndexOf(target));
+                break;
+            case AudioEffectBusItem bus:
+                bus.MoveEffectTo(
+                    dragged.Slot,
+                    target is null
+                        ? bus.EffectSlots.Count - 1
+                        : bus.EffectSlots.IndexOf(target));
+                break;
+        }
+
+        e.Handled = true;
+    }
+
     private void OnPlaylistMouseWheel(object sender, MouseWheelEventArgs e) =>
         ScrollPlaylistOrParent(sender as DependencyObject, e);
 
@@ -1193,6 +1268,10 @@ public partial class MainWindow : Window
         }
         return null;
     }
+
+    private sealed record EffectSlotDragData(
+        object Owner,
+        AudioEffectSlotItem Slot);
 
     private void OnOpenPlaylistWindowClick(object sender, RoutedEventArgs e)
     {

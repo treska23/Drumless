@@ -32,7 +32,7 @@ public sealed class AudioInputProfileProcessorTests
     }
 
     [TestMethod]
-    public void EveryProcessedProfile_ProducesBoundedAudioWithoutAllocatingConfiguration()
+    public void EveryProfile_LeavesSignalCleanWithoutAutomaticPlugins()
     {
         foreach (var profile in Enum.GetValues<AudioInputProfileKind>()
                      .Where(profile => profile != AudioInputProfileKind.Clean))
@@ -43,14 +43,13 @@ public sealed class AudioInputProfileProcessorTests
                 var source = (float)Math.Sin(sampleIndex * 0.071d) * 0.82f;
                 var result = processor.Process(source);
 
-                Assert.IsTrue(float.IsFinite(result), $"{profile} produjo una muestra no finita.");
-                Assert.IsTrue(result is >= -1f and <= 1f, $"{profile} salió del rango.");
+                Assert.AreEqual(source, result, 0.00001f);
             }
         }
     }
 
     [TestMethod]
-    public void GuitarDriveProfile_ChangesTheWaveform()
+    public void GuitarDriveProfile_DoesNotApplyBuiltInDistortion()
     {
         using var processor = new AudioInputProfileProcessor(
             48_000,
@@ -62,11 +61,11 @@ public sealed class AudioInputProfileProcessorTests
             result = processor.Process(0.35f);
         }
 
-        Assert.AreNotEqual(0.35f, result, 0.01f);
+        Assert.AreEqual(0.35f, result, 0.00001f);
     }
 
     [TestMethod]
-    public void CustomChain_BypassPreservesSignalAndEnabledChainChangesIt()
+    public void RemovedInternalChain_IsIgnored()
     {
         using var processor = new AudioInputProfileProcessor(
             48_000,
@@ -85,17 +84,15 @@ public sealed class AudioInputProfileProcessorTests
         {
             processed = processor.Process(0.32f);
         }
-        Assert.AreNotEqual(0.32f, processed, 0.01f);
+        Assert.AreEqual(0.32f, processed, 0.00001f);
     }
 
     [TestMethod]
-    public void PresetsNeverExceedFourSlots()
+    public void ProfilesNeverCreateDefaultEffects()
     {
         foreach (var profile in Enum.GetValues<AudioInputProfileKind>())
         {
-            Assert.IsTrue(
-                AudioInputEffectPresetCatalog.Create(profile).Count <=
-                AudioEffectCatalog.MaximumSlots);
+            Assert.AreEqual(0, AudioInputEffectPresetCatalog.Create(profile).Count);
         }
     }
 }

@@ -7,7 +7,7 @@ namespace DrumPracticeStudio.Tests;
 public sealed class AudioEffectRackProcessorTests
 {
     [TestMethod]
-    public void ProcessStereo_ChangesBothChannelsAndBypassPreservesThem()
+    public void ProcessStereo_IgnoresRemovedInternalEffects()
     {
         var effects = new[]
         {
@@ -16,7 +16,7 @@ public sealed class AudioEffectRackProcessorTests
         using var rack = new AudioEffectRackProcessor(48_000, effects);
         var active = Enumerable.Repeat(0.3f, 512).ToArray();
         rack.ProcessStereo(active);
-        Assert.AreNotEqual(0.3f, active[^1], 0.01f);
+        Assert.IsTrue(active.All(sample => Math.Abs(sample - 0.3f) < 0.00001f));
 
         rack.SetEffects(effects, bypassed: true);
         var bypassed = Enumerable.Repeat(0.3f, 512).ToArray();
@@ -33,10 +33,27 @@ public sealed class AudioEffectRackProcessorTests
         Assert.IsTrue(bus.AddEffect());
         Assert.IsTrue(bus.AddEffect());
         Assert.IsFalse(bus.AddEffect());
+        foreach (var slot in bus.EffectSlots)
+        {
+            slot.ExternalVst3 = Effect(slot.Id);
+        }
 
         var last = bus.EffectSlots[^1];
         Assert.IsTrue(bus.MoveEffect(last, -1));
-        Assert.AreSame(last, bus.EffectSlots[^2]);
+        Assert.AreSame(last, bus.EffectSlots[0]);
+        Assert.IsTrue(bus.MoveEffectTo(last, 2));
+        Assert.AreSame(last, bus.EffectSlots[2]);
         Assert.AreEqual(4, bus.ToSetting().EffectiveEffects.Count);
     }
+
+    private static Vst3EffectReference Effect(string name) => new(
+        $@"C:\VST3\{name}.vst3",
+        name,
+        Guid.NewGuid().ToString("N").ToUpperInvariant(),
+        "Audio Module Class",
+        name,
+        "Vendor",
+        "1",
+        "3.7",
+        "Fx");
 }

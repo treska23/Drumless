@@ -22,12 +22,15 @@ Prototipo Windows de una aplicación de práctica para batería electrónica y t
   voz, guitarra, piano/teclados y otros;
   nunca modifica ni mueve el archivo original.
 - Monitorización simultánea de todas las entradas de una interfaz ASIO, cada una con
-  activación, ganancia y perfil independiente. Incluye presets Limpio, Voz, Guitarra
-  limpia, Guitarra con distorsión, Bajo y Batería, con cadenas editables de hasta cuatro
-  procesos, bypass A/B y presets importables/exportables. Las ganancias usan faders
-  verticales de estilo mesa de mezclas con clic preciso; la claqueta usa un knob circular.
-- Efectos incorporados o VST3 externos en cada entrada y en los buses de pista local,
-  YouTube y maestro. Los efectos externos se ejecutan en un proceso aislado: si fallan,
+  activación, ganancia y etiqueta de instrumento independiente. Las cadenas admiten hasta
+  cuatro plugins VST3 instalados por el usuario, reordenación por arrastre,
+  envío directo al principio/final, bypass A/B y presets
+  importables/exportables; no se aplican efectos internos predeterminados. Las ganancias
+  usan faders verticales de estilo mesa de mezclas con clic preciso y arrastre; la claqueta
+  usa un knob circular.
+- Plugins VST3 externos en cada entrada y en los buses de pista local, YouTube y maestro,
+  localizados en las carpetas estándar o en carpetas añadidas por el usuario. Se ejecutan
+  en un proceso aislado: si fallan,
   la señal continúa en bypass y la aplicación muestra el diagnóstico.
 - Grabación WAV de la mezcla final de pistas locales o YouTube: pista/vídeo,
   batería interna/VST y todas las entradas ASIO monitorizadas; cada toma se registra

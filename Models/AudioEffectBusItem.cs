@@ -18,6 +18,9 @@ public sealed record AudioEffectBusSetting(
 {
     public IReadOnlyList<AudioEffectSlotSetting> EffectiveEffects =>
         (Effects ?? [])
+        .Where(effect =>
+            effect.Kind == AudioEffectKind.ExternalVst3 &&
+            effect.ExternalVst3 is not null)
         .Take(AudioEffectCatalog.MaximumSlots)
         .Select(AudioEffectSlotSetting.Normalize)
         .ToArray();
@@ -87,7 +90,7 @@ public sealed class AudioEffectBusItem : ObservableObject
             return false;
         }
         var slot = new AudioEffectSlotItem(
-            AudioEffectSlotSetting.Create(AudioEffectKind.Equalizer));
+            AudioEffectSlotSetting.Create(AudioEffectKind.ExternalVst3));
         slot.PropertyChanged += OnSlotPropertyChanged;
         EffectSlots.Add(slot);
         OnPropertyChanged(nameof(EffectSlots));
@@ -110,8 +113,23 @@ public sealed class AudioEffectBusItem : ObservableObject
     public bool MoveEffect(AudioEffectSlotItem slot, int direction)
     {
         var index = EffectSlots.IndexOf(slot);
-        var target = Math.Clamp(index + Math.Sign(direction), 0, EffectSlots.Count - 1);
+        var target = direction < 0 ? 0 : EffectSlots.Count - 1;
         if (index < 0 || target == index)
+        {
+            return false;
+        }
+        return MoveEffectTo(slot, target);
+    }
+
+    public bool MoveEffectTo(AudioEffectSlotItem slot, int targetIndex)
+    {
+        var index = EffectSlots.IndexOf(slot);
+        if (index < 0)
+        {
+            return false;
+        }
+        var target = Math.Clamp(targetIndex, 0, EffectSlots.Count - 1);
+        if (target == index)
         {
             return false;
         }

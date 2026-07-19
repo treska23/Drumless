@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 7;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -134,6 +134,10 @@ public sealed class StudioStateStore
                 ? document.AudioInputChannelIndex
                 : null,
             AudioInputGain = Math.Clamp(document.AudioInputGain ?? 0.8d, 0d, 1.5d),
+            Vst3EffectFolders = (document.Vst3EffectFolders ?? [])
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
             MidiDeviceName = string.IsNullOrWhiteSpace(document.MidiDeviceName)
                 ? null
                 : document.MidiDeviceName,
@@ -185,7 +189,11 @@ public sealed class StudioStateStore
                         ? null
                         : monitor.Effects
                             .Select(TryCreateAudioEffect)
-                            .Where(effect => effect is not null)
+                            .Where(effect => effect is
+                            {
+                                Kind: AudioEffectKind.ExternalVst3,
+                                ExternalVst3: not null
+                            })
                             .Cast<AudioEffectSlotSetting>()
                             .Take(AudioEffectCatalog.MaximumSlots)
                             .ToArray(),
@@ -210,7 +218,11 @@ public sealed class StudioStateStore
                 bus.Target,
                 (bus.Effects ?? [])
                     .Select(TryCreateAudioEffect)
-                    .Where(effect => effect is not null)
+                    .Where(effect => effect is
+                    {
+                        Kind: AudioEffectKind.ExternalVst3,
+                        ExternalVst3: not null
+                    })
                     .Cast<AudioEffectSlotSetting>()
                     .Take(AudioEffectCatalog.MaximumSlots)
                     .ToArray(),
@@ -323,6 +335,10 @@ public sealed class StudioStateStore
         AudioInputOutputDeviceId = state.AudioInputOutputDeviceId,
         AudioInputChannelIndex = state.AudioInputChannelIndex,
         AudioInputGain = Math.Clamp(state.AudioInputGain, 0d, 1.5d),
+        Vst3EffectFolders = state.Vst3EffectFolders
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList(),
         AudioInputMonitors = state.AudioInputMonitors.Select(monitor => new AudioInputMonitorDto
         {
             ChannelIndex = monitor.ChannelIndex,
@@ -776,6 +792,7 @@ public sealed class StudioStateStore
         public double? AudioInputGain { get; set; }
         public List<AudioInputMonitorDto>? AudioInputMonitors { get; set; }
         public List<AudioEffectBusDto>? AudioEffectBuses { get; set; }
+        public List<string>? Vst3EffectFolders { get; set; }
         public string? MidiDeviceName { get; set; }
         public int? MidiDeviceIndex { get; set; }
         public bool? AutoConnectMidi { get; set; }

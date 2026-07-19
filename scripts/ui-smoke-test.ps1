@@ -5,6 +5,14 @@ param(
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type @"
+using System.Runtime.InteropServices;
+public static class NativeMouse {
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(
+        uint flags, uint dx, uint dy, uint data, System.UIntPtr extraInfo);
+}
+"@
 
 $process = if ($ProcessId -gt 0) {
     Get-Process -Id $ProcessId -ErrorAction Stop
@@ -70,12 +78,47 @@ $requiredPracticeControls = @(
     "StartPerformanceButton",
     "FinishPerformanceButton",
     "ClearAnalysisDataButton",
-    "PerformanceHistoryText"
+    "PerformanceHistoryText",
+    "TrackVolumeFader"
 )
 foreach ($automationId in $requiredPracticeControls) {
     if (-not (Find-ElementByAutomationId $automationId)) {
         throw "La página de práctica no expuso el control $automationId."
     }
+}
+
+$trackFader = Find-ElementByAutomationId "TrackVolumeFader"
+$trackRange = $trackFader.GetCurrentPattern(
+    [System.Windows.Automation.RangeValuePattern]::Pattern
+)
+$trackRange.SetValue(0.5)
+Start-Sleep -Milliseconds 150
+$faderBounds = $trackFader.Current.BoundingRectangle
+$faderX = [int]($faderBounds.Left + ($faderBounds.Width / 2))
+$railClickY = [int]($faderBounds.Top + ($faderBounds.Height * 0.25))
+[NativeMouse]::SetCursorPos($faderX, $railClickY) | Out-Null
+[NativeMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+[NativeMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+Start-Sleep -Milliseconds 200
+$railClickValue = $trackRange.Current.Value
+if ($railClickValue -le 0.6 -or $railClickValue -ge 0.95) {
+    throw "El clic en el rail produjo un valor incorrecto: $railClickValue."
+}
+
+$trackRange.SetValue(0.5)
+Start-Sleep -Milliseconds 150
+$dragStartY = [int]($faderBounds.Top + ($faderBounds.Height / 2))
+$dragEndY = [int]($faderBounds.Top + ($faderBounds.Height * 0.25))
+[NativeMouse]::SetCursorPos($faderX, $dragStartY) | Out-Null
+[NativeMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+Start-Sleep -Milliseconds 100
+[NativeMouse]::SetCursorPos($faderX, $dragEndY) | Out-Null
+Start-Sleep -Milliseconds 150
+[NativeMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+Start-Sleep -Milliseconds 200
+$draggedFaderValue = $trackRange.Current.Value
+if ($draggedFaderValue -le 0.6 -or $draggedFaderValue -ge 0.95) {
+    throw "El tirador del volumen de pista no respondió al arrastre: $draggedFaderValue."
 }
 
 $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
@@ -186,6 +229,10 @@ Invoke-Element $devices
 if (-not (Find-ElementByAutomationId "AudioInputMonitorList")) {
     throw "La página de dispositivos no expuso la mezcla multientrada."
 }
+if (-not (Find-ElementByAutomationId "ScanVstEffectsButton") -or
+    -not (Find-ElementByAutomationId "ChooseVstEffectFolderButton")) {
+    throw "La página de dispositivos no expuso la búsqueda e importación de plugins VST3."
+}
 
 $allElements = $root.FindAll(
     [System.Windows.Automation.TreeScope]::Descendants,
@@ -201,6 +248,8 @@ if (-not $mapping) {
     ButtonsFound = $names.Count
     PadTriggered = $kick.Current.Name
     PracticeControlsVerified = $requiredPracticeControls.Count
+    TrackFaderRailClickValue = $railClickValue
+    TrackFaderDraggedValue = $draggedFaderValue
     LibrariesVerified = $factory.Current.Name
     TrackControlsVerified = $requiredTrackControls.Count
     LibraryRowsBeforeSearch = $initialLibraryItems

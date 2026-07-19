@@ -160,6 +160,7 @@
             <Setter Property="Width" Value="48" />
             <Setter Property="SmallChange" Value="0.01" />
             <Setter Property="LargeChange" Value="0.05" />
+            <Setter Property="Cursor" Value="SizeNS" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Slider">

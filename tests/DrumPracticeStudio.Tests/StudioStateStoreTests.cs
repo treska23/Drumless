@@ -25,6 +25,10 @@ public sealed class StudioStateStoreTests
             AudioInputOutputDeviceId = "asio:Focusrite USB ASIO",
             AudioInputChannelIndex = 1,
             AudioInputGain = 0.73d,
+            Vst3EffectFolders =
+            [
+                @"D:\Audio\VST3 personalizados"
+            ],
             AudioInputMonitors =
             [
                 new AudioInputMonitorSetting(
@@ -203,24 +207,27 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(0.55f, loaded.AudioInputMonitors[0].Gain);
         Assert.AreEqual(AudioInputProfileKind.Voice, loaded.AudioInputMonitors[0].Profile);
         Assert.IsTrue(loaded.AudioInputMonitors[0].EffectsBypassed);
-        Assert.AreEqual(2, loaded.AudioInputMonitors[0].EffectiveEffects.Count);
+        Assert.AreEqual(1, loaded.AudioInputMonitors[0].EffectiveEffects.Count);
         Assert.AreEqual(
             AudioEffectKind.ExternalVst3,
-            loaded.AudioInputMonitors[0].EffectiveEffects[1].Kind);
+            loaded.AudioInputMonitors[0].EffectiveEffects[0].Kind);
         Assert.AreEqual(
             "Test Effect",
-            loaded.AudioInputMonitors[0].EffectiveEffects[1].ExternalVst3?.Name);
+            loaded.AudioInputMonitors[0].EffectiveEffects[0].ExternalVst3?.Name);
         Assert.AreEqual(
             @"C:\Presets\Test.vstpreset",
-            loaded.AudioInputMonitors[0].EffectiveEffects[1].ExternalVst3?.PresetPath);
+            loaded.AudioInputMonitors[0].EffectiveEffects[0].ExternalVst3?.PresetPath);
         Assert.AreEqual(1, loaded.AudioInputMonitors[1].ChannelIndex);
         Assert.AreEqual(0.73f, loaded.AudioInputMonitors[1].Gain);
         Assert.AreEqual(AudioInputProfileKind.GuitarDrive, loaded.AudioInputMonitors[1].Profile);
         Assert.AreEqual(2, loaded.AudioEffectBuses.Count);
         Assert.AreEqual(AudioEffectBusTarget.Track, loaded.AudioEffectBuses[0].Target);
-        Assert.AreEqual(2, loaded.AudioEffectBuses[0].EffectiveEffects.Count);
+        Assert.AreEqual(0, loaded.AudioEffectBuses[0].EffectiveEffects.Count);
         Assert.AreEqual(AudioEffectBusTarget.Master, loaded.AudioEffectBuses[1].Target);
         Assert.IsTrue(loaded.AudioEffectBuses[1].EffectsBypassed);
+        CollectionAssert.AreEqual(
+            new[] { @"D:\Audio\VST3 personalizados" },
+            loaded.Vst3EffectFolders);
         Assert.AreEqual("MPK mini 3", loaded.MidiDeviceName);
         Assert.AreEqual(2, loaded.MidiDeviceIndex.GetValueOrDefault());
         Assert.IsTrue(loaded.AutoConnectMidi);
