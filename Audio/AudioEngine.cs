@@ -396,6 +396,29 @@ public sealed class AudioEngine : IDisposable
         }
     }
 
+    internal async Task<Vst3EffectEditorResult> OpenVstEffectEditorAsync(string slotId)
+    {
+        if (string.IsNullOrWhiteSpace(slotId))
+        {
+            return new Vst3EffectEditorResult(false, "El slot VST3 no es válido.");
+        }
+
+        var request = _trackEffects.TryOpenEditorAsync(slotId);
+        if (request is null)
+        {
+            lock (_youtubeCaptureGate)
+            {
+                request = _youtubeEffectRack?.TryOpenEditorAsync(slotId);
+            }
+        }
+        request ??= _output?.TryOpenEffectEditorAsync(slotId);
+        return request is null
+            ? new Vst3EffectEditorResult(
+                false,
+                "El plugin no está activo. Activa su slot y la entrada o bus donde está insertado.")
+            : await request;
+    }
+
     public async Task LoadVstInstrumentAsync(
         Vst3InstrumentItem instrument,
         CancellationToken cancellationToken = default)

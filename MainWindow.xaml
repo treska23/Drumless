@@ -1353,6 +1353,15 @@
                                                                         <TextBlock Text="{Binding ExternalVst3.Name}"
                                                                                    Foreground="{StaticResource TextSecondary}"
                                                                                    FontSize="9" TextWrapping="Wrap" />
+                                                                        <Button Style="{StaticResource PrimaryButton}"
+                                                                                Content="Abrir interfaz"
+                                                                                Margin="0,4,0,0" HorizontalAlignment="Left"
+                                                                                IsEnabled="{Binding CanOpenEditor}"
+                                                                                Command="{Binding DataContext.OpenVstEffectEditorCommand,
+                                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}"
+                                                                                AutomationProperties.Name="Abrir interfaz del plugin VST3"
+                                                                                AutomationProperties.AutomationId="OpenVstEffectEditorButton" />
                                                                         <Button Style="{StaticResource SecondaryButton}"
                                                                                 Content="Preset VST3"
                                                                                 Margin="0,3,0,0" HorizontalAlignment="Left"
@@ -1511,6 +1520,15 @@
                                                                         <TextBlock Text="{Binding ExternalVst3.Name}"
                                                                                    Foreground="{StaticResource TextSecondary}"
                                                                                    FontSize="9" TextWrapping="Wrap" />
+                                                                        <Button Style="{StaticResource PrimaryButton}"
+                                                                                Content="Abrir interfaz"
+                                                                                Margin="0,4,0,0" HorizontalAlignment="Left"
+                                                                                IsEnabled="{Binding CanOpenEditor}"
+                                                                                Command="{Binding DataContext.OpenVstEffectEditorCommand,
+                                                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}"
+                                                                                AutomationProperties.Name="Abrir interfaz del plugin VST3"
+                                                                                AutomationProperties.AutomationId="OpenVstEffectEditorButton" />
                                                                         <Button Style="{StaticResource SecondaryButton}"
                                                                                 Content="Preset VST3"
                                                                                 Margin="0,3,0,0" HorizontalAlignment="Left"

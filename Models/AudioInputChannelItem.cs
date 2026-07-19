@@ -364,7 +364,13 @@ public sealed class AudioEffectSlotItem : ObservableObject
     public bool IsEnabled
     {
         get => _isEnabled;
-        set => SetProperty(ref _isEnabled, value);
+        set
+        {
+            if (SetProperty(ref _isEnabled, value))
+            {
+                OnPropertyChanged(nameof(CanOpenEditor));
+            }
+        }
     }
 
     public double Amount
@@ -387,11 +393,13 @@ public sealed class AudioEffectSlotItem : ObservableObject
             if (SetProperty(ref _externalVst3, value))
             {
                 OnPropertyChanged(nameof(DisplayName));
+                OnPropertyChanged(nameof(CanOpenEditor));
             }
         }
     }
 
     public bool IsExternal => Kind == AudioEffectKind.ExternalVst3;
+    public bool CanOpenEditor => IsEnabled && ExternalVst3 is not null;
     public string DisplayName => IsExternal
         ? ExternalVst3?.Name ?? "VST3 sin seleccionar"
         : AudioEffectCatalog.GetLabel(Kind);

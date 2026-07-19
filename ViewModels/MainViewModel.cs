@@ -194,6 +194,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ImportInputEffectChain);
         ChooseVstEffectPresetCommand = new RelayCommand<AudioEffectSlotItem>(
             ChooseVstEffectPreset);
+        OpenVstEffectEditorCommand = new RelayCommand<AudioEffectSlotItem>(
+            slot => _ = OpenVstEffectEditorAsync(slot));
         AddBusEffectSlotCommand = new RelayCommand<AudioEffectBusItem>(AddBusEffectSlot);
         RemoveBusEffectSlotCommand = new RelayCommand<AudioEffectSlotItem>(RemoveBusEffectSlot);
         MoveBusEffectSlotUpCommand = new RelayCommand<AudioEffectSlotItem>(
@@ -287,6 +289,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public RelayCommand<AudioInputMonitorItem> ExportInputEffectChainCommand { get; }
     public RelayCommand<AudioInputMonitorItem> ImportInputEffectChainCommand { get; }
     public RelayCommand<AudioEffectSlotItem> ChooseVstEffectPresetCommand { get; }
+    public RelayCommand<AudioEffectSlotItem> OpenVstEffectEditorCommand { get; }
     public RelayCommand<AudioEffectBusItem> AddBusEffectSlotCommand { get; }
     public RelayCommand<AudioEffectSlotItem> RemoveBusEffectSlotCommand { get; }
     public RelayCommand<AudioEffectSlotItem> MoveBusEffectSlotUpCommand { get; }
@@ -1670,6 +1673,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             slot.ExternalVst3 = effect with { PresetPath = dialog.FileName };
             AudioInputStatus = $"Preset de {effect.Name} preparado; el proceso aislado se ha recargado.";
+        }
+    }
+
+    private async Task OpenVstEffectEditorAsync(AudioEffectSlotItem? slot)
+    {
+        if (slot?.ExternalVst3 is not { } effect)
+        {
+            AudioInputStatus = "Selecciona primero un efecto VST3 externo.";
+            return;
+        }
+
+        AudioInputStatus = $"Abriendo la interfaz de {effect.Name}…";
+        var result = await _audio.OpenVstEffectEditorAsync(slot.Id);
+        AudioInputStatus = result.Message;
+        if (!result.Succeeded)
+        {
+            MessageBox.Show(
+                result.Message,
+                "Interfaz del plugin",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
     }
 

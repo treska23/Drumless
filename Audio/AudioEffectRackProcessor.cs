@@ -76,6 +76,17 @@ internal sealed class AudioEffectRackProcessor : IDisposable
         }
     }
 
+    public Task<Vst3EffectEditorResult>? TryOpenEditorAsync(string slotId)
+    {
+        lock (_gate)
+        {
+            return _external
+                .FirstOrDefault(effect =>
+                    string.Equals(effect.Id, slotId, StringComparison.Ordinal))
+                ?.Processor.OpenEditorAsync();
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)
@@ -122,8 +133,12 @@ internal sealed class AudioEffectRackProcessor : IDisposable
             try
             {
                 _external.Add(new ExternalEffect(
+                    setting.Id,
                     (float)setting.Mix,
-                    IsolatedVst3EffectProcessor.Start(setting.ExternalVst3!, _sampleRate)));
+                    IsolatedVst3EffectProcessor.Start(
+                        setting.ExternalVst3!,
+                        _sampleRate,
+                        setting.Id)));
             }
             catch (Exception exception)
             {
@@ -135,6 +150,7 @@ internal sealed class AudioEffectRackProcessor : IDisposable
     }
 
     private sealed record ExternalEffect(
+        string Id,
         float Mix,
         IsolatedVst3EffectProcessor Processor);
 }
@@ -165,6 +181,8 @@ internal sealed class AudioEffectRackSampleProvider : ISampleProvider, IDisposab
     public WaveFormat WaveFormat { get; }
     public string? Warning => _processor.Warning;
     public uint LatencySamples => _processor.LatencySamples;
+    public Task<Vst3EffectEditorResult>? TryOpenEditorAsync(string slotId) =>
+        _processor.TryOpenEditorAsync(slotId);
 
     public int Read(Span<float> buffer)
     {

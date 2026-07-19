@@ -6,6 +6,32 @@ namespace DrumPracticeStudio.Tests;
 public sealed class AudioInputChannelItemTests
 {
     [TestMethod]
+    public void EffectSlot_CanOpenEditorOnlyWhenPluginIsSelectedAndEnabled()
+    {
+        var slot = new AudioEffectSlotItem(AudioEffectSlotSetting.Create(
+            AudioEffectKind.ExternalVst3));
+
+        Assert.IsFalse(slot.CanOpenEditor);
+
+        slot.ExternalVst3 = new Vst3EffectReference(
+            @"C:\VST3\Test.vst3",
+            "Test",
+            "00112233445566778899AABBCCDDEEFF",
+            "Audio Module Class",
+            "Test Effect",
+            "Test Vendor",
+            "1",
+            "3.7",
+            "Fx|Dynamics");
+
+        Assert.IsTrue(slot.CanOpenEditor);
+
+        slot.IsEnabled = false;
+
+        Assert.IsFalse(slot.CanOpenEditor);
+    }
+
+    [TestMethod]
     public void DisplayName_DisabledChannelUsesSafeLabel()
     {
         var channel = new AudioInputChannelItem(null, "ignored");

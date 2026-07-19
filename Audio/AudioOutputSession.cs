@@ -436,6 +436,10 @@ internal sealed class AudioOutputSession : IDisposable
         _asioDuplexRenderer?.SetMasterEffects(effects, bypassed);
     }
 
+    public Task<Vst3EffectEditorResult>? TryOpenEffectEditorAsync(string slotId) =>
+        _asioDuplexRenderer?.TryOpenEffectEditorAsync(slotId) ??
+        _masterEffectRack?.TryOpenEditorAsync(slotId);
+
     public void Dispose()
     {
         if (_disposed)
@@ -600,6 +604,18 @@ internal sealed class AudioOutputSession : IDisposable
             IReadOnlyList<AudioEffectSlotSetting> effects,
             bool bypassed) =>
             _masterEffects.SetEffects(effects, bypassed);
+
+        public Task<Vst3EffectEditorResult>? TryOpenEffectEditorAsync(string slotId)
+        {
+            foreach (var processor in _processors)
+            {
+                if (processor.TryOpenEditorAsync(slotId) is { } request)
+                {
+                    return request;
+                }
+            }
+            return _masterEffects.TryOpenEditorAsync(slotId);
+        }
 
         public void Process(in AsioProcessBuffers buffers)
         {

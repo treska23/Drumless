@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using DrumPracticeStudio.Models;
@@ -14,7 +16,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
     private readonly Process _process;
     private readonly BinaryWriter _writer;
     private readonly BinaryReader _reader;
-    private readonly Channel<AudioPacket> _input;
+    private readonly Channel<BridgeRequest> _input;
     private readonly ConcurrentQueue<AudioPacket> _output = new();
     private readonly CancellationTokenSource _cancellation = new();
     private readonly Task _bridge;
@@ -27,17 +29,19 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         BinaryWriter writer,
         BinaryReader reader,
         Vst3EffectReference reference,
-        uint pluginLatencySamples)
+        uint pluginLatencySamples,
+        bool hasEditor)
     {
         _process = process;
         _writer = writer;
         _reader = reader;
         Reference = reference;
         PluginLatencySamples = pluginLatencySamples;
-        _input = Channel.CreateBounded<AudioPacket>(new BoundedChannelOptions(3)
+        HasEditor = hasEditor;
+        _input = Channel.CreateBounded<BridgeRequest>(new BoundedChannelOptions(4)
         {
             SingleReader = true,
-            SingleWriter = true,
+            SingleWriter = false,
             FullMode = BoundedChannelFullMode.Wait
         });
         _bridge = Task.Run(BridgeAsync);
@@ -45,6 +49,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
 
     public Vst3EffectReference Reference { get; }
     public uint PluginLatencySamples { get; }
+    public bool HasEditor { get; }
     public uint TotalLatencySamples =>
         PluginLatencySamples + (uint)Math.Max(0, Volatile.Read(ref _pipelineFrames));
     public string? Failure => Volatile.Read(ref _failure);
@@ -52,7 +57,8 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
 
     public static IsolatedVst3EffectProcessor Start(
         Vst3EffectReference reference,
-        int sampleRate)
+        int sampleRate,
+        string slotId)
     {
         ArgumentNullException.ThrowIfNull(reference);
         var executable = Environment.ProcessPath;
@@ -74,7 +80,8 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             sampleRate,
             AudioLatencySettings.VstMaxBlockSize,
             readyPath,
-            diagnosticPath);
+            diagnosticPath,
+            GetAutomaticStatePath(slotId, reference));
         File.WriteAllText(configurationPath, JsonSerializer.Serialize(configuration));
 
         var startInfo = new ProcessStartInfo(executable)
@@ -129,7 +136,8 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
                 new BinaryWriter(process.StandardInput.BaseStream),
                 new BinaryReader(process.StandardOutput.BaseStream),
                 reference,
-                ready.LatencySamples);
+                ready.LatencySamples,
+                ready.HasEditor);
         }
         catch
         {
@@ -180,6 +188,42 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         Submit(buffer, frames);
     }
 
+    public async Task<Vst3EffectEditorResult> OpenEditorAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsAvailable)
+        {
+            return new Vst3EffectEditorResult(
+                false,
+                Failure ?? $"{Reference.Name} no está activo.");
+        }
+        if (!HasEditor)
+        {
+            return new Vst3EffectEditorResult(
+                false,
+                $"{Reference.Name} no proporciona una interfaz VST3 compatible.");
+        }
+
+        var completion = new TaskCompletionSource<Vst3EffectEditorResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            await _input.Writer.WriteAsync(
+                new ControlRequest(Vst3EffectRuntimeProtocol.OpenEditorCommand, completion),
+                cancellationToken);
+            return await completion.Task.WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+        }
+        catch (Exception exception) when (exception is
+            ChannelClosedException or
+            TimeoutException or
+            OperationCanceledException)
+        {
+            return new Vst3EffectEditorResult(
+                false,
+                $"No se pudo abrir la interfaz de {Reference.Name}: {exception.Message}");
+        }
+    }
+
     private void MixAvailableOutput(Span<float> samples, int channels, float wetMix)
     {
         if (_output.TryDequeue(out var processed))
@@ -225,7 +269,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
     private void Submit(float[] buffer, int frames)
     {
         Volatile.Write(ref _pipelineFrames, frames);
-        if (!_input.Writer.TryWrite(new AudioPacket(buffer, frames)))
+        if (!_input.Writer.TryWrite(new AudioRequest(buffer, frames)))
         {
             ArrayPool<float>.Shared.Return(buffer);
         }
@@ -239,20 +283,38 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         }
         _input.Writer.TryComplete();
         _cancellation.Cancel();
+        var bridgeStopped = false;
         try
         {
-            _writer.Write(0);
-            _writer.Flush();
+            bridgeStopped = _bridge.Wait(1_000);
         }
         catch
         {
         }
-        try
+        if (!bridgeStopped)
         {
-            _bridge.Wait(1_000);
+            try
+            {
+                if (!_process.HasExited)
+                {
+                    _process.Kill(entireProcessTree: true);
+                }
+                bridgeStopped = _bridge.Wait(1_000);
+            }
+            catch
+            {
+            }
         }
-        catch
+        else
         {
+            try
+            {
+                _writer.Write(0);
+                _writer.Flush();
+            }
+            catch
+            {
+            }
         }
         while (_output.TryDequeue(out var packet))
         {
@@ -262,7 +324,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         _reader.Dispose();
         try
         {
-            if (!_process.HasExited && !_process.WaitForExit(1_000))
+            if (!_process.HasExited && !_process.WaitForExit(3_000))
             {
                 _process.Kill(entireProcessTree: true);
             }
@@ -278,31 +340,16 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
     {
         try
         {
-            await foreach (var packet in _input.Reader.ReadAllAsync(_cancellation.Token))
+            await foreach (var request in _input.Reader.ReadAllAsync(_cancellation.Token))
             {
-                try
+                switch (request)
                 {
-                    _writer.Write(packet.Frames);
-                    for (var index = 0; index < packet.Frames * 2; index++)
-                    {
-                        _writer.Write(packet.Buffer[index]);
-                    }
-                    _writer.Flush();
-                    var outputFrames = _reader.ReadInt32();
-                    var outputBuffer = ArrayPool<float>.Shared.Rent(outputFrames * 2);
-                    for (var index = 0; index < outputFrames * 2; index++)
-                    {
-                        outputBuffer[index] = _reader.ReadSingle();
-                    }
-                    _output.Enqueue(new AudioPacket(outputBuffer, outputFrames));
-                    while (_output.Count > 2 && _output.TryDequeue(out var stale))
-                    {
-                        ArrayPool<float>.Shared.Return(stale.Buffer);
-                    }
-                }
-                finally
-                {
-                    ArrayPool<float>.Shared.Return(packet.Buffer);
+                    case AudioRequest audio:
+                        ProcessAudioRequest(audio);
+                        break;
+                    case ControlRequest control:
+                        ProcessControlRequest(control);
+                        break;
                 }
             }
         }
@@ -315,6 +362,91 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
                 ref _failure,
                 $"{Reference.Name} quedó en bypass: {exception.Message}");
         }
+        finally
+        {
+            while (_input.Reader.TryRead(out var pending))
+            {
+                switch (pending)
+                {
+                    case AudioRequest audio:
+                        ArrayPool<float>.Shared.Return(audio.Buffer);
+                        break;
+                    case ControlRequest control:
+                        control.Completion.TrySetResult(new Vst3EffectEditorResult(
+                            false,
+                            $"{Reference.Name} se cerró antes de abrir su interfaz."));
+                        break;
+                }
+            }
+        }
+    }
+
+    private void ProcessAudioRequest(AudioRequest packet)
+    {
+        try
+        {
+            _writer.Write(packet.Frames);
+            for (var index = 0; index < packet.Frames * 2; index++)
+            {
+                _writer.Write(packet.Buffer[index]);
+            }
+            _writer.Flush();
+            var outputFrames = _reader.ReadInt32();
+            var outputBuffer = ArrayPool<float>.Shared.Rent(outputFrames * 2);
+            for (var index = 0; index < outputFrames * 2; index++)
+            {
+                outputBuffer[index] = _reader.ReadSingle();
+            }
+            _output.Enqueue(new AudioPacket(outputBuffer, outputFrames));
+            while (_output.Count > 2 && _output.TryDequeue(out var stale))
+            {
+                ArrayPool<float>.Shared.Return(stale.Buffer);
+            }
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(packet.Buffer);
+        }
+    }
+
+    private void ProcessControlRequest(ControlRequest request)
+    {
+        try
+        {
+            _writer.Write(request.Command);
+            _writer.Flush();
+            var succeeded = _reader.ReadBoolean();
+            var message = _reader.ReadString();
+            request.Completion.TrySetResult(new Vst3EffectEditorResult(succeeded, message));
+        }
+        catch (Exception exception)
+        {
+            request.Completion.TrySetResult(new Vst3EffectEditorResult(
+                false,
+                $"No se pudo controlar {Reference.Name}: {exception.Message}"));
+            throw;
+        }
+    }
+
+    private static string GetAutomaticStatePath(
+        string slotId,
+        Vst3EffectReference reference)
+    {
+        var identity = Encoding.UTF8.GetBytes(
+            $"{reference.ModulePath}|{reference.ClassId}|{reference.PresetPath}");
+        var fingerprint = Convert.ToHexString(SHA256.HashData(identity))[..16];
+        var safeSlotId = string.Concat(slotId.Where(char.IsLetterOrDigit));
+        if (string.IsNullOrWhiteSpace(safeSlotId))
+        {
+            safeSlotId = "slot";
+        }
+        else if (safeSlotId.Length > 64)
+        {
+            safeSlotId = safeSlotId[..64];
+        }
+        return Path.Combine(
+            AppPaths.VstStates,
+            $"effect-{safeSlotId}-{fingerprint}.vstpreset");
     }
 
     private static void TryDeleteDirectory(string path)
@@ -328,5 +460,12 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         }
     }
 
+    private abstract record BridgeRequest;
+    private sealed record AudioRequest(float[] Buffer, int Frames) : BridgeRequest;
+    private sealed record ControlRequest(
+        int Command,
+        TaskCompletionSource<Vst3EffectEditorResult> Completion) : BridgeRequest;
     private sealed record AudioPacket(float[] Buffer, int Frames);
 }
+
+internal sealed record Vst3EffectEditorResult(bool Succeeded, string Message);

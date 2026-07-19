@@ -151,6 +151,17 @@ internal sealed class AudioInputProfileProcessor : IDisposable
         }
     }
 
+    public Task<Vst3EffectEditorResult>? TryOpenEditorAsync(string slotId)
+    {
+        lock (_externalGate)
+        {
+            return _externalEffects
+                .FirstOrDefault(effect =>
+                    string.Equals(effect.Id, slotId, StringComparison.Ordinal))
+                ?.Processor.OpenEditorAsync();
+        }
+    }
+
     public void Dispose()
     {
         lock (_externalGate)
@@ -206,7 +217,8 @@ internal sealed class AudioInputProfileProcessor : IDisposable
                         (float)setting.Mix,
                         IsolatedVst3EffectProcessor.Start(
                             setting.ExternalVst3!,
-                            _sampleRate)));
+                            _sampleRate,
+                            setting.Id)));
                 }
                 catch (Exception exception)
                 {

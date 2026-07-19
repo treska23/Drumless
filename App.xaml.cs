@@ -43,8 +43,7 @@ public partial class App : Application
             string.Equals(e.Args[0], Vst3EffectRuntimeProtocol.Argument, StringComparison.Ordinal))
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            var exitCode = Vst3EffectRuntimeProtocol.Execute(e.Args[1]);
-            Shutdown(exitCode);
+            Vst3EffectRuntimeProtocol.Start(e.Args[1]);
             return;
         }
 
