@@ -43,6 +43,7 @@ public sealed class StudioStateStoreTests
                     "Fx|Guitar")
             ],
             HasScannedVst3Effects = true,
+            Vst3EffectGroupingMode = Vst3EffectGroupingMode.EffectType,
             AudioInputMonitors =
             [
                 new AudioInputMonitorSetting(
@@ -282,6 +283,9 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(
             "4E545356246967547569746172207269",
             loaded.Vst3EffectCatalog[0].ClassId);
+        Assert.AreEqual(
+            Vst3EffectGroupingMode.EffectType,
+            loaded.Vst3EffectGroupingMode);
         Assert.AreEqual("MPK mini 3", loaded.MidiDeviceName);
         Assert.AreEqual(2, loaded.MidiDeviceIndex.GetValueOrDefault());
         Assert.IsTrue(loaded.AutoConnectMidi);

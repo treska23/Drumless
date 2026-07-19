@@ -47,6 +47,8 @@ public sealed class StudioState
     public List<string> Vst3EffectFolders { get; set; } = [];
     public List<Vst3EffectReference> Vst3EffectCatalog { get; set; } = [];
     public bool HasScannedVst3Effects { get; set; }
+    public Vst3EffectGroupingMode Vst3EffectGroupingMode { get; set; } =
+        Vst3EffectGroupingMode.VendorThenEffectType;
     public string? MidiDeviceName { get; set; }
     public int? MidiDeviceIndex { get; set; }
     public bool AutoConnectMidi { get; set; } = true;

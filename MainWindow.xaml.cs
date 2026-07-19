@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Data;
+using System.Windows.Threading;
 using DrumPracticeStudio.Infrastructure;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
@@ -39,6 +40,7 @@ public partial class MainWindow : Window
     private PlaylistWindow? _playlistWindow;
     private ChordSheetWindow? _chordSheetWindow;
     private readonly HashSet<ComboBox> _configuredVstEffectPickers = [];
+    private readonly Dictionary<ComboBox, int> _vstEffectFilterVersions = [];
 
     private void OnMixerFaderPreviewMouseLeftButtonDown(
         object sender,
@@ -1128,16 +1130,9 @@ public partial class MainWindow : Window
         }
 
         var view = new ListCollectionView(effects);
-        view.SortDescriptions.Add(
-            new SortDescription(nameof(Vst3EffectItem.Vendor), ListSortDirection.Ascending));
-        view.SortDescriptions.Add(
-            new SortDescription(nameof(Vst3EffectItem.EffectType), ListSortDirection.Ascending));
-        view.SortDescriptions.Add(
-            new SortDescription(nameof(Vst3EffectItem.DisplayName), ListSortDirection.Ascending));
-        view.GroupDescriptions.Add(
-            new PropertyGroupDescription(nameof(Vst3EffectItem.Vendor)));
-        view.GroupDescriptions.Add(
-            new PropertyGroupDescription(nameof(Vst3EffectItem.EffectType)));
+        ApplyVst3EffectGrouping(
+            view,
+            _viewModel.SelectedVst3EffectGroupingOption.Mode);
         comboBox.ItemsSource = view;
 
         if (comboBox.Template.FindName("PART_EditableTextBox", comboBox) is TextBox searchBox)
@@ -1145,16 +1140,115 @@ public partial class MainWindow : Window
             searchBox.TextChanged += (_, _) =>
             {
                 var query = searchBox.Text;
-                view.Filter = item =>
-                    item is Vst3EffectItem effect &&
-                    effect.MatchesSearch(query);
-                view.Refresh();
-                if (!comboBox.IsDropDownOpen && searchBox.IsKeyboardFocusWithin)
+                QueueVst3EffectFilter(comboBox, view, query, openDropDown: true);
+            };
+        }
+    }
+
+    private void OnVst3EffectGroupingModeChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox
+            {
+                SelectedItem: Vst3EffectGroupingOption option
+            })
+        {
+            return;
+        }
+
+        foreach (var picker in _configuredVstEffectPickers.ToArray())
+        {
+            if (picker.ItemsSource is ListCollectionView view)
+            {
+                ApplyVst3EffectGrouping(view, option.Mode);
+            }
+        }
+    }
+
+    private static void ApplyVst3EffectGrouping(
+        ListCollectionView view,
+        Vst3EffectGroupingMode mode)
+    {
+        using (view.DeferRefresh())
+        {
+            view.SortDescriptions.Clear();
+            view.GroupDescriptions.Clear();
+            switch (mode)
+            {
+                case Vst3EffectGroupingMode.EffectType:
+                    view.SortDescriptions.Add(new SortDescription(
+                        nameof(Vst3EffectItem.EffectType),
+                        ListSortDirection.Ascending));
+                    view.SortDescriptions.Add(new SortDescription(
+                        nameof(Vst3EffectItem.Vendor),
+                        ListSortDirection.Ascending));
+                    view.GroupDescriptions.Add(new PropertyGroupDescription(
+                        nameof(Vst3EffectItem.EffectType)));
+                    break;
+                case Vst3EffectGroupingMode.Vendor:
+                    view.SortDescriptions.Add(new SortDescription(
+                        nameof(Vst3EffectItem.Vendor),
+                        ListSortDirection.Ascending));
+                    view.SortDescriptions.Add(new SortDescription(
+                        nameof(Vst3EffectItem.EffectType),
+                        ListSortDirection.Ascending));
+                    view.GroupDescriptions.Add(new PropertyGroupDescription(
+                        nameof(Vst3EffectItem.Vendor)));
+                    break;
+                case Vst3EffectGroupingMode.VendorThenEffectType:
+                    view.SortDescriptions.Add(new SortDescription(
+                        nameof(Vst3EffectItem.Vendor),
+                        ListSortDirection.Ascending));
+                    view.SortDescriptions.Add(new SortDescription(
+                        nameof(Vst3EffectItem.EffectType),
+                        ListSortDirection.Ascending));
+                    view.GroupDescriptions.Add(new PropertyGroupDescription(
+                        nameof(Vst3EffectItem.Vendor)));
+                    view.GroupDescriptions.Add(new PropertyGroupDescription(
+                        nameof(Vst3EffectItem.EffectType)));
+                    break;
+                case Vst3EffectGroupingMode.None:
+                    break;
+            }
+            view.SortDescriptions.Add(new SortDescription(
+                nameof(Vst3EffectItem.DisplayName),
+                ListSortDirection.Ascending));
+        }
+    }
+
+    private void QueueVst3EffectFilter(
+        ComboBox comboBox,
+        ListCollectionView view,
+        string? query,
+        bool openDropDown)
+    {
+        var version = _vstEffectFilterVersions.TryGetValue(comboBox, out var current)
+            ? current + 1
+            : 1;
+        _vstEffectFilterVersions[comboBox] = version;
+        _ = comboBox.Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() =>
+            {
+                if (!_vstEffectFilterVersions.TryGetValue(comboBox, out var latest) ||
+                    latest != version ||
+                    !ReferenceEquals(comboBox.ItemsSource, view))
+                {
+                    return;
+                }
+
+                view.Filter = string.IsNullOrWhiteSpace(query)
+                    ? null
+                    : item => item is Vst3EffectItem effect &&
+                              effect.MatchesSearch(query);
+                if (openDropDown &&
+                    !comboBox.IsDropDownOpen &&
+                    comboBox.IsKeyboardFocusWithin)
                 {
                     comboBox.IsDropDownOpen = true;
                 }
-            };
-        }
+            }));
     }
 
     private void OnVst3EffectPickerDropDownOpened(object sender, EventArgs e)
@@ -1175,14 +1269,12 @@ public partial class MainWindow : Window
                     selectedEffect.DisplayLabel,
                     StringComparison.CurrentCulture))
             {
-                view.Filter = null;
-                view.Refresh();
+                QueueVst3EffectFilter(comboBox, view, null, openDropDown: false);
                 searchBox.SelectAll();
             }
             else if (string.IsNullOrWhiteSpace(searchBox.Text))
             {
-                view.Filter = null;
-                view.Refresh();
+                QueueVst3EffectFilter(comboBox, view, null, openDropDown: false);
             }
         }
     }

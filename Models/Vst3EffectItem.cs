@@ -2,6 +2,18 @@ using NAudio.Vst3;
 
 namespace DrumPracticeStudio.Models;
 
+public enum Vst3EffectGroupingMode
+{
+    EffectType,
+    Vendor,
+    VendorThenEffectType,
+    None
+}
+
+public sealed record Vst3EffectGroupingOption(
+    Vst3EffectGroupingMode Mode,
+    string Label);
+
 public sealed class Vst3EffectItem(
     Vst3ModuleInfo module,
     Vst3ClassInfo pluginClass)

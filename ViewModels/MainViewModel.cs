@@ -84,6 +84,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly List<AudioInputMonitorSetting> _preferredAudioInputMonitors = [];
     private readonly List<string> _vst3EffectFolders = [];
     private bool _hasScannedVst3Effects;
+    private Vst3EffectGroupingOption _selectedVst3EffectGroupingOption = null!;
     private string? _preferredMidiDeviceName;
     private int? _preferredMidiDeviceIndex;
     private bool _autoConnectMidi = true;
@@ -124,6 +125,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         MappingRows = [];
         Vst3Instruments = [];
         Vst3Effects = [];
+        Vst3EffectGroupingOptions =
+        [
+            new(Vst3EffectGroupingMode.EffectType, "Tipo de efecto"),
+            new(Vst3EffectGroupingMode.Vendor, "Fabricante"),
+            new(Vst3EffectGroupingMode.VendorThenEffectType, "Fabricante → tipo"),
+            new(Vst3EffectGroupingMode.None, "Sin agrupar · A–Z")
+        ];
+        _selectedVst3EffectGroupingOption = Vst3EffectGroupingOptions[2];
         Vst3Programs = [];
         Tracks = _trackLibrary.Tracks;
         VisibleTracks = [];
@@ -273,6 +282,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<MidiMappingRow> MappingRows { get; }
     public ObservableCollection<Vst3InstrumentItem> Vst3Instruments { get; }
     public ObservableCollection<Vst3EffectItem> Vst3Effects { get; }
+    public IReadOnlyList<Vst3EffectGroupingOption> Vst3EffectGroupingOptions { get; }
     public ObservableCollection<Vst3ProgramItem> Vst3Programs { get; }
     public ObservableCollection<LocalTrack> Tracks { get; }
 
@@ -1573,6 +1583,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         1 => "1 plugin guardado y disponible",
         _ => $"{Vst3Effects.Count} plugins guardados y disponibles"
     };
+
+    public Vst3EffectGroupingOption SelectedVst3EffectGroupingOption
+    {
+        get => _selectedVst3EffectGroupingOption;
+        set
+        {
+            var normalized = value ?? Vst3EffectGroupingOptions.First(
+                option => option.Mode == Vst3EffectGroupingMode.VendorThenEffectType);
+            if (SetProperty(ref _selectedVst3EffectGroupingOption, normalized) &&
+                !_isInitializingTrackWorkspace)
+            {
+                ScheduleSettingsSave();
+            }
+        }
+    }
 
     private void AddInputEffectSlot(AudioInputMonitorItem? monitor)
     {

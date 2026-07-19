@@ -250,6 +250,12 @@ public sealed partial class MainViewModel
             _vst3EffectFolders.AddRange(state.Vst3EffectFolders);
             _hasScannedVst3Effects = state.HasScannedVst3Effects;
             RestoreVst3EffectCatalog(state);
+            SelectedVst3EffectGroupingOption =
+                Vst3EffectGroupingOptions.FirstOrDefault(
+                    option => option.Mode == state.Vst3EffectGroupingMode)
+                ?? Vst3EffectGroupingOptions.First(
+                    option => option.Mode ==
+                              Vst3EffectGroupingMode.VendorThenEffectType);
             OnPropertyChanged(nameof(Vst3EffectFoldersLabel));
             foreach (var bus in AudioEffectBuses)
             {
@@ -1355,6 +1361,7 @@ public sealed partial class MainViewModel
                     .Select(effect => effect.ToReference())
                     .ToList(),
                 HasScannedVst3Effects = _hasScannedVst3Effects,
+                Vst3EffectGroupingMode = SelectedVst3EffectGroupingOption.Mode,
                 MidiDeviceName = _preferredMidiDeviceName,
                 MidiDeviceIndex = _preferredMidiDeviceIndex,
                 AutoConnectMidi = _autoConnectMidi,

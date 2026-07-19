@@ -3,11 +3,15 @@ param(
     [int] $ProcessId = 0,
     [switch] $VerifyVstScanIndicator,
     [switch] $SkipAudioTrigger,
-    [int] $ExpectedVstCatalogMinimum = 0
+    [int] $ExpectedVstInputComboMinimum = 0,
+    [string] $VstInputComboSearchQuery = "",
+    [int] $ExpectedVstInputComboSearchResults = -1,
+    [string] $ExpectedVstGroupName = ""
 )
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
 using System.Runtime.InteropServices;
 public static class NativeMouse {
@@ -239,13 +243,15 @@ if (-not (Find-ElementByAutomationId "ScanVstEffectsButton") -or
     -not (Find-ElementByAutomationId "ChooseVstEffectFolderButton")) {
     throw "La página de dispositivos no expuso la búsqueda e importación de plugins VST3."
 }
-if (-not (Find-ElementByAutomationId "Vst3EffectCatalogPicker") -or
-    -not (Find-ElementByAutomationId "RemoveVstEffectFromCatalogButton")) {
-    throw "La página de dispositivos no expuso el catálogo VST3 persistente."
+if (-not (Find-ElementByAutomationId "Vst3EffectGroupingModePicker")) {
+    throw "La página de dispositivos no expuso el criterio de clasificación VST3."
 }
-$catalogPicker = Find-ElementByAutomationId "Vst3EffectCatalogPicker"
+$catalogPicker = Find-ElementByName "Buscar y elegir efecto VST3 externo"
 $catalogItems = @()
-if ($ExpectedVstCatalogMinimum -gt 0) {
+if ($ExpectedVstInputComboMinimum -gt 0) {
+    if (-not $catalogPicker) {
+        throw "No se encontró un combo VST3 perteneciente a una entrada o bus."
+    }
     $expandPattern = $catalogPicker.GetCurrentPattern(
         [System.Windows.Automation.ExpandCollapsePattern]::Pattern
     )
@@ -255,10 +261,62 @@ if ($ExpectedVstCatalogMinimum -gt 0) {
         [System.Windows.Automation.TreeScope]::Descendants,
         $listItemCondition
     ) | ForEach-Object { $_.Current.Name })
-    $expandPattern.Collapse()
-    if ($catalogItems.Count -lt $ExpectedVstCatalogMinimum) {
-        throw "El catálogo VST3 restauró $($catalogItems.Count) plugins; se esperaban al menos $ExpectedVstCatalogMinimum."
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedVstGroupName)) {
+        $groupCondition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Group
+        )
+        $groupNames = @($catalogPicker.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $groupCondition
+        ) | ForEach-Object { $_.Current.Name })
+        if ($groupNames -notcontains $ExpectedVstGroupName) {
+            throw "El combo VST3 no mostró el grupo esperado '$ExpectedVstGroupName'. Grupos: $($groupNames -join ', ')."
+        }
     }
+    $expandPattern.Collapse()
+    if ($catalogItems.Count -lt $ExpectedVstInputComboMinimum) {
+        throw "El combo del canal restauró $($catalogItems.Count) plugins; se esperaban al menos $ExpectedVstInputComboMinimum."
+    }
+}
+$catalogSearchItems = @()
+if (-not [string]::IsNullOrWhiteSpace($VstInputComboSearchQuery)) {
+    $editCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Edit
+    )
+    $catalogEditor = $catalogPicker.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $editCondition
+    )
+    if (-not $catalogEditor) {
+        throw "El combo VST3 no expuso su campo de búsqueda editable."
+    }
+    $catalogValue = $catalogEditor.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )
+    $expandPattern = $catalogPicker.GetCurrentPattern(
+        [System.Windows.Automation.ExpandCollapsePattern]::Pattern
+    )
+    if ($expandPattern.Current.ExpandCollapseState -ne
+        [System.Windows.Automation.ExpandCollapseState]::Expanded) {
+        $expandPattern.Expand()
+        Start-Sleep -Milliseconds 250
+    }
+    $catalogEditor.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait("^a")
+    [System.Windows.Forms.SendKeys]::SendWait($VstInputComboSearchQuery)
+    Start-Sleep -Milliseconds 500
+    $catalogSearchItems = @($catalogPicker.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $listItemCondition
+    ) | ForEach-Object { $_.Current.Name })
+    $expandPattern.Collapse()
+    if ($ExpectedVstInputComboSearchResults -ge 0 -and
+        $catalogSearchItems.Count -ne $ExpectedVstInputComboSearchResults) {
+        throw "La búsqueda VST3 devolvió $($catalogSearchItems.Count) resultados; se esperaban $ExpectedVstInputComboSearchResults."
+    }
+    $catalogValue.SetValue("")
 }
 if (-not (Find-ElementByAutomationId "AudioInputStatusText")) {
     throw "La página de dispositivos no expuso el estado de búsqueda de plugins VST3."
@@ -271,7 +329,9 @@ if ($inputFader) {
     $inputRange = $inputFader.GetCurrentPattern(
         [System.Windows.Automation.RangeValuePattern]::Pattern
     )
-    $inputRange.SetValue(0.5)
+    $inputMiddle = $inputRange.Current.Minimum +
+        (($inputRange.Current.Maximum - $inputRange.Current.Minimum) / 2)
+    $inputRange.SetValue($inputMiddle)
     Start-Sleep -Milliseconds 150
     $inputBounds = $inputFader.Current.BoundingRectangle
     $inputX = [int]($inputBounds.Left + ($inputBounds.Width / 2))
@@ -281,11 +341,16 @@ if ($inputFader) {
     [NativeMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 200
     $inputFaderRailClickValue = $inputRange.Current.Value
-    if ($inputFaderRailClickValue -le 0.6 -or $inputFaderRailClickValue -ge 0.95) {
+    $inputExpectedMinimum = $inputRange.Current.Minimum +
+        (($inputRange.Current.Maximum - $inputRange.Current.Minimum) * 0.6)
+    $inputExpectedMaximum = $inputRange.Current.Minimum +
+        (($inputRange.Current.Maximum - $inputRange.Current.Minimum) * 0.95)
+    if ($inputFaderRailClickValue -le $inputExpectedMinimum -or
+        $inputFaderRailClickValue -ge $inputExpectedMaximum) {
         throw "El clic en el rail del fader de entrada produjo un valor incorrecto: $inputFaderRailClickValue."
     }
 
-    $inputRange.SetValue(0.5)
+    $inputRange.SetValue($inputMiddle)
     Start-Sleep -Milliseconds 150
     $inputDragStartY = [int]($inputBounds.Top + ($inputBounds.Height / 2))
     [NativeMouse]::SetCursorPos($inputX, $inputDragStartY) | Out-Null
@@ -296,7 +361,8 @@ if ($inputFader) {
     [NativeMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 200
     $inputFaderDraggedValue = $inputRange.Current.Value
-    if ($inputFaderDraggedValue -le 0.6 -or $inputFaderDraggedValue -ge 0.95) {
+    if ($inputFaderDraggedValue -le $inputExpectedMinimum -or
+        $inputFaderDraggedValue -ge $inputExpectedMaximum) {
         throw "El tirador del fader de entrada no respondió al arrastre: $inputFaderDraggedValue."
     }
 }
@@ -344,7 +410,8 @@ $padResult = if ($SkipAudioTrigger) { "Omitido" } else { $kick.Current.Name }
     YouTubeControlsVerified = $requiredYouTubeControls.Count
     InputFaderRailClickValue = $inputFaderRailClickValue
     InputFaderDraggedValue = $inputFaderDraggedValue
-    VstCatalogItems = $catalogItems -join " | "
+    VstInputComboItems = $catalogItems -join " | "
+    VstInputComboSearchItems = $catalogSearchItems -join " | "
     VstScanIndicatorVerified = $vstScanIndicatorVerified
     MidiProfileVerified = $mapping.Current.Name
 }

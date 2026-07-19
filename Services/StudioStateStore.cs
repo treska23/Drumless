@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -149,6 +149,11 @@ public sealed class StudioStateStore
                 .Select(group => group.First())
                 .ToList(),
             HasScannedVst3Effects = document.HasScannedVst3Effects ?? false,
+            Vst3EffectGroupingMode =
+                document.Vst3EffectGroupingMode is { } groupingMode &&
+                Enum.IsDefined(groupingMode)
+                    ? groupingMode
+                    : Vst3EffectGroupingMode.VendorThenEffectType,
             MidiDeviceName = string.IsNullOrWhiteSpace(document.MidiDeviceName)
                 ? null
                 : document.MidiDeviceName,
@@ -359,6 +364,9 @@ public sealed class StudioStateStore
             .Select(group => ToVst3EffectReferenceDto(group.First()))
             .ToList(),
         HasScannedVst3Effects = state.HasScannedVst3Effects,
+        Vst3EffectGroupingMode = Enum.IsDefined(state.Vst3EffectGroupingMode)
+            ? state.Vst3EffectGroupingMode
+            : Vst3EffectGroupingMode.VendorThenEffectType,
         AudioInputMonitors = state.AudioInputMonitors.Select(monitor => new AudioInputMonitorDto
         {
             ChannelIndex = monitor.ChannelIndex,
@@ -971,6 +979,7 @@ public sealed class StudioStateStore
         public List<string>? Vst3EffectFolders { get; set; }
         public List<Vst3EffectReferenceDto>? Vst3EffectCatalog { get; set; }
         public bool? HasScannedVst3Effects { get; set; }
+        public Vst3EffectGroupingMode? Vst3EffectGroupingMode { get; set; }
         public string? MidiDeviceName { get; set; }
         public int? MidiDeviceIndex { get; set; }
         public bool? AutoConnectMidi { get; set; }
