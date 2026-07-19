@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Windows;
+using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Views;
 using NAudio.Vst3;
@@ -12,7 +14,8 @@ internal sealed record Vst3EffectRuntimeConfiguration(
     int MaximumBlockFrames,
     string ReadyPath,
     string DiagnosticPath,
-    string? StatePath = null);
+    string? StatePath = null,
+    string? PipeName = null);
 
 internal sealed record Vst3EffectRuntimeReady(
     bool Ready,
@@ -73,11 +76,22 @@ internal static class Vst3EffectRuntimeProtocol
                 runtime.HasEditor));
 
             var activeRuntime = runtime;
+            if (string.IsNullOrWhiteSpace(activeConfiguration.PipeName))
+            {
+                throw new InvalidDataException("El efecto VST3 no recibió una tubería de audio dedicada.");
+            }
+            using var pipe = new NamedPipeClientStream(
+                ".",
+                activeConfiguration.PipeName,
+                PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+            await pipe.ConnectAsync(30_000);
             await Task.Run(() => RunMessageLoop(
                 activeRuntime,
-                Console.OpenStandardInput(),
-                Console.OpenStandardOutput(),
-                activeConfiguration.MaximumBlockFrames));
+                pipe,
+                pipe,
+                activeConfiguration.MaximumBlockFrames,
+                activeConfiguration.DiagnosticPath));
         }
         catch (Exception exception)
         {
@@ -114,12 +128,17 @@ internal static class Vst3EffectRuntimeProtocol
         EffectRuntime runtime,
         Stream input,
         Stream output,
-        int maximumBlockFrames)
+        int maximumBlockFrames,
+        string? diagnosticPath)
     {
         using var reader = new BinaryReader(input, System.Text.Encoding.UTF8, leaveOpen: true);
         using var writer = new BinaryWriter(output, System.Text.Encoding.UTF8, leaveOpen: true);
-        var inputBuffer = new float[Math.Max(1, maximumBlockFrames) * 2];
-        var outputBuffer = new float[Math.Max(1, maximumBlockFrames) * 2];
+        var hostInput = new float[Math.Max(1, maximumBlockFrames) * 2];
+        var pluginInput = new float[
+            Math.Max(1, maximumBlockFrames) * Math.Max(1, runtime.Plugin.InputChannelCount)];
+        var pluginOutput = new float[
+            Math.Max(1, maximumBlockFrames) * runtime.Plugin.OutputChannelCount];
+        var isFirstAudioBlock = true;
         while (true)
         {
             var message = reader.ReadInt32();
@@ -134,28 +153,105 @@ internal static class Vst3EffectRuntimeProtocol
             }
 
             var frames = message;
-            writer.Write(frames);
             var remaining = frames;
+            var wroteResponseHeader = false;
             while (remaining > 0)
             {
                 var chunkFrames = Math.Min(remaining, maximumBlockFrames);
                 var samples = chunkFrames * 2;
-                for (var index = 0; index < samples; index++)
+                reader.BaseStream.ReadExactly(MemoryMarshal.AsBytes(
+                    hostInput.AsSpan(0, samples)));
+                ConvertHostInput(
+                    hostInput.AsSpan(0, samples),
+                    pluginInput,
+                    chunkFrames,
+                    runtime.Plugin.InputChannelCount);
+                if (isFirstAudioBlock)
                 {
-                    inputBuffer[index] = reader.ReadSingle();
+                    WriteDiagnostic(
+                        diagnosticPath,
+                        $"Procesando primer bloque: {chunkFrames} frames, " +
+                        $"{runtime.Plugin.InputChannelCount}→{runtime.Plugin.OutputChannelCount} canales.");
                 }
                 runtime.Plugin.Process(
-                    inputBuffer.AsSpan(0, samples),
-                    outputBuffer.AsSpan(0, samples),
+                    pluginInput.AsSpan(0, chunkFrames * runtime.Plugin.InputChannelCount),
+                    pluginOutput.AsSpan(0, chunkFrames * runtime.Plugin.OutputChannelCount),
                     chunkFrames);
-                for (var index = 0; index < samples; index++)
+                if (isFirstAudioBlock)
                 {
-                    writer.Write(outputBuffer[index]);
+                    WriteDiagnostic(diagnosticPath, "Primer bloque procesado correctamente.");
+                    isFirstAudioBlock = false;
                 }
+                if (!wroteResponseHeader)
+                {
+                    writer.Write(frames);
+                    wroteResponseHeader = true;
+                }
+                WriteHostOutput(
+                    writer,
+                    pluginOutput,
+                    chunkFrames,
+                    runtime.Plugin.OutputChannelCount);
                 remaining -= chunkFrames;
             }
             writer.Flush();
         }
+    }
+
+    internal static void ConvertHostInput(
+        ReadOnlySpan<float> stereoInput,
+        Span<float> pluginInput,
+        int frames,
+        int pluginChannels)
+    {
+        if (pluginChannels == 1)
+        {
+            for (var frame = 0; frame < frames; frame++)
+            {
+                pluginInput[frame] =
+                    (stereoInput[frame * 2] + stereoInput[(frame * 2) + 1]) * 0.5f;
+            }
+            return;
+        }
+        stereoInput[..(frames * 2)].CopyTo(pluginInput);
+    }
+
+    internal static void ConvertPluginOutput(
+        ReadOnlySpan<float> pluginOutput,
+        Span<float> stereoOutput,
+        int frames,
+        int pluginChannels)
+    {
+        if (pluginChannels == 1)
+        {
+            for (var frame = 0; frame < frames; frame++)
+            {
+                var sample = pluginOutput[frame];
+                stereoOutput[frame * 2] = sample;
+                stereoOutput[(frame * 2) + 1] = sample;
+            }
+            return;
+        }
+        pluginOutput[..(frames * 2)].CopyTo(stereoOutput);
+    }
+
+    private static void WriteHostOutput(
+        BinaryWriter writer,
+        ReadOnlySpan<float> pluginOutput,
+        int frames,
+        int pluginChannels)
+    {
+        if (pluginChannels == 1)
+        {
+            for (var frame = 0; frame < frames; frame++)
+            {
+                writer.Write(pluginOutput[frame]);
+                writer.Write(pluginOutput[frame]);
+            }
+            return;
+        }
+        // Mono needs duplication above; stereo can be transferred as one contiguous block.
+        writer.Write(MemoryMarshal.AsBytes(pluginOutput[..(frames * 2)]));
     }
 
     private static void ExecuteControlCommand(
@@ -210,6 +306,11 @@ internal static class Vst3EffectRuntimeProtocol
 
     private static void WriteDiagnostic(string? path, Exception exception)
     {
+        WriteDiagnostic(path, exception.ToString());
+    }
+
+    private static void WriteDiagnostic(string? path, string message)
+    {
         if (string.IsNullOrWhiteSpace(path))
         {
             return;
@@ -219,7 +320,7 @@ internal static class Vst3EffectRuntimeProtocol
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.AppendAllText(
                 path,
-                $"{DateTimeOffset.Now:O} {exception}{Environment.NewLine}");
+                $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}");
         }
         catch
         {
@@ -290,11 +391,12 @@ internal static class Vst3EffectRuntimeProtocol
                     throw new InvalidOperationException(
                         $"{configuration.Effect.Name} es un instrumento, no un efecto.");
                 }
-                if (plugin.InputChannelCount != 2 || plugin.OutputChannelCount != 2)
+                if (plugin.InputChannelCount is not (1 or 2) ||
+                    plugin.OutputChannelCount is not (1 or 2))
                 {
                     throw new NotSupportedException(
                         $"{configuration.Effect.Name} expone {plugin.InputChannelCount} entrada(s) y " +
-                        $"{plugin.OutputChannelCount} salida(s); se necesita estéreo 2→2.");
+                        $"{plugin.OutputChannelCount} salida(s); sólo se admiten buses mono o estéreo.");
                 }
 
                 var loadPath = File.Exists(configuration.StatePath)

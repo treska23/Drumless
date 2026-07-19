@@ -39,13 +39,68 @@ public sealed class Vst3EffectRuntimeProtocolTests
             64,
             "ready.json",
             "effect.log",
-            "effect-state.vstpreset");
+            "effect-state.vstpreset",
+            "audio-pipe");
 
         var restored = JsonSerializer.Deserialize<Vst3EffectRuntimeConfiguration>(
             JsonSerializer.Serialize(configuration));
 
         Assert.IsNotNull(restored);
         Assert.AreEqual("effect-state.vstpreset", restored.StatePath);
+        Assert.AreEqual("audio-pipe", restored.PipeName);
+    }
+
+    [TestMethod]
+    public void ConvertHostInput_DownmixesStereoToMonoWithoutChangingLevel()
+    {
+        var stereo = new[] { 0.8f, 0.2f, -0.4f, 0.2f };
+        var mono = new float[2];
+
+        Vst3EffectRuntimeProtocol.ConvertHostInput(
+            stereo,
+            mono,
+            frames: 2,
+            pluginChannels: 1);
+
+        CollectionAssert.AreEqual(new[] { 0.5f, -0.1f }, mono);
+    }
+
+    [TestMethod]
+    public void ConvertPluginOutput_DuplicatesMonoIntoBothHostChannels()
+    {
+        var mono = new[] { 0.25f, -0.75f };
+        var stereo = new float[4];
+
+        Vst3EffectRuntimeProtocol.ConvertPluginOutput(
+            mono,
+            stereo,
+            frames: 2,
+            pluginChannels: 1);
+
+        CollectionAssert.AreEqual(
+            new[] { 0.25f, 0.25f, -0.75f, -0.75f },
+            stereo);
+    }
+
+    [TestMethod]
+    public void StereoConversions_PreserveEverySample()
+    {
+        var original = new[] { 0.1f, 0.2f, 0.3f, 0.4f };
+        var pluginInput = new float[4];
+        var hostOutput = new float[4];
+
+        Vst3EffectRuntimeProtocol.ConvertHostInput(
+            original,
+            pluginInput,
+            frames: 2,
+            pluginChannels: 2);
+        Vst3EffectRuntimeProtocol.ConvertPluginOutput(
+            pluginInput,
+            hostOutput,
+            frames: 2,
+            pluginChannels: 2);
+
+        CollectionAssert.AreEqual(original, hostOutput);
     }
 
     [TestMethod]

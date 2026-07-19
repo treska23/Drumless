@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
 
@@ -13,28 +15,33 @@ namespace DrumPracticeStudio.Audio;
 internal sealed class IsolatedVst3EffectProcessor : IDisposable
 {
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(35);
+    private static readonly TimeSpan AudioBlockTimeout = TimeSpan.FromSeconds(2);
     private readonly Process _process;
+    private readonly Stream _bridgeStream;
     private readonly BinaryWriter _writer;
     private readonly BinaryReader _reader;
     private readonly Channel<BridgeRequest> _input;
     private readonly ConcurrentQueue<AudioPacket> _output = new();
     private readonly CancellationTokenSource _cancellation = new();
     private readonly Task _bridge;
+    private readonly Timer _watchdog;
     private int _disposed;
     private int _pipelineFrames;
+    private int _suspiciousOutputBlocks;
     private string? _failure;
 
     private IsolatedVst3EffectProcessor(
         Process process,
-        BinaryWriter writer,
-        BinaryReader reader,
+        Stream bridgeStream,
         Vst3EffectReference reference,
         uint pluginLatencySamples,
         bool hasEditor)
     {
         _process = process;
-        _writer = writer;
-        _reader = reader;
+        _bridgeStream = bridgeStream;
+        var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        _writer = new BinaryWriter(bridgeStream, utf8, leaveOpen: true);
+        _reader = new BinaryReader(bridgeStream, utf8, leaveOpen: true);
         Reference = reference;
         PluginLatencySamples = pluginLatencySamples;
         HasEditor = hasEditor;
@@ -44,6 +51,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.Wait
         });
+        _watchdog = new Timer(OnAudioBlockTimeout);
         _bridge = Task.Run(BridgeAsync);
     }
 
@@ -73,6 +81,13 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         Directory.CreateDirectory(root);
         var configurationPath = Path.Combine(root, "configuration.json");
         var readyPath = Path.Combine(root, "ready.json");
+        var pipeName = $"DrumPracticeStudio.Effect.Audio.{Guid.NewGuid():N}";
+        var bridgePipe = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
         var diagnosticPath = Path.Combine(AppPaths.Vst3Logs, $"effect-{Guid.NewGuid():N}.log");
         Directory.CreateDirectory(AppPaths.Vst3Logs);
         var configuration = new Vst3EffectRuntimeConfiguration(
@@ -81,7 +96,8 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             AudioLatencySettings.VstMaxBlockSize,
             readyPath,
             diagnosticPath,
-            GetAutomaticStatePath(slotId, reference));
+            GetAutomaticStatePath(slotId, reference),
+            pipeName);
         File.WriteAllText(configurationPath, JsonSerializer.Serialize(configuration));
 
         var startInfo = new ProcessStartInfo(executable)
@@ -89,9 +105,9 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardInput = false,
+            RedirectStandardOutput = false,
+            RedirectStandardError = false
         };
         startInfo.ArgumentList.Add(Vst3EffectRuntimeProtocol.Argument);
         startInfo.ArgumentList.Add(configurationPath);
@@ -130,11 +146,14 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
                 throw new InvalidOperationException(
                     $"{ready.Message} Registro: {diagnosticPath}");
             }
+            bridgePipe.WaitForConnectionAsync()
+                .WaitAsync(StartupTimeout)
+                .GetAwaiter()
+                .GetResult();
             TryDeleteDirectory(root);
             return new IsolatedVst3EffectProcessor(
                 process,
-                new BinaryWriter(process.StandardInput.BaseStream),
-                new BinaryReader(process.StandardOutput.BaseStream),
+                bridgePipe,
                 reference,
                 ready.LatencySamples,
                 ready.HasEditor);
@@ -152,6 +171,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             {
             }
             process.Dispose();
+            bridgePipe.Dispose();
             TryDeleteDirectory(root);
             throw;
         }
@@ -164,14 +184,15 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             return;
         }
 
-        MixAvailableOutput(samples, channels: 1, wetMix);
-
         var buffer = ArrayPool<float>.Shared.Rent(samples.Length * 2);
         for (var frame = 0; frame < samples.Length; frame++)
         {
+            // Submit the current dry input. Feeding the previous wet block back into the plug-in
+            // creates an unintended feedback loop, which is especially dangerous with amp sims.
             buffer[frame * 2] = samples[frame];
             buffer[(frame * 2) + 1] = samples[frame];
         }
+        MixAvailableOutput(samples, channels: 1, wetMix);
         Submit(buffer, samples.Length);
     }
 
@@ -182,9 +203,9 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             return;
         }
         var frames = samples.Length / 2;
-        MixAvailableOutput(samples[..(frames * 2)], channels: 2, wetMix);
         var buffer = ArrayPool<float>.Shared.Rent(frames * 2);
         samples[..(frames * 2)].CopyTo(buffer);
+        MixAvailableOutput(samples[..(frames * 2)], channels: 2, wetMix);
         Submit(buffer, frames);
     }
 
@@ -232,6 +253,10 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             {
                 if (processed.Frames * channels == samples.Length)
                 {
+                    if (!ValidateOutput(samples, processed))
+                    {
+                        return;
+                    }
                     var dryMix = 1f - Math.Clamp(wetMix, 0f, 1f);
                     for (var frame = 0; frame < processed.Frames; frame++)
                     {
@@ -264,6 +289,47 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
                 ArrayPool<float>.Shared.Return(processed.Buffer);
             }
         }
+    }
+
+    private bool ValidateOutput(ReadOnlySpan<float> dry, AudioPacket processed)
+    {
+        double drySquares = 0d;
+        double wetSquares = 0d;
+        var wetSamples = processed.Frames * 2;
+        for (var index = 0; index < dry.Length; index++)
+        {
+            var sample = dry[index];
+            if (float.IsFinite(sample))
+            {
+                drySquares += sample * sample;
+            }
+        }
+        for (var index = 0; index < wetSamples; index++)
+        {
+            var sample = processed.Buffer[index];
+            if (!float.IsFinite(sample) || MathF.Abs(sample) > 8f)
+            {
+                Volatile.Write(
+                    ref _failure,
+                    $"{Reference.Name} quedó en bypass de seguridad: produjo audio no válido o fuera de rango.");
+                return false;
+            }
+            wetSquares += sample * sample;
+        }
+
+        var dryRms = Math.Sqrt(drySquares / Math.Max(1, dry.Length));
+        var wetRms = Math.Sqrt(wetSquares / Math.Max(1, wetSamples));
+        var suspicious = dryRms < 0.001d && wetRms > 0.7d;
+        _suspiciousOutputBlocks = suspicious ? _suspiciousOutputBlocks + 1 : 0;
+        if (_suspiciousOutputBlocks < 3)
+        {
+            return true;
+        }
+
+        Volatile.Write(
+            ref _failure,
+            $"{Reference.Name} quedó en bypass de seguridad: detectada una salida sostenida muy alta sin señal de entrada.");
+        return false;
     }
 
     private void Submit(float[] buffer, int frames)
@@ -322,6 +388,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         }
         _writer.Dispose();
         _reader.Dispose();
+        _bridgeStream.Dispose();
         try
         {
             if (!_process.HasExited && !_process.WaitForExit(3_000))
@@ -333,6 +400,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         {
         }
         _process.Dispose();
+        _watchdog.Dispose();
         _cancellation.Dispose();
     }
 
@@ -385,18 +453,20 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
     {
         try
         {
+            _watchdog.Change(AudioBlockTimeout, Timeout.InfiniteTimeSpan);
             _writer.Write(packet.Frames);
-            for (var index = 0; index < packet.Frames * 2; index++)
-            {
-                _writer.Write(packet.Buffer[index]);
-            }
+            _writer.Write(MemoryMarshal.AsBytes(
+                packet.Buffer.AsSpan(0, packet.Frames * 2)));
             _writer.Flush();
             var outputFrames = _reader.ReadInt32();
-            var outputBuffer = ArrayPool<float>.Shared.Rent(outputFrames * 2);
-            for (var index = 0; index < outputFrames * 2; index++)
+            if (outputFrames != packet.Frames)
             {
-                outputBuffer[index] = _reader.ReadSingle();
+                throw new InvalidDataException(
+                    $"{Reference.Name} devolvió {outputFrames} frames para un bloque de {packet.Frames}.");
             }
+            var outputBuffer = ArrayPool<float>.Shared.Rent(outputFrames * 2);
+            _reader.BaseStream.ReadExactly(MemoryMarshal.AsBytes(
+                outputBuffer.AsSpan(0, outputFrames * 2)));
             _output.Enqueue(new AudioPacket(outputBuffer, outputFrames));
             while (_output.Count > 2 && _output.TryDequeue(out var stale))
             {
@@ -405,7 +475,29 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         }
         finally
         {
+            _watchdog.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
             ArrayPool<float>.Shared.Return(packet.Buffer);
+        }
+    }
+
+    private void OnAudioBlockTimeout(object? state)
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+        Volatile.Write(
+            ref _failure,
+            $"{Reference.Name} quedó en bypass de seguridad porque dejó de responder al procesar audio.");
+        try
+        {
+            if (!_process.HasExited)
+            {
+                _process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
         }
     }
 

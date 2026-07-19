@@ -220,7 +220,8 @@ public sealed unsafe class Vst3Plugin : IDisposable
     /// collection itself is built once at construction; individual <see cref="Vst3Parameter"/>
     /// values are live and round-trip to the controller on each property access.
     /// </summary>
-    public Vst3ParameterCollection Parameters { get; private set; } = null!;
+    public Vst3ParameterCollection Parameters { get; private set; } =
+        new(Array.Empty<Vst3Parameter>());
 
     /// <summary>
     /// The plug-in's units (the <c>IUnitInfo</c> hierarchy), or an empty list when the plug-in does
@@ -264,6 +265,12 @@ public sealed unsafe class Vst3Plugin : IDisposable
     /// transparently by the public API.
     /// </summary>
     public bool HasSeparateController => _hasSeparateController;
+
+    /// <summary>
+    /// <c>true</c> when the plug-in exposes an edit controller. A VST 3 processor is allowed to
+    /// process audio without one; parameters and its custom editor are unavailable in that case.
+    /// </summary>
+    public bool HasEditController => _controller is not null;
 
     internal Vst3Plugin(IPluginFactory factory, Vst3ClassInfo classInfo, int sampleRate, int maxBlockSize)
     {
@@ -370,11 +377,6 @@ public sealed unsafe class Vst3Plugin : IDisposable
         {
             ResolveSeparateController(factory);
         }
-        if (_controller is null)
-        {
-            throw new InvalidOperationException(
-                $"Class '{ClassInfo.Name}' did not expose an IEditController (neither same-object QI nor IComponent::getControllerClassId yielded one).");
-        }
 
         // 4b. Hand the controller a host component handler. Plug-ins frequently use the handler
         // pointer's presence as a "host is ready" signal — without it some plug-ins leave their
@@ -393,35 +395,41 @@ public sealed unsafe class Vst3Plugin : IDisposable
         // path, SDK-helper-based plug-ins (Arturia, etc.) see editor edits silently dropped:
         // their DSP only reads parameters via inputParameterChanges. JUCE-wrapped plug-ins
         // pump their own UI→DSP edits internally and look unaffected.
-        var componentHandler = new Vst3ComponentHandler(
-            (id, value) =>
-            {
-                var clamped = value < 0 ? 0 : value > 1 ? 1 : value;
-                _liveParamChanges.Enqueue((ComputeTargetSample(Stopwatch.GetTimestamp()), id, clamped));
-            },
-            OnRestartComponent);
-        var handlerIdentity = Vst3ComWrappers.Instance.GetOrCreateComInterfaceForObject(
-            componentHandler, CreateComInterfaceFlags.None);
-        try
+        if (_controller is not null)
         {
-            var ichIid = Vst3StandardInterfaceIds.IComponentHandler;
-            var handlerQiHr = Marshal.QueryInterface(handlerIdentity, in ichIid, out _componentHandlerUnknown);
-            if (handlerQiHr != 0 || _componentHandlerUnknown == IntPtr.Zero)
+            var componentHandler = new Vst3ComponentHandler(
+                (id, value) =>
+                {
+                    var clamped = value < 0 ? 0 : value > 1 ? 1 : value;
+                    _liveParamChanges.Enqueue((ComputeTargetSample(Stopwatch.GetTimestamp()), id, clamped));
+                },
+                OnRestartComponent);
+            var handlerIdentity = Vst3ComWrappers.Instance.GetOrCreateComInterfaceForObject(
+                componentHandler, CreateComInterfaceFlags.None);
+            try
             {
-                throw new InvalidOperationException(
-                    $"Failed to QI host-side IComponentHandler (HRESULT 0x{handlerQiHr:X8}).");
+                var ichIid = Vst3StandardInterfaceIds.IComponentHandler;
+                var handlerQiHr = Marshal.QueryInterface(
+                    handlerIdentity,
+                    in ichIid,
+                    out _componentHandlerUnknown);
+                if (handlerQiHr != 0 || _componentHandlerUnknown == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to QI host-side IComponentHandler (HRESULT 0x{handlerQiHr:X8}).");
+                }
             }
+            finally
+            {
+                Marshal.Release(handlerIdentity);
+            }
+            _controller.SetComponentHandler(_componentHandlerUnknown);
         }
-        finally
-        {
-            Marshal.Release(handlerIdentity);
-        }
-        _controller.SetComponentHandler(_componentHandlerUnknown);
 
         // 4c. For the two-object form, connect both halves via IConnectionPoint first — some
         // plug-ins' setComponentState calls expect the message channel to already exist. Matches
         // the SDK's `PlugProvider::initializeAndConnectComponentController` ordering.
-        if (_hasSeparateController)
+        if (_hasSeparateController && _controller is not null)
         {
             TryConnectComponentAndController();
         }
@@ -429,7 +437,10 @@ public sealed unsafe class Vst3Plugin : IDisposable
         // 4d. Sync the component's startup state into the controller so its parameter mirror is
         // consistent before we ever call getParameterCount. Skipping this step leaves many
         // plug-ins reporting stale or default parameter values from the controller side.
-        SyncComponentStateToController();
+        if (_controller is not null)
+        {
+            SyncComponentStateToController();
+        }
 
         // 5. Validate the bus topology. Effects need at least one audio input and one audio output
         // bus. Instruments (VSTis) have no audio input but must expose an audio output bus and an
@@ -539,26 +550,32 @@ public sealed unsafe class Vst3Plugin : IDisposable
 
         // 12. Build the parameter collection by walking the controller, and stand up the
         // host-side IParameterChanges that Process() drains pending writes into.
-        Parameters = BuildParameterCollection();
-        BuildMidiControllerMap();
-        CacheProgramChangeParameter();
-        BuildUnitModel();
-        _inputChanges = new Vst3HostParameterChanges();
-        var inputChangesUnk = Vst3ComWrappers.Instance.GetOrCreateComInterfaceForObject(
-            _inputChanges, CreateComInterfaceFlags.None);
-        try
+        if (_controller is not null)
         {
-            var ipcIid = Vst3StandardInterfaceIds.IParameterChanges;
-            var qiPcHr = Marshal.QueryInterface(inputChangesUnk, in ipcIid, out _inputChangesPtr);
-            if (qiPcHr != 0 || _inputChangesPtr == IntPtr.Zero)
+            Parameters = BuildParameterCollection();
+            BuildMidiControllerMap();
+            CacheProgramChangeParameter();
+            BuildUnitModel();
+            _inputChanges = new Vst3HostParameterChanges();
+            var inputChangesUnk = Vst3ComWrappers.Instance.GetOrCreateComInterfaceForObject(
+                _inputChanges, CreateComInterfaceFlags.None);
+            try
             {
-                throw new InvalidOperationException(
-                    $"Failed to QI host-side IParameterChanges (HRESULT 0x{qiPcHr:X8}).");
+                var ipcIid = Vst3StandardInterfaceIds.IParameterChanges;
+                var qiPcHr = Marshal.QueryInterface(
+                    inputChangesUnk,
+                    in ipcIid,
+                    out _inputChangesPtr);
+                if (qiPcHr != 0 || _inputChangesPtr == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to QI host-side IParameterChanges (HRESULT 0x{qiPcHr:X8}).");
+                }
             }
-        }
-        finally
-        {
-            Marshal.Release(inputChangesUnk);
+            finally
+            {
+                Marshal.Release(inputChangesUnk);
+            }
         }
 
         // 13. Instruments: stand up the host-side IEventList that Process feeds scheduled notes
@@ -587,8 +604,8 @@ public sealed unsafe class Vst3Plugin : IDisposable
 
     /// <summary>
     /// Negotiates the input/output speaker arrangement with the plug-in, following the SDK pattern:
-    /// query every bus's declared default, then try to override bus 0 (the main bus) to stereo. If
-    /// the plug-in rejects, fall back to the plug-in's full default arrangement. <c>numIns</c> and
+    /// query every bus's declared default and use it when valid. If the plug-in rejects that
+    /// arrangement, fall back to stereo. <c>numIns</c> and
     /// <c>numOuts</c> always match <c>IComponent::getBusCount</c> — some plug-ins (NI Supercharger
     /// GT, TAL-Dub-X) reject any <c>setBusArrangements</c> call where the bus count doesn't match.
     /// Only mono and stereo arrangements on bus 0 are supported in this phase.
@@ -613,26 +630,43 @@ public sealed unsafe class Vst3Plugin : IDisposable
             outArrs[i] = a;
         }
 
-        // First try: force bus 0 to stereo (the preferred render path) but keep all other buses at
-        // their plug-in-declared defaults.
+        // Explicit mono variants keep their declared layout. General-purpose processors are
+        // offered stereo first: some amp suites publish a mono-capable default but only their
+        // stereo topology is safe for realtime hosting. Mono-only processors can still reject
+        // stereo and fall back to the declared arrangement below.
         var origIn0 = numIn > 0 ? inArrs[0] : 0;
         var origOut0 = numOut > 0 ? outArrs[0] : 0;
-        if (numIn > 0) inArrs[0] = SpeakerArrangements.Stereo;
-        if (numOut > 0) outArrs[0] = SpeakerArrangements.Stereo;
+        var preferDeclared = ClassInfo.Name.Contains(
+            "Mono",
+            StringComparison.OrdinalIgnoreCase);
+        if (!preferDeclared)
+        {
+            if (numIn > 0) inArrs[0] = SpeakerArrangements.Stereo;
+            if (numOut > 0) outArrs[0] = SpeakerArrangements.Stereo;
+        }
         var hr = _processor!.SetBusArrangements(
             (IntPtr)inArrs, numIn, (IntPtr)outArrs, numOut);
 
         if (hr != TResultCodes.Ok)
         {
-            // Plug-in refused stereo — restore the declared defaults and re-issue.
-            if (numIn > 0) inArrs[0] = origIn0;
-            if (numOut > 0) outArrs[0] = origOut0;
+            if (preferDeclared)
+            {
+                if (numIn > 0) inArrs[0] = SpeakerArrangements.Stereo;
+                if (numOut > 0) outArrs[0] = SpeakerArrangements.Stereo;
+            }
+            else
+            {
+                if (numIn > 0) inArrs[0] = origIn0;
+                if (numOut > 0) outArrs[0] = origOut0;
+            }
             var retryHr = _processor.SetBusArrangements(
                 (IntPtr)inArrs, numIn, (IntPtr)outArrs, numOut);
             if (retryHr != TResultCodes.Ok)
             {
                 throw new InvalidOperationException(
-                    $"Class '{ClassInfo.Name}' rejected stereo (HRESULT 0x{hr:X8}) and also rejected its own declared arrangement (bus0 in=0x{origIn0:X16}, out=0x{origOut0:X16}, HRESULT 0x{retryHr:X8}, busCount {numIn}/{numOut}).");
+                    $"Class '{ClassInfo.Name}' rejected both its declared arrangement " +
+                    $"(in=0x{origIn0:X16}, out=0x{origOut0:X16}) and stereo " +
+                    $"(HRESULT 0x{hr:X8}/0x{retryHr:X8}, busCount {numIn}/{numOut}).");
             }
         }
 
@@ -662,13 +696,11 @@ public sealed unsafe class Vst3Plugin : IDisposable
     private void ResolveSeparateController(IPluginFactory factory)
     {
         Span<byte> controllerCid = stackalloc byte[16];
+        var hasAdvertisedController = false;
         fixed (byte* cidPtr = controllerCid)
         {
             var cidHr = _component!.GetControllerClassId((IntPtr)cidPtr);
-            if (cidHr != TResultCodes.Ok)
-            {
-                return;
-            }
+            hasAdvertisedController = cidHr == TResultCodes.Ok;
         }
         // Treat all-zero CID as "no controller advertised".
         var allZero = true;
@@ -676,9 +708,13 @@ public sealed unsafe class Vst3Plugin : IDisposable
         {
             if (controllerCid[i] != 0) { allZero = false; break; }
         }
-        if (allZero)
+        if (!hasAdvertisedController || allZero)
         {
-            return;
+            // Compatibility path for older shell plug-ins: some factories expose the controller
+            // from the component class ID even though the created component does not QI to it and
+            // getControllerClassId returns false. A failed factory request is harmless; the audio
+            // processor remains usable without a custom editor.
+            Vst3Tuid.Parse(ClassInfo.ClassId, controllerCid);
         }
 
         var iidBytes = Vst3StandardInterfaceIds.IEditController.ToByteArray(bigEndian: false);
@@ -692,6 +728,21 @@ public sealed unsafe class Vst3Plugin : IDisposable
                 return;
             }
         }
+        // Do not trust old shell factories to honour the requested IID. Waves 10, for example,
+        // can report success while returning its component interface for this compatibility
+        // request. Verify the pointer before projecting it onto a managed IEditController.
+        var controllerIid = Vst3StandardInterfaceIds.IEditController;
+        var controllerQiHr = Marshal.QueryInterface(
+            controllerPtr,
+            in controllerIid,
+            out var verifiedControllerPtr);
+        Marshal.Release(controllerPtr);
+        if (controllerQiHr != 0 || verifiedControllerPtr == IntPtr.Zero)
+        {
+            return;
+        }
+        controllerPtr = verifiedControllerPtr;
+
         // Probe the separate controller for IConnectionPoint + IMidiMapping before releasing the ref.
         var connectionIid = Vst3StandardInterfaceIds.IConnectionPoint;
         Marshal.QueryInterface(controllerPtr, in connectionIid, out _controllerCpPtr);
@@ -919,7 +970,15 @@ public sealed unsafe class Vst3Plugin : IDisposable
     /// </remarks>
     public Vst3PluginView? CreateView()
     {
-        var controller = _controller ?? throw new ObjectDisposedException(nameof(Vst3Plugin));
+        if (_controller is null)
+        {
+            if (_processor is null)
+            {
+                throw new ObjectDisposedException(nameof(Vst3Plugin));
+            }
+            return null;
+        }
+        var controller = _controller;
         // ViewType::kEditor — a null-terminated ASCII C string.
         ReadOnlySpan<byte> editor = "editor\0"u8;
         IntPtr viewPtr;
@@ -1342,11 +1401,11 @@ public sealed unsafe class Vst3Plugin : IDisposable
             inputChangesPtr = _inputChangesPtr;
         }
 
-        // Instrument event input: drain the notes scheduled for this block into the host event list
-        // (converting absolute sample times to block-relative offsets) and supply a process context.
-        // Effects skip all of this — InputEvents / ProcessContext stay null, exactly as before.
+        // Instrument event input: drain the notes scheduled for this block into the host event list.
+        // Every processor receives a valid transport context: several amp/effect suites use it for
+        // tempo-synchronised modules even when no instrument events are present.
         var inputEventsPtr = IntPtr.Zero;
-        ProcessContext ctx = default;
+        var ctx = BuildProcessContext(_samplePosition);
         if (_isInstrument && _inputEvents is not null)
         {
             _inputEvents.Clear();
@@ -1378,7 +1437,6 @@ public sealed unsafe class Vst3Plugin : IDisposable
             DrainLiveEventsIntoPending();
             DispatchPendingLiveEvents(blockEnd, numSamples);
             inputEventsPtr = _inputEventsPtr;
-            ctx = BuildProcessContext(_samplePosition);
         }
 
         var data = new ProcessData
@@ -1394,7 +1452,7 @@ public sealed unsafe class Vst3Plugin : IDisposable
             OutputParameterChanges = IntPtr.Zero,
             InputEvents = inputEventsPtr,
             OutputEvents = IntPtr.Zero,
-            ProcessContext = _isInstrument ? (IntPtr)(&ctx) : IntPtr.Zero,
+            ProcessContext = (IntPtr)(&ctx),
         };
 
         var hr = _processor.Process(ref data);

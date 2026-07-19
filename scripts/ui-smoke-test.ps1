@@ -1,7 +1,8 @@
 param(
     [string] $ProcessName = "DrumPracticeStudio",
     [int] $ProcessId = 0,
-    [switch] $VerifyVstScanIndicator
+    [switch] $VerifyVstScanIndicator,
+    [switch] $SkipAudioTrigger
 )
 
 Add-Type -AssemblyName UIAutomationClient
@@ -126,7 +127,9 @@ if ($draggedFaderValue -le 0.6 -or $draggedFaderValue -ge 0.95) {
 $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
 Write-Output ("TRAS PRACTICAR: " + (@($buttons | ForEach-Object { $_.Current.Name }) -join " | "))
 $kick = $buttons | Where-Object { $_.Current.Name -eq "Bombo" } | Select-Object -First 1
-Invoke-Element $kick
+if (-not $SkipAudioTrigger) {
+    Invoke-Element $kick
+}
 
 $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
 $libraries = $buttons | Where-Object { $_.Current.Name -like "*Librer*" } | Select-Object -First 1
@@ -239,6 +242,43 @@ if (-not (Find-ElementByAutomationId "AudioInputStatusText")) {
     throw "La página de dispositivos no expuso el estado de búsqueda de plugins VST3."
 }
 
+$inputFader = Find-ElementByAutomationId "AudioInputGainFader"
+$inputFaderRailClickValue = $null
+$inputFaderDraggedValue = $null
+if ($inputFader) {
+    $inputRange = $inputFader.GetCurrentPattern(
+        [System.Windows.Automation.RangeValuePattern]::Pattern
+    )
+    $inputRange.SetValue(0.5)
+    Start-Sleep -Milliseconds 150
+    $inputBounds = $inputFader.Current.BoundingRectangle
+    $inputX = [int]($inputBounds.Left + ($inputBounds.Width / 2))
+    $inputRailY = [int]($inputBounds.Top + ($inputBounds.Height * 0.25))
+    [NativeMouse]::SetCursorPos($inputX, $inputRailY) | Out-Null
+    [NativeMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [NativeMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 200
+    $inputFaderRailClickValue = $inputRange.Current.Value
+    if ($inputFaderRailClickValue -le 0.6 -or $inputFaderRailClickValue -ge 0.95) {
+        throw "El clic en el rail del fader de entrada produjo un valor incorrecto: $inputFaderRailClickValue."
+    }
+
+    $inputRange.SetValue(0.5)
+    Start-Sleep -Milliseconds 150
+    $inputDragStartY = [int]($inputBounds.Top + ($inputBounds.Height / 2))
+    [NativeMouse]::SetCursorPos($inputX, $inputDragStartY) | Out-Null
+    [NativeMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 100
+    [NativeMouse]::SetCursorPos($inputX, $inputRailY) | Out-Null
+    Start-Sleep -Milliseconds 150
+    [NativeMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 200
+    $inputFaderDraggedValue = $inputRange.Current.Value
+    if ($inputFaderDraggedValue -le 0.6 -or $inputFaderDraggedValue -ge 0.95) {
+        throw "El tirador del fader de entrada no respondió al arrastre: $inputFaderDraggedValue."
+    }
+}
+
 $vstScanIndicatorVerified = $false
 if ($VerifyVstScanIndicator) {
     Invoke-Element (Find-ElementByAutomationId "ScanVstEffectsButton")
@@ -267,10 +307,11 @@ if (-not $mapping) {
     throw "La página de dispositivos no mostró el perfil MIDI."
 }
 
+$padResult = if ($SkipAudioTrigger) { "Omitido" } else { $kick.Current.Name }
 [pscustomobject]@{
     Window = $root.Current.Name
     ButtonsFound = $names.Count
-    PadTriggered = $kick.Current.Name
+    PadTriggered = $padResult
     PracticeControlsVerified = $requiredPracticeControls.Count
     TrackFaderRailClickValue = $railClickValue
     TrackFaderDraggedValue = $draggedFaderValue
@@ -279,6 +320,8 @@ if (-not $mapping) {
     LibraryRowsBeforeSearch = $initialLibraryItems
     LibraryRowsWithoutMatches = $filteredLibraryItems
     YouTubeControlsVerified = $requiredYouTubeControls.Count
+    InputFaderRailClickValue = $inputFaderRailClickValue
+    InputFaderDraggedValue = $inputFaderDraggedValue
     VstScanIndicatorVerified = $vstScanIndicatorVerified
     MidiProfileVerified = $mapping.Current.Name
 }

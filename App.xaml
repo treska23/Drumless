@@ -178,12 +178,15 @@
                                 <Track x:Name="PART_Track"
                                        Margin="0,8"
                                        Orientation="Vertical"
+                                       Minimum="{TemplateBinding Minimum}"
+                                       Maximum="{TemplateBinding Maximum}"
+                                       Value="{TemplateBinding Value}"
                                        IsDirectionReversed="{TemplateBinding IsDirectionReversed}">
                                     <Track.DecreaseRepeatButton>
-                                        <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
-                                                      Background="Transparent"
+                                        <RepeatButton Background="Transparent"
                                                       BorderThickness="0"
                                                       Focusable="False"
+                                                      IsHitTestVisible="False"
                                                       Opacity="0" />
                                     </Track.DecreaseRepeatButton>
                                     <Track.Thumb>
@@ -207,10 +210,10 @@
                                         </Thumb>
                                     </Track.Thumb>
                                     <Track.IncreaseRepeatButton>
-                                        <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
-                                                      Background="Transparent"
+                                        <RepeatButton Background="Transparent"
                                                       BorderThickness="0"
                                                       Focusable="False"
+                                                      IsHitTestVisible="False"
                                                       Opacity="0" />
                                     </Track.IncreaseRepeatButton>
                                 </Track>
