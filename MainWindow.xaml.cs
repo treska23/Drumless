@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private int _youtubeAudioRoutingInProgress;
     private YouTubePlaybackRequest? _pendingYouTubePlayback;
     private PlaylistWindow? _playlistWindow;
+    private ChordSheetWindow? _chordSheetWindow;
     private readonly HashSet<ComboBox> _configuredVstEffectPickers = [];
 
     private void OnMixerFaderPreviewMouseLeftButtonDown(
@@ -81,6 +82,7 @@ public partial class MainWindow : Window
         _viewModel.YouTubePlaybackRequested += OnYouTubePlaybackRequested;
         _viewModel.YouTubeControlRequested += OnYouTubeControlRequested;
         _viewModel.YouTubeMetronomeChanged += OnYouTubeMetronomeChanged;
+        _viewModel.ChordSheetWindowRequested += OnChordSheetWindowRequested;
         SourceInitialized += OnSourceInitialized;
         Closing += OnClosing;
         Closed += OnClosed;
@@ -179,9 +181,23 @@ public partial class MainWindow : Window
         _viewModel.YouTubePlaybackRequested -= OnYouTubePlaybackRequested;
         _viewModel.YouTubeControlRequested -= OnYouTubeControlRequested;
         _viewModel.YouTubeMetronomeChanged -= OnYouTubeMetronomeChanged;
+        _viewModel.ChordSheetWindowRequested -= OnChordSheetWindowRequested;
         YouTubeWebView.Dispose();
         _playlistWindow?.Close();
+        _chordSheetWindow?.Close();
         _viewModel.Dispose();
+    }
+
+    private void OnChordSheetWindowRequested(object? sender, EventArgs e)
+    {
+        if (_chordSheetWindow is { IsVisible: true })
+        {
+            _chordSheetWindow.Activate();
+            return;
+        }
+        _chordSheetWindow = new ChordSheetWindow(_viewModel) { Owner = this };
+        _chordSheetWindow.Closed += (_, _) => _chordSheetWindow = null;
+        _chordSheetWindow.Show();
     }
 
     private async void OnClosing(object? sender, CancelEventArgs e)

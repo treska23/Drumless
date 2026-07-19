@@ -197,6 +197,8 @@ public sealed class MediaAnalysisRecord
     public TempoSettings? Tempo { get; set; }
     public TempoAnalysisOrigin TempoOrigin { get; set; } = TempoAnalysisOrigin.Manual;
     public DateTimeOffset? TempoUpdatedAtUtc { get; set; }
+    public SongStructureMap? SongStructure { get; set; }
+    public ChordSheetDocument? ChordSheet { get; set; }
     public DrumReferenceMap? DrumReference { get; set; }
     public List<DrumPerformanceSession> PerformanceSessions { get; set; } = [];
 }

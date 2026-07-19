@@ -71,6 +71,7 @@ $requiredPracticeControls = @(
     "StopOutputRecordingButton",
     "PlayLastRecordingButton",
     "AnalyzeTempoButton",
+    "OpenChordSheetButton",
     "TempoBpmTextBox",
     "TempoFirstBeatTextBox",
     "MetronomeEnabledCheckBox",

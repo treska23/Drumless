@@ -257,7 +257,7 @@ public sealed partial class MainViewModel
         try
         {
             IsAnalyzingTempo = true;
-            TempoStatus = $"Analizando {track.Title} por ventanas…";
+            TempoStatus = $"Analizando tempo y estructura de {track.Title}…";
             var result = await _tempoAnalysis.AnalyzeMapAsync(track.Path, cancellation.Token);
             if (CurrentTrack?.Id != track.Id)
             {
@@ -266,8 +266,30 @@ public sealed partial class MainViewModel
 
             ReplaceEditorCollection(ProposedTempoSegments, result.Segments, subscribe: false);
             OnPropertyChanged(nameof(HasTempoProposal));
-            TempoStatus = $"{result.Summary} Confianza global {result.OverallConfidence:P0}. " +
-                          "La propuesta no se aplicará hasta que pulses «Aplicar propuesta».";
+            var first = result.Segments.FirstOrDefault();
+            var proposedTempo = first is null
+                ? null
+                : TempoSettings.Normalize(new TempoSettings(
+                    first.Bpm,
+                    first.FirstBeatSeconds,
+                    first.BeatsPerBar,
+                    MetronomeEnabled,
+                    MetronomeVolume,
+                    result.OverallConfidence,
+                    result.Segments));
+            var structure = await _songStructureAnalysis.AnalyzeAsync(
+                track.Path,
+                proposedTempo,
+                cancellation.Token);
+            if (CurrentTrack?.Id != track.Id)
+            {
+                return;
+            }
+            ApplySongStructureAnalysis($"local:{track.Id}", structure);
+            TempoStatus = $"{result.Summary} {structure.Sections.Count} secciones musicales " +
+                          $"propuestas. Confianza de tempo {result.OverallConfidence:P0} y " +
+                          $"estructura {structure.Confidence:P0}. " +
+                          "El mapa de tempo no se aplicará hasta que pulses «Aplicar propuesta».";
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -599,6 +621,7 @@ public sealed partial class MainViewModel
         }
         ClearTransientTempoResults();
         SynchronizeTempoEditor(track?.Tempo, track?.TempoLabel);
+        LoadChordSheetForCurrentMedia();
         RefreshDrumReferenceStatus();
         YouTubeMetronomeChanged?.Invoke(this, new YouTubeMetronomeRequest(null));
         OnPropertyChanged(nameof(CanAnalyzeTempo));
@@ -617,6 +640,7 @@ public sealed partial class MainViewModel
                 ? null
                 : $"YouTube · {item.Tempo.Bpm:0.##} BPM · primer pulso " +
                   $"{item.Tempo.FirstBeatSeconds:0.000} s");
+        LoadChordSheetForCurrentMedia();
         YouTubeMetronomeChanged?.Invoke(
             this,
             new YouTubeMetronomeRequest(item.Tempo));
@@ -991,11 +1015,13 @@ public sealed partial class MainViewModel
         }
 
         SynchronizeTempoEditor(null, null);
+        LoadChordSheetForCurrentMedia();
         PerformanceResultText = "Datos de análisis y sesiones borrados.";
         RefreshPerformanceHistory();
         RefreshDrumReferenceStatus();
         SaveTrackWorkspace();
-        TempoStatus = "Datos de tempo, claqueta y puntuaciones borrados para esta pista.";
+        TempoStatus =
+            "Datos de tempo, estructura, letra/acordes, claqueta y puntuaciones borrados para esta pista.";
     }
 
     private void RecordPerformanceHit(MidiNoteMessage message)
@@ -1025,6 +1051,7 @@ public sealed partial class MainViewModel
         if (double.IsFinite(seconds) && seconds >= 0d)
         {
             _youtubePerformancePositionSeconds = seconds;
+            UpdateChordSheetPlaybackPosition(seconds);
         }
     }
 }

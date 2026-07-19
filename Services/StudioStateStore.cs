@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 7;
+    public const int CurrentSchemaVersion = 8;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -484,6 +484,8 @@ public sealed class StudioStateStore
             }
         }
         var drumReference = TryCreateDrumReference(dto.DrumReference);
+        var songStructure = TryCreateSongStructure(dto.SongStructure);
+        var chordSheet = TryCreateChordSheet(dto.ChordSheet);
 
         record = new MediaAnalysisRecord
         {
@@ -491,10 +493,98 @@ public sealed class StudioStateStore
             Tempo = tempo,
             TempoOrigin = origin,
             TempoUpdatedAtUtc = dto.TempoUpdatedAtUtc,
+            SongStructure = songStructure,
+            ChordSheet = chordSheet,
             DrumReference = drumReference,
             PerformanceSessions = sessions
         };
-        return tempo is not null || drumReference is not null || sessions.Count > 0;
+        return tempo is not null ||
+               songStructure is not null ||
+               chordSheet is not null ||
+               drumReference is not null ||
+               sessions.Count > 0;
+    }
+
+    private static SongStructureMap? TryCreateSongStructure(SongStructureDto? dto)
+    {
+        if (dto is null ||
+            dto.AnalyzedAtUtc == default ||
+            dto.DurationSeconds is not >= 0d ||
+            !double.IsFinite(dto.DurationSeconds.Value) ||
+            dto.Confidence is null ||
+            !double.IsFinite(dto.Confidence.Value))
+        {
+            return null;
+        }
+
+        var sections = (dto.Sections ?? [])
+            .Where(section =>
+                !string.IsNullOrWhiteSpace(section.Id) &&
+                section.StartSeconds is >= 0d &&
+                section.EndSeconds is > 0d &&
+                section.EndSeconds > section.StartSeconds &&
+                !string.IsNullOrWhiteSpace(section.Label))
+            .Select(section => new SongSection(
+                section.Id!,
+                section.StartSeconds!.Value,
+                section.EndSeconds!.Value,
+                section.Label!,
+                section.Confidence ?? 0d,
+                section.Signature ?? string.Empty))
+            .ToArray();
+        if (sections.Length == 0)
+        {
+            return null;
+        }
+        return SongStructureMap.Normalize(new SongStructureMap(
+            dto.AnalyzedAtUtc,
+            dto.DurationSeconds.Value,
+            dto.Confidence.Value,
+            sections));
+    }
+
+    private static ChordSheetDocument? TryCreateChordSheet(ChordSheetDto? dto)
+    {
+        if (dto is null ||
+            string.IsNullOrWhiteSpace(dto.Id) ||
+            string.IsNullOrWhiteSpace(dto.Title) ||
+            dto.UpdatedAtUtc == default ||
+            !Enum.IsDefined(dto.SourceKind))
+        {
+            return null;
+        }
+
+        var lines = (dto.Lines ?? [])
+            .Where(line =>
+                !string.IsNullOrWhiteSpace(line.Id) &&
+                line.Order is >= 0 &&
+                Enum.IsDefined(line.Kind))
+            .Select(line => new ChordSheetLine(
+                line.Id!,
+                line.Order!.Value,
+                line.Kind,
+                line.Text ?? string.Empty,
+                line.StartSeconds is { } start && double.IsFinite(start) && start >= 0d
+                    ? start
+                    : null,
+                line.Confidence is { } confidence && double.IsFinite(confidence)
+                    ? confidence
+                    : 0d,
+                line.SectionLabel))
+            .ToArray();
+        if (lines.Length == 0 && string.IsNullOrWhiteSpace(dto.RawText))
+        {
+            return null;
+        }
+        return ChordSheetDocument.Normalize(new ChordSheetDocument(
+            dto.Id,
+            dto.Title,
+            dto.SourceKind,
+            dto.SourceUrl,
+            dto.RawText ?? string.Empty,
+            dto.UpdatedAtUtc,
+            dto.LeadSeconds ?? 2d,
+            lines));
     }
 
     private static bool TryCreatePerformanceSession(
@@ -565,6 +655,46 @@ public sealed class StudioStateStore
         Tempo = record.Tempo is null ? null : ToTempoDto(record.Tempo),
         TempoOrigin = record.TempoOrigin,
         TempoUpdatedAtUtc = record.TempoUpdatedAtUtc,
+        SongStructure = record.SongStructure is null
+            ? null
+            : new SongStructureDto
+            {
+                AnalyzedAtUtc = record.SongStructure.AnalyzedAtUtc,
+                DurationSeconds = record.SongStructure.DurationSeconds,
+                Confidence = record.SongStructure.Confidence,
+                Sections = record.SongStructure.Sections.Select(section =>
+                    new SongSectionDto
+                    {
+                        Id = section.Id,
+                        StartSeconds = section.StartSeconds,
+                        EndSeconds = section.EndSeconds,
+                        Label = section.Label,
+                        Confidence = section.Confidence,
+                        Signature = section.Signature
+                    }).ToList()
+            },
+        ChordSheet = record.ChordSheet is null
+            ? null
+            : new ChordSheetDto
+            {
+                Id = record.ChordSheet.Id,
+                Title = record.ChordSheet.Title,
+                SourceKind = record.ChordSheet.SourceKind,
+                SourceUrl = record.ChordSheet.SourceUrl,
+                RawText = record.ChordSheet.RawText,
+                UpdatedAtUtc = record.ChordSheet.UpdatedAtUtc,
+                LeadSeconds = record.ChordSheet.LeadSeconds,
+                Lines = record.ChordSheet.Lines.Select(line => new ChordSheetLineDto
+                {
+                    Id = line.Id,
+                    Order = line.Order,
+                    Kind = line.Kind,
+                    Text = line.Text,
+                    StartSeconds = line.StartSeconds,
+                    Confidence = line.Confidence,
+                    SectionLabel = line.SectionLabel
+                }).ToList()
+            },
         DrumReference = record.DrumReference is null
             ? null
             : new DrumReferenceDto
@@ -912,8 +1042,51 @@ public sealed class StudioStateStore
         public TempoDto? Tempo { get; set; }
         public TempoAnalysisOrigin TempoOrigin { get; set; }
         public DateTimeOffset? TempoUpdatedAtUtc { get; set; }
+        public SongStructureDto? SongStructure { get; set; }
+        public ChordSheetDto? ChordSheet { get; set; }
         public DrumReferenceDto? DrumReference { get; set; }
         public List<DrumPerformanceSessionDto>? PerformanceSessions { get; set; }
+    }
+
+    private sealed class SongStructureDto
+    {
+        public DateTimeOffset AnalyzedAtUtc { get; set; }
+        public double? DurationSeconds { get; set; }
+        public double? Confidence { get; set; }
+        public List<SongSectionDto>? Sections { get; set; }
+    }
+
+    private sealed class SongSectionDto
+    {
+        public string? Id { get; set; }
+        public double? StartSeconds { get; set; }
+        public double? EndSeconds { get; set; }
+        public string? Label { get; set; }
+        public double? Confidence { get; set; }
+        public string? Signature { get; set; }
+    }
+
+    private sealed class ChordSheetDto
+    {
+        public string? Id { get; set; }
+        public string? Title { get; set; }
+        public ChordSheetSourceKind SourceKind { get; set; }
+        public string? SourceUrl { get; set; }
+        public string? RawText { get; set; }
+        public DateTimeOffset UpdatedAtUtc { get; set; }
+        public double? LeadSeconds { get; set; }
+        public List<ChordSheetLineDto>? Lines { get; set; }
+    }
+
+    private sealed class ChordSheetLineDto
+    {
+        public string? Id { get; set; }
+        public int? Order { get; set; }
+        public ChordSheetLineKind Kind { get; set; }
+        public string? Text { get; set; }
+        public double? StartSeconds { get; set; }
+        public double? Confidence { get; set; }
+        public string? SectionLabel { get; set; }
     }
 
     private sealed class DrumReferenceDto

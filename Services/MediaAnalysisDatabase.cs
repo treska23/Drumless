@@ -75,6 +75,24 @@ public sealed class MediaAnalysisDatabase
             : DrumReferenceMap.Normalize(reference);
     }
 
+    public void SetSongStructure(string mediaKey, SongStructureMap? structure)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mediaKey);
+        var record = GetOrCreate(mediaKey);
+        record.SongStructure = structure is null
+            ? null
+            : SongStructureMap.Normalize(structure);
+    }
+
+    public void SetChordSheet(string mediaKey, ChordSheetDocument? chordSheet)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mediaKey);
+        var record = GetOrCreate(mediaKey);
+        record.ChordSheet = chordSheet is null
+            ? null
+            : ChordSheetDocument.Normalize(chordSheet);
+    }
+
     public bool Remove(string? mediaKey) =>
         !string.IsNullOrWhiteSpace(mediaKey) && _records.Remove(mediaKey);
 
@@ -101,6 +119,12 @@ public sealed class MediaAnalysisDatabase
         Tempo = record.Tempo is null ? null : TempoSettings.Normalize(record.Tempo),
         TempoOrigin = record.TempoOrigin,
         TempoUpdatedAtUtc = record.TempoUpdatedAtUtc,
+        SongStructure = record.SongStructure is null
+            ? null
+            : SongStructureMap.Normalize(record.SongStructure),
+        ChordSheet = record.ChordSheet is null
+            ? null
+            : ChordSheetDocument.Normalize(record.ChordSheet),
         DrumReference = record.DrumReference is null
             ? null
             : DrumReferenceMap.Normalize(record.DrumReference),

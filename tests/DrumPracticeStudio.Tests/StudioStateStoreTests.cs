@@ -164,6 +164,40 @@ public sealed class StudioStateStoreTests
             Tempo = state.Tracks[0].Tempo,
             TempoOrigin = TempoAnalysisOrigin.ManuallyAdjusted,
             TempoUpdatedAtUtc = new DateTimeOffset(2026, 7, 16, 8, 0, 0, TimeSpan.Zero),
+            SongStructure = new SongStructureMap(
+                new DateTimeOffset(2026, 7, 16, 8, 2, 0, TimeSpan.Zero),
+                180d,
+                0.74d,
+                [
+                    new SongSection("section-a", 0d, 42d, "Sección A", 0.8d, "0.2|0.4"),
+                    new SongSection("section-b", 42d, 80d, "Sección B", 0.68d, "0.7|0.8")
+                ]),
+            ChordSheet = new ChordSheetDocument(
+                "sheet-1",
+                "Original",
+                ChordSheetSourceKind.WebSelection,
+                "https://example.test/chords",
+                "[Em]Primera línea",
+                new DateTimeOffset(2026, 7, 16, 8, 3, 0, TimeSpan.Zero),
+                1.5d,
+                [
+                    new ChordSheetLine(
+                        "line-1",
+                        0,
+                        ChordSheetLineKind.Chords,
+                        "Em",
+                        0d,
+                        0.5d,
+                        "Estrofa"),
+                    new ChordSheetLine(
+                        "line-2",
+                        1,
+                        ChordSheetLineKind.Lyrics,
+                        "Primera línea",
+                        1.2d,
+                        1d,
+                        "Estrofa")
+                ]),
             DrumReference = new DrumReferenceMap(
                 "reference-v1",
                 originalPath,
@@ -277,6 +311,14 @@ public sealed class StudioStateStoreTests
         var loadedAnalysis = loaded.AnalysisRecords.Single(record =>
             record.MediaKey == "local:track-original");
         Assert.AreEqual(TempoAnalysisOrigin.ManuallyAdjusted, loadedAnalysis.TempoOrigin);
+        Assert.IsNotNull(loadedAnalysis.SongStructure);
+        Assert.AreEqual(2, loadedAnalysis.SongStructure.Sections.Count);
+        Assert.AreEqual("Sección B", loadedAnalysis.SongStructure.Sections[1].Label);
+        Assert.IsNotNull(loadedAnalysis.ChordSheet);
+        Assert.AreEqual("https://example.test/chords", loadedAnalysis.ChordSheet.SourceUrl);
+        Assert.AreEqual(2, loadedAnalysis.ChordSheet.Lines.Count);
+        Assert.AreEqual(1.2d, loadedAnalysis.ChordSheet.Lines[1].StartSeconds);
+        Assert.AreEqual(1.5d, loadedAnalysis.ChordSheet.LeadSeconds);
         Assert.AreEqual(1, loadedAnalysis.PerformanceSessions.Count);
         Assert.IsNotNull(loadedAnalysis.DrumReference);
         Assert.AreEqual("reference-v1", loadedAnalysis.DrumReference.Version);

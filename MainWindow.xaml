@@ -314,12 +314,22 @@
 
                             <Border Style="{StaticResource CardStyle}" Margin="0,16,0,0">
                                 <StackPanel>
-                                    <TextBlock Text="CLAQUETA POR PISTA" Foreground="{StaticResource Accent}"
+                                    <TextBlock Text="ANÁLISIS DE PISTA" Foreground="{StaticResource Accent}"
                                                FontSize="10" FontWeight="Bold" />
-                                    <Button Style="{StaticResource SecondaryButton}" Content="Analizar tempo de esta pista"
+                                    <Button Style="{StaticResource SecondaryButton}" Content="Analizar tempo y estructura"
                                             Margin="0,10,0,8" IsEnabled="{Binding CanAnalyzeTempo}"
                                             Command="{Binding AnalyzeTempoCommand}"
                                             AutomationProperties.AutomationId="AnalyzeTempoButton" />
+                                    <Button Style="{StaticResource PrimaryButton}"
+                                            Content="Abrir letra y acordes"
+                                            Margin="0,0,0,8"
+                                            IsEnabled="{Binding HasTrack}"
+                                            Command="{Binding OpenChordSheetWindowCommand}"
+                                            AutomationProperties.AutomationId="OpenChordSheetButton" />
+                                    <TextBlock Text="{Binding SongStructureStatus}"
+                                               Foreground="{StaticResource TextSecondary}"
+                                               TextWrapping="Wrap" FontSize="10"
+                                               Margin="0,0,0,8" />
                                     <Grid Margin="0,2,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />

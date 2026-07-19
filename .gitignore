@@ -7,6 +7,7 @@ obj/
 *.nupkg
 TestResults/
 artifacts/
+.tmp/
 *.wav
 *.mp3
 *.flac

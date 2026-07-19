@@ -217,6 +217,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         PanicVstCommand = new RelayCommand(() => _audio.PanicVstInstrument());
         InitializeTrackCommands();
         InitializeTempoCommands();
+        InitializeChordSheetCommands();
         InitializeRecordingCommands();
 
         _midi.NoteReceived += OnMidiNoteReceived;
@@ -771,6 +772,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _tempoAnalysisCancellation?.Dispose();
         _tempoSourceCancellation?.Cancel();
         _tempoSourceCancellation?.Dispose();
+        _chordSheetSourceCancellation?.Cancel();
+        _chordSheetSourceCancellation?.Dispose();
         _vstLoadCancellation?.Cancel();
         _vstLoadCancellation?.Dispose();
         _vstEffectScanCancellation?.Cancel();
@@ -796,6 +799,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _midi.ControlChangeReceived -= OnMidiControlChangeReceived;
         _midi.Dispose();
         _tempoSourceSearch.Dispose();
+        _chordSheetSourceSearch.Dispose();
         _audio.Dispose();
     }
 
@@ -1272,6 +1276,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SetProperty(ref _trackProgress, position.TotalSeconds, nameof(TrackProgress));
         TrackDurationSeconds = duration.TotalSeconds;
         PlayButtonLabel = _desiredTrackPlaying ? "Pausar" : "Reproducir";
+        if (CurrentTrack is not null)
+        {
+            UpdateChordSheetPlaybackPosition(position.TotalSeconds);
+        }
     }
 
     private void RefreshMidiDevices()
