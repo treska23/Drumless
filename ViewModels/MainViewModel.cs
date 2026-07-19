@@ -124,8 +124,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Vst3Effects = [];
         Vst3Programs = [];
         Tracks = _trackLibrary.Tracks;
+        VisibleTracks = [];
+        LibrarySortOptions =
+        [
+            new LibraryTrackSortOption(LibraryTrackSortMode.DateAddedNewest, "Más recientes primero"),
+            new LibraryTrackSortOption(LibraryTrackSortMode.DateAddedOldest, "Más antiguas primero"),
+            new LibraryTrackSortOption(LibraryTrackSortMode.NameAscending, "Nombre · A–Z"),
+            new LibraryTrackSortOption(LibraryTrackSortMode.NameDescending, "Nombre · Z–A")
+        ];
+        _selectedLibrarySortOption = LibrarySortOptions[0];
         Playlists = [];
         PlaylistItems = [];
+        VisiblePlaylistItems = [];
+        VisiblePlaylists = [];
         PlaybackModeOptions =
         [
             new PlaybackModeOption(PlaybackMode.Single, "Una pista"),

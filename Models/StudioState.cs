@@ -70,6 +70,7 @@ public sealed class TrackRecord
     public required string Title { get; init; }
     public required string Path { get; init; }
     public required TrackVariant Variant { get; init; }
+    public DateTimeOffset? DateAddedUtc { get; init; }
     public TempoSettings? Tempo { get; set; }
 }
 

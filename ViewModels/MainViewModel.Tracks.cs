@@ -28,6 +28,10 @@ public sealed partial class MainViewModel
     private string? _trackWorkspaceWarning;
 
     private string _outputFolderPath = AppPaths.DerivedTracks;
+    private string _librarySearchText = string.Empty;
+    private LibraryTrackSortOption? _selectedLibrarySortOption;
+    private string _playlistItemSearchText = string.Empty;
+    private string _playlistSearchText = string.Empty;
     private LocalTrack? _selectedLibraryTrack;
     private Playlist? _selectedPlaylist;
     private PlaylistItemViewModel? _selectedPlaylistItem;
@@ -39,6 +43,10 @@ public sealed partial class MainViewModel
     public ObservableCollection<Playlist> Playlists { get; }
     public ObservableCollection<PlaylistItemViewModel> PlaylistItems { get; }
     public ObservableCollection<PlaybackModeOption> PlaybackModeOptions { get; }
+    public ObservableCollection<LocalTrack> VisibleTracks { get; }
+    public ObservableCollection<LibraryTrackSortOption> LibrarySortOptions { get; }
+    public ObservableCollection<PlaylistItemViewModel> VisiblePlaylistItems { get; }
+    public ObservableCollection<Playlist> VisiblePlaylists { get; }
 
     public RelayCommand<LocalTrack> LoadTrackCommand { get; private set; } = null!;
     public RelayCommand<LocalTrack> RemoveLibraryTrackCommand { get; private set; } = null!;
@@ -61,6 +69,54 @@ public sealed partial class MainViewModel
     {
         get => _outputFolderPath;
         private set => SetProperty(ref _outputFolderPath, value);
+    }
+
+    public string LibrarySearchText
+    {
+        get => _librarySearchText;
+        set
+        {
+            if (SetProperty(ref _librarySearchText, value))
+            {
+                RebuildVisibleTracks();
+            }
+        }
+    }
+
+    public LibraryTrackSortOption? SelectedLibrarySortOption
+    {
+        get => _selectedLibrarySortOption;
+        set
+        {
+            if (SetProperty(ref _selectedLibrarySortOption, value))
+            {
+                RebuildVisibleTracks();
+            }
+        }
+    }
+
+    public string PlaylistItemSearchText
+    {
+        get => _playlistItemSearchText;
+        set
+        {
+            if (SetProperty(ref _playlistItemSearchText, value))
+            {
+                RebuildVisiblePlaylistItems();
+            }
+        }
+    }
+
+    public string PlaylistSearchText
+    {
+        get => _playlistSearchText;
+        set
+        {
+            if (SetProperty(ref _playlistSearchText, value))
+            {
+                RebuildVisiblePlaylists();
+            }
+        }
     }
 
     public LocalTrack? SelectedLibraryTrack
@@ -127,7 +183,10 @@ public sealed partial class MainViewModel
         {
             var missing = Tracks.Count(track => track.IsMissing);
             var total = Tracks.Count == 1 ? "1 pista" : $"{Tracks.Count} pistas";
-            return missing == 0 ? total : $"{total} · {missing} sin archivo";
+            var summary = missing == 0 ? total : $"{total} · {missing} sin archivo";
+            return VisibleTracks.Count == Tracks.Count
+                ? summary
+                : $"{summary} · {VisibleTracks.Count} visibles";
         }
     }
 
@@ -490,6 +549,7 @@ public sealed partial class MainViewModel
         var playlist = new Playlist { Id = Guid.NewGuid().ToString("N"), Name = name };
         AttachPlaylist(playlist);
         Playlists.Add(playlist);
+        RebuildVisiblePlaylists();
         SelectedPlaylist = playlist;
         PlaylistNameDraft = playlist.Name;
         SaveTrackWorkspace();
@@ -512,6 +572,7 @@ public sealed partial class MainViewModel
         }
 
         SelectedPlaylist.Name = name;
+        RebuildVisiblePlaylists();
         OnPropertyChanged(nameof(Playlists));
         OnPropertyChanged(nameof(MixedPlaylistSummary));
         SaveTrackWorkspace();
@@ -530,6 +591,7 @@ public sealed partial class MainViewModel
         var index = Playlists.IndexOf(SelectedPlaylist);
         DetachPlaylist(SelectedPlaylist);
         Playlists.Remove(SelectedPlaylist);
+        RebuildVisiblePlaylists();
         SelectedPlaylist = Playlists.Count == 0
             ? null
             : Playlists[Math.Min(index, Playlists.Count - 1)];
@@ -674,11 +736,19 @@ public sealed partial class MainViewModel
 
     private void RemoveTrackFromLibrary(LocalTrack? track)
     {
-        if (track is null)
+        if (track is null || !RemoveTrackFromLibraryCore(track))
         {
             return;
         }
 
+        RefreshLibraryPresentation();
+        RefreshPerformanceHistory();
+        SaveTrackWorkspace();
+        StatusMessage = $"{track.Title} quitada de la biblioteca y datos de análisis borrados · el archivo no se ha eliminado";
+    }
+
+    private bool RemoveTrackFromLibraryCore(LocalTrack track)
+    {
         if (CurrentTrack?.Id == track.Id)
         {
             StopTrack();
@@ -702,7 +772,7 @@ public sealed partial class MainViewModel
         _analysisDatabase.Remove($"local:{track.Id}");
         if (!_trackLibrary.Remove(track.Id))
         {
-            return;
+            return false;
         }
 
         if (SelectedLibraryTrack?.Id == track.Id)
@@ -710,10 +780,7 @@ public sealed partial class MainViewModel
             SelectedLibraryTrack = null;
         }
         ResetPlaylistPlaybackQueue(currentItemId: null);
-        RefreshLibraryPresentation();
-        RefreshPerformanceHistory();
-        SaveTrackWorkspace();
-        StatusMessage = $"{track.Title} quitada de la biblioteca y datos de análisis borrados · el archivo no se ha eliminado";
+        return true;
     }
 
     private void MovePlaylistItem(PlaylistItemViewModel? item, bool moveUp)
@@ -734,6 +801,125 @@ public sealed partial class MainViewModel
     }
 
     public void AddTrackToSelectedPlaylist(LocalTrack track) => AddTrackToPlaylist(track);
+
+    public void LoadLibrarySelection(IReadOnlyList<LocalTrack> tracks)
+    {
+        if (tracks.Count != 1)
+        {
+            StatusMessage = tracks.Count == 0
+                ? "Selecciona una pista para cargarla"
+                : "Selecciona solo una pista para cargarla";
+            return;
+        }
+
+        var track = tracks[0];
+        if (!track.IsAvailable)
+        {
+            StatusMessage = $"{track.Title}: el archivo ya no está disponible";
+            return;
+        }
+
+        _ = LoadAndSelectTrackAsync(track, autoPlay: false, resetNavigation: true);
+    }
+
+    public void AddLibrarySelectionToPlaylist(IReadOnlyList<LocalTrack> tracks)
+    {
+        if (tracks.Count == 0)
+        {
+            StatusMessage = "Selecciona una o varias pistas de la biblioteca";
+            return;
+        }
+        if (SelectedPlaylist is null)
+        {
+            StatusMessage = "Crea o selecciona una playlist primero";
+            return;
+        }
+
+        var added = tracks
+            .DistinctBy(track => track.Id)
+            .Count(track => PlaylistEditor.AddTrack(SelectedPlaylist, track));
+        if (added == 0)
+        {
+            StatusMessage = $"Las pistas seleccionadas ya estaban en {SelectedPlaylist.Name}";
+            return;
+        }
+
+        PlaylistChanged();
+        StatusMessage = added == 1
+            ? $"1 pista añadida a {SelectedPlaylist.Name}"
+            : $"{added} pistas añadidas a {SelectedPlaylist.Name}";
+    }
+
+    public void RemoveLibrarySelection(IReadOnlyList<LocalTrack> tracks)
+    {
+        var selected = tracks
+            .DistinctBy(track => track.Id)
+            .ToArray();
+        if (selected.Length == 0)
+        {
+            StatusMessage = "Selecciona una o varias pistas de la biblioteca";
+            return;
+        }
+
+        var removed = selected.Count(RemoveTrackFromLibraryCore);
+        if (removed == 0)
+        {
+            return;
+        }
+
+        RefreshLibraryPresentation();
+        RefreshPerformanceHistory();
+        SaveTrackWorkspace();
+        StatusMessage = removed == 1
+            ? "1 pista quitada de la biblioteca · el archivo no se ha eliminado"
+            : $"{removed} pistas quitadas de la biblioteca · ningún archivo se ha eliminado";
+    }
+
+    public void PlayPlaylistSelection(IReadOnlyList<PlaylistItemViewModel> items)
+    {
+        if (items.Count != 1)
+        {
+            StatusMessage = items.Count == 0
+                ? "Selecciona un elemento de la playlist"
+                : "Selecciona solo un elemento para reproducirlo";
+            return;
+        }
+
+        _ = PlayPlaylistItemAsync(items[0]);
+    }
+
+    public void MovePlaylistSelection(IReadOnlyList<PlaylistItemViewModel> items, bool moveUp)
+    {
+        if (items.Count != 1)
+        {
+            StatusMessage = "Selecciona un solo elemento para cambiarlo de posición";
+            return;
+        }
+
+        MovePlaylistItem(items[0], moveUp);
+    }
+
+    public void RemovePlaylistSelection(IReadOnlyList<PlaylistItemViewModel> items)
+    {
+        if (SelectedPlaylist is null || items.Count == 0)
+        {
+            StatusMessage = "Selecciona uno o varios elementos de la playlist";
+            return;
+        }
+
+        var removed = items
+            .DistinctBy(item => item.Id)
+            .Count(item => PlaylistEditor.RemoveItem(SelectedPlaylist, item.Id));
+        if (removed == 0)
+        {
+            return;
+        }
+
+        PlaylistChanged();
+        StatusMessage = removed == 1
+            ? "1 elemento quitado de la playlist · el origen sigue intacto"
+            : $"{removed} elementos quitados de la playlist · los orígenes siguen intactos";
+    }
 
     public void MoveSelectedPlaylistItem(PlaylistItemViewModel item, int targetIndex)
     {
@@ -987,6 +1173,46 @@ public sealed partial class MainViewModel
         SelectedPlaylistItem = selectedId is null
             ? null
             : PlaylistItems.FirstOrDefault(item => item.Id == selectedId);
+        RebuildVisiblePlaylistItems();
+    }
+
+    private void RebuildVisiblePlaylistItems()
+    {
+        var search = PlaylistItemSearchText.Trim();
+        var items = string.IsNullOrWhiteSpace(search)
+            ? PlaylistItems
+            : PlaylistItems.Where(item =>
+                item.Title.Contains(search, StringComparison.CurrentCultureIgnoreCase) ||
+                item.Detail.Contains(search, StringComparison.CurrentCultureIgnoreCase) ||
+                item.SourceLabel.Contains(search, StringComparison.CurrentCultureIgnoreCase));
+
+        VisiblePlaylistItems.Clear();
+        foreach (var item in items)
+        {
+            VisiblePlaylistItems.Add(item);
+        }
+
+        if (SelectedPlaylistItem is not null &&
+            !VisiblePlaylistItems.Any(item => item.Id == SelectedPlaylistItem.Id))
+        {
+            SelectedPlaylistItem = null;
+        }
+    }
+
+    private void RebuildVisiblePlaylists()
+    {
+        var search = PlaylistSearchText.Trim();
+        var playlists = Playlists
+            .Where(playlist =>
+                string.IsNullOrWhiteSpace(search) ||
+                playlist.Name.Contains(search, StringComparison.CurrentCultureIgnoreCase))
+            .OrderBy(playlist => playlist.Name, StringComparer.CurrentCultureIgnoreCase);
+
+        VisiblePlaylists.Clear();
+        foreach (var playlist in playlists)
+        {
+            VisiblePlaylists.Add(playlist);
+        }
     }
 
     private bool IsPlaylistItemAvailable(PlaylistItem item) => item.Kind switch
@@ -1042,6 +1268,7 @@ public sealed partial class MainViewModel
     {
         if (eventArgs.PropertyName == nameof(Playlist.Name))
         {
+            RebuildVisiblePlaylists();
             OnPropertyChanged(nameof(MixedPlaylistSummary));
             return;
         }
@@ -1062,11 +1289,33 @@ public sealed partial class MainViewModel
 
     private void RefreshLibraryPresentation()
     {
+        RebuildVisibleTracks();
+        RebuildVisiblePlaylists();
         RebuildPlaylistItems();
-        OnPropertyChanged(nameof(LibrarySummary));
         OnPropertyChanged(nameof(SelectedPlaylistSummary));
         OnPropertyChanged(nameof(CurrentTrackSubtitle));
         OnPropertyChanged(nameof(CanCreateDrumless));
+    }
+
+    private void RebuildVisibleTracks()
+    {
+        var sortMode = SelectedLibrarySortOption?.Mode
+            ?? LibraryTrackSortMode.DateAddedNewest;
+        var tracks = LibraryTrackQuery.Apply(Tracks, LibrarySearchText, sortMode);
+
+        VisibleTracks.Clear();
+        foreach (var track in tracks)
+        {
+            VisibleTracks.Add(track);
+        }
+
+        if (SelectedLibraryTrack is not null &&
+            !VisibleTracks.Any(track => track.Id == SelectedLibraryTrack.Id))
+        {
+            SelectedLibraryTrack = null;
+        }
+
+        OnPropertyChanged(nameof(LibrarySummary));
     }
 
     private void SaveTrackWorkspace(bool silent = false)

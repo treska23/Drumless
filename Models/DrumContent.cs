@@ -78,6 +78,7 @@ public sealed class LocalTrack : ObservableObject
     public required string Title { get; init; }
     public required string Path { get; init; }
     public required TrackVariant Variant { get; init; }
+    public DateTimeOffset DateAddedUtc { get; init; } = DateTimeOffset.UtcNow;
 
     public TempoSettings? Tempo
     {
@@ -111,6 +112,8 @@ public sealed class LocalTrack : ObservableObject
     public string TempoLabel => Tempo is null
         ? "Tempo sin analizar"
         : $"{Tempo.Bpm:0.##} BPM · primer pulso {Tempo.FirstBeatSeconds:0.000} s";
+
+    public string DateAddedLabel => $"Añadida {DateAddedUtc.ToLocalTime():g}";
 
     public string VariantLabel => Variant switch
     {

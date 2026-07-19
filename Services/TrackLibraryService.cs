@@ -55,6 +55,7 @@ public sealed class TrackLibraryService
                 Title = record.Title,
                 Path = normalizedPath,
                 Variant = record.Variant,
+                DateAddedUtc = record.DateAddedUtc ?? ResolveLegacyDate(normalizedPath),
                 Tempo = record.Tempo,
                 IsMissing = !File.Exists(normalizedPath)
             });
@@ -68,6 +69,7 @@ public sealed class TrackLibraryService
             Title = track.Title,
             Path = track.Path,
             Variant = track.Variant,
+            DateAddedUtc = track.DateAddedUtc,
             Tempo = track.Tempo
         })
         .ToArray();
@@ -173,6 +175,7 @@ public sealed class TrackLibraryService
             Title = resolvedTitle,
             Path = normalizedPath,
             Variant = variant,
+            DateAddedUtc = DateTimeOffset.UtcNow,
             IsMissing = !File.Exists(normalizedPath)
         };
         AddTrack(track);
@@ -212,6 +215,24 @@ public sealed class TrackLibraryService
         {
             normalizedPath = string.Empty;
             return false;
+        }
+    }
+
+    private static DateTimeOffset ResolveLegacyDate(string path)
+    {
+        try
+        {
+            return File.Exists(path)
+                ? new DateTimeOffset(File.GetCreationTimeUtc(path), TimeSpan.Zero)
+                : DateTimeOffset.UtcNow;
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            return DateTimeOffset.UtcNow;
         }
     }
 

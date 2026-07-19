@@ -739,14 +739,61 @@
 
                             <Border Grid.Column="0" Style="{StaticResource CardStyle}" Padding="16">
                                 <StackPanel>
-                                    <Grid Margin="0,0,0,12">
-                                        <StackPanel>
+                                    <Grid Margin="0,0,0,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
                                             <TextBlock Text="Biblioteca" FontSize="20" FontWeight="SemiBold" />
                                             <TextBlock Text="{Binding LibrarySummary}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
                                         </StackPanel>
+                                        <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                                            <WrapPanel HorizontalAlignment="Right">
+                                                <Button x:Name="LoadLibrarySelectionButton"
+                                                        Style="{StaticResource PrimaryButton}" Content="▶"
+                                                        Padding="9,6" Margin="0,0,5,0" IsEnabled="False"
+                                                        Click="OnLoadLibrarySelectionClick"
+                                                        ToolTip="Cargar la pista seleccionada"
+                                                        AutomationProperties.AutomationId="LoadLibrarySelectionButton" />
+                                                <Button x:Name="AddLibrarySelectionButton"
+                                                        Style="{StaticResource SecondaryButton}" Content="＋"
+                                                        Padding="9,6" Margin="0,0,5,0" IsEnabled="False"
+                                                        Click="OnAddLibrarySelectionToPlaylistClick"
+                                                        ToolTip="Añadir las pistas seleccionadas a la playlist activa"
+                                                        AutomationProperties.AutomationId="AddLibrarySelectionButton" />
+                                                <Button x:Name="RemoveLibrarySelectionButton"
+                                                        Style="{StaticResource SecondaryButton}" Content="✕"
+                                                        Padding="9,6" IsEnabled="False"
+                                                        Click="OnRemoveLibrarySelectionClick"
+                                                        ToolTip="Quitar registros de la biblioteca; no elimina archivos"
+                                                        AutomationProperties.AutomationId="RemoveLibrarySelectionButton" />
+                                            </WrapPanel>
+                                            <TextBlock x:Name="LibrarySelectionSummary" Text="0 seleccionadas"
+                                                       Foreground="{StaticResource TextSecondary}" FontSize="10"
+                                                       Margin="0,3,0,0" HorizontalAlignment="Right" />
+                                        </StackPanel>
                                     </Grid>
-                                    <ListBox x:Name="TrackLibraryList" ItemsSource="{Binding Tracks}"
+                                    <TextBox Text="{Binding LibrarySearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Buscar por nombre, carpeta o tipo"
+                                             Margin="0,0,0,7"
+                                             AutomationProperties.Name="Buscar en la biblioteca"
+                                             AutomationProperties.AutomationId="LibrarySearchTextBox" />
+                                    <ComboBox ItemsSource="{Binding LibrarySortOptions}"
+                                              SelectedItem="{Binding SelectedLibrarySortOption}"
+                                              Margin="0,0,0,9"
+                                              AutomationProperties.Name="Orden de la biblioteca"
+                                              AutomationProperties.AutomationId="LibrarySortComboBox">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Label}" Foreground="#151820" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <ListBox x:Name="TrackLibraryList" ItemsSource="{Binding VisibleTracks}"
                                              SelectedItem="{Binding SelectedLibraryTrack}"
+                                             SelectionMode="Extended"
+                                             SelectionChanged="OnLibrarySelectionChanged"
                                              MaxHeight="430" AutomationProperties.AutomationId="TrackLibraryList"
                                              HorizontalContentAlignment="Stretch"
                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -760,46 +807,23 @@
                                         </ListBox.ItemContainerStyle>
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
-                                                <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="4,10">
-                                                    <Grid>
-                                                        <Grid.RowDefinitions>
-                                                            <RowDefinition Height="Auto" />
-                                                            <RowDefinition Height="Auto" />
-                                                        </Grid.RowDefinitions>
-                                                        <StackPanel>
-                                                            <TextBlock Text="{Binding Title}"
-                                                                       FontWeight="SemiBold"
-                                                                       TextTrimming="CharacterEllipsis"
-                                                                       ToolTip="{Binding Title}" />
-                                                            <TextBlock Text="ARCHIVO NO ENCONTRADO"
-                                                                       Foreground="#FF7B7B"
-                                                                       FontSize="10"
-                                                                       FontWeight="Bold"
-                                                                       Margin="0,3,0,0"
-                                                                       Visibility="{Binding IsMissing, Converter={StaticResource BoolToVisibility}}"
-                                                                       AutomationProperties.AutomationId="MissingTrackBadge" />
-                                                            <TextBlock Text="{Binding VariantLabel}" Foreground="{StaticResource Accent}" FontSize="11" Margin="0,3,0,0" />
-                                                            <TextBlock Text="{Binding Path}" Foreground="{StaticResource TextSecondary}" FontSize="10"
-                                                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" />
-                                                        </StackPanel>
-                                                        <WrapPanel Grid.Row="1"
-                                                                   Margin="0,8,0,0"
-                                                                   HorizontalAlignment="Left">
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="Cargar" Padding="9,6" Margin="0,0,6,0"
-                                                                    Command="{Binding DataContext.LoadTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}" IsEnabled="{Binding IsAvailable}" />
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="+ Playlist" Padding="9,6"
-                                                                    Command="{Binding DataContext.AddTrackToPlaylistCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}"
-                                                                    AutomationProperties.AutomationId="AddTrackToPlaylistButton" />
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="Quitar registro" Padding="9,6"
-                                                                    Margin="6,0,0,0"
-                                                                    ToolTip="Quita la pista de la biblioteca y borra su análisis; no elimina el archivo"
-                                                                    Command="{Binding DataContext.RemoveLibraryTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}"
-                                                                    AutomationProperties.AutomationId="RemoveLibraryTrackButton" />
+                                                <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="5,9">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}" />
+                                                        <TextBlock Text="ARCHIVO NO ENCONTRADO"
+                                                                   Foreground="#FF7B7B" FontSize="10" FontWeight="Bold"
+                                                                   Margin="0,3,0,0"
+                                                                   Visibility="{Binding IsMissing, Converter={StaticResource BoolToVisibility}}"
+                                                                   AutomationProperties.AutomationId="MissingTrackBadge" />
+                                                        <WrapPanel Margin="0,3,0,0">
+                                                            <TextBlock Text="{Binding VariantLabel}" Foreground="{StaticResource Accent}" FontSize="10" />
+                                                            <TextBlock Text=" · " Foreground="{StaticResource TextSecondary}" FontSize="10" />
+                                                            <TextBlock Text="{Binding DateAddedLabel}" Foreground="{StaticResource TextSecondary}" FontSize="10" />
                                                         </WrapPanel>
-                                                    </Grid>
+                                                        <TextBlock Text="{Binding Path}" Foreground="{StaticResource TextSecondary}" FontSize="10"
+                                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" />
+                                                    </StackPanel>
                                                 </Border>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
@@ -830,8 +854,52 @@
                                                 Click="OnOpenPlaylistWindowClick"
                                                 AutomationProperties.AutomationId="OpenPlaylistWindowButton" />
                                     </Grid>
-                                    <ListBox x:Name="PlaylistItemList" ItemsSource="{Binding PlaylistItems}"
+                                    <Grid DockPanel.Dock="Top" Margin="0,0,0,9">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Text="{Binding PlaylistItemSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                                 Margin="0,0,9,0"
+                                                 ToolTip="Buscar dentro de la playlist"
+                                                 AutomationProperties.Name="Buscar en la playlist"
+                                                 AutomationProperties.AutomationId="PlaylistItemSearchTextBox" />
+                                        <StackPanel Grid.Column="1">
+                                            <WrapPanel HorizontalAlignment="Right">
+                                                <Button x:Name="PlayPlaylistSelectionButton"
+                                                        Style="{StaticResource PrimaryButton}" Content="▶"
+                                                        Padding="9,6" Margin="0,0,5,0" IsEnabled="False"
+                                                        Click="OnPlayPlaylistSelectionClick"
+                                                        ToolTip="Reproducir el elemento seleccionado"
+                                                        AutomationProperties.AutomationId="PlayPlaylistSelectionButton" />
+                                                <Button x:Name="MovePlaylistSelectionUpButton"
+                                                        Style="{StaticResource SecondaryButton}" Content="↑"
+                                                        Padding="8,6" Margin="0,0,5,0" IsEnabled="False"
+                                                        Click="OnMovePlaylistSelectionUpClick"
+                                                        ToolTip="Subir el elemento seleccionado"
+                                                        AutomationProperties.AutomationId="MovePlaylistSelectionUpButton" />
+                                                <Button x:Name="MovePlaylistSelectionDownButton"
+                                                        Style="{StaticResource SecondaryButton}" Content="↓"
+                                                        Padding="8,6" Margin="0,0,5,0" IsEnabled="False"
+                                                        Click="OnMovePlaylistSelectionDownClick"
+                                                        ToolTip="Bajar el elemento seleccionado"
+                                                        AutomationProperties.AutomationId="MovePlaylistSelectionDownButton" />
+                                                <Button x:Name="RemovePlaylistSelectionButton"
+                                                        Style="{StaticResource SecondaryButton}" Content="✕"
+                                                        Padding="8,6" IsEnabled="False"
+                                                        Click="OnRemovePlaylistSelectionClick"
+                                                        ToolTip="Quitar los elementos seleccionados; no elimina los orígenes"
+                                                        AutomationProperties.AutomationId="RemovePlaylistSelectionButton" />
+                                            </WrapPanel>
+                                            <TextBlock x:Name="PlaylistItemSelectionSummary" Text="0 seleccionados"
+                                                       Foreground="{StaticResource TextSecondary}" FontSize="10"
+                                                       Margin="0,3,0,0" HorizontalAlignment="Right" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <ListBox x:Name="PlaylistItemList" ItemsSource="{Binding VisiblePlaylistItems}"
                                              SelectedItem="{Binding SelectedPlaylistItem}"
+                                             SelectionMode="Extended"
+                                             SelectionChanged="OnPlaylistSelectionChanged"
                                              MinHeight="390" MaxHeight="540"
                                              AutomationProperties.AutomationId="PlaylistTrackList"
                                              ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -854,7 +922,6 @@
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="36" />
                                                             <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
                                                         <TextBlock Text="☰" Foreground="{StaticResource TextSecondary}"
                                                                    FontSize="18" VerticalAlignment="Center" />
@@ -866,20 +933,6 @@
                                                             <TextBlock Text="{Binding Detail}" Foreground="{StaticResource TextSecondary}"
                                                                        FontSize="10" TextTrimming="CharacterEllipsis" />
                                                         </StackPanel>
-                                                        <WrapPanel Grid.Column="2" VerticalAlignment="Center">
-                                                            <Button Style="{StaticResource PrimaryButton}" Content="▶" Padding="9,6" Margin="0,0,5,0"
-                                                                    Command="{Binding DataContext.PlayPlaylistItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}" IsEnabled="{Binding IsAvailable}" />
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="↑" Padding="8,6" Margin="0,0,5,0"
-                                                                    Command="{Binding DataContext.MovePlaylistItemUpCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}" AutomationProperties.AutomationId="MovePlaylistTrackUpButton" />
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="↓" Padding="8,6" Margin="0,0,5,0"
-                                                                    Command="{Binding DataContext.MovePlaylistItemDownCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}" AutomationProperties.AutomationId="MovePlaylistTrackDownButton" />
-                                                            <Button Style="{StaticResource SecondaryButton}" Content="Quitar" Padding="8,6"
-                                                                    Command="{Binding DataContext.RemovePlaylistItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}" AutomationProperties.AutomationId="RemovePlaylistTrackButton" />
-                                                        </WrapPanel>
                                                     </Grid>
                                                 </Border>
                                             </DataTemplate>
@@ -896,35 +949,40 @@
                                     <TextBlock Text="El selector elige dónde añadir y ordenar pistas. No cambia la mezcla por sí solo."
                                                Foreground="{StaticResource TextSecondary}" FontSize="11"
                                                TextWrapping="Wrap" Margin="0,4,0,0" />
-                                    <ComboBox ItemsSource="{Binding Playlists}" SelectedItem="{Binding SelectedPlaylist}"
-                                              Margin="0,7,0,8"
-                                              AutomationProperties.AutomationId="PlaylistSelector">
-                                        <ComboBox.ItemTemplate>
+                                    <TextBox Text="{Binding PlaylistSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0,7,0,6"
+                                             ToolTip="Buscar playlist por nombre"
+                                             AutomationProperties.Name="Buscar playlists"
+                                             AutomationProperties.AutomationId="PlaylistSearchTextBox" />
+                                    <ListBox ItemsSource="{Binding VisiblePlaylists}"
+                                             SelectedItem="{Binding SelectedPlaylist}"
+                                             MaxHeight="120" Margin="0,0,0,8"
+                                             HorizontalContentAlignment="Stretch"
+                                             AutomationProperties.AutomationId="PlaylistSelector">
+                                        <ListBox.ItemTemplate>
                                             <DataTemplate>
-                                                <TextBlock Text="{Binding Name}" Foreground="#151820" />
+                                                <TextBlock Text="{Binding Name}" Padding="4,3"
+                                                           TextTrimming="CharacterEllipsis" />
                                             </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
                                     <TextBox Text="{Binding PlaylistNameDraft, UpdateSourceTrigger=PropertyChanged}"
                                              ToolTip="Nombre para crear o renombrar" Margin="0,0,0,8"
                                              AutomationProperties.AutomationId="PlaylistNameTextBox" />
                                     <WrapPanel Margin="0,0,0,12">
-                                        <Button Style="{StaticResource PrimaryButton}" Content="Nueva" Padding="11,7" Margin="0,0,6,6"
+                                        <Button Style="{StaticResource PrimaryButton}" Content="＋" Padding="11,7" Margin="0,0,6,6"
                                                 Command="{Binding CreatePlaylistCommand}"
+                                                ToolTip="Crear una playlist"
                                                 AutomationProperties.AutomationId="NewPlaylistButton" />
-                                        <Button Style="{StaticResource SecondaryButton}" Content="Renombrar" Padding="11,7" Margin="0,0,6,6"
+                                        <Button Style="{StaticResource SecondaryButton}" Content="✎" Padding="11,7" Margin="0,0,6,6"
                                                 Command="{Binding RenamePlaylistCommand}"
+                                                ToolTip="Renombrar la playlist seleccionada"
                                                 AutomationProperties.AutomationId="RenamePlaylistButton" />
-                                        <Button Style="{StaticResource SecondaryButton}" Content="Eliminar" Padding="11,7" Margin="0,0,0,6"
+                                        <Button Style="{StaticResource SecondaryButton}" Content="✕" Padding="11,7" Margin="0,0,0,6"
                                                 Command="{Binding DeletePlaylistCommand}"
+                                                ToolTip="Eliminar la playlist; no borra archivos"
                                                 AutomationProperties.AutomationId="DeletePlaylistButton" />
                                     </WrapPanel>
-
-                                    <Button Style="{StaticResource PrimaryButton}" Content="Añadir pista seleccionada"
-                                            Padding="11,7" Margin="0,0,0,8" HorizontalAlignment="Stretch"
-                                            Command="{Binding AddTrackToPlaylistCommand}"
-                                            CommandParameter="{Binding SelectedLibraryTrack}"
-                                            AutomationProperties.AutomationId="AddSelectedTrackToPlaylistButton" />
 
                                     <TextBlock Text="COLA DE REPRODUCCIÓN" Foreground="{StaticResource TextSecondary}"
                                                FontSize="10" FontWeight="Bold" />

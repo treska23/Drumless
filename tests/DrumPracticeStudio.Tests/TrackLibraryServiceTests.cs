@@ -22,6 +22,7 @@ public sealed class TrackLibraryServiceTests
         Assert.AreEqual("Toma uno", loaded.Title);
         Assert.AreEqual(TrackVariant.Recording, loaded.Variant);
         Assert.IsTrue(loaded.IsAvailable);
+        Assert.AreEqual(registered.DateAddedUtc, loaded.DateAddedUtc);
     }
 
     [TestMethod]

@@ -9,6 +9,7 @@ public sealed class StudioStateStoreTests
     [TestMethod]
     public void SaveAndLoad_RoundTripsCompleteState()
     {
+        var dateAddedUtc = new DateTimeOffset(2026, 7, 10, 9, 30, 0, TimeSpan.Zero);
         using var temporary = new TemporaryDirectory();
         var statePath = temporary.Combine("state", "studio-state.json");
         var outputFolder = temporary.Combine("generated");
@@ -84,6 +85,7 @@ public sealed class StudioStateStoreTests
                     Title = "Original",
                     Path = originalPath,
                     Variant = TrackVariant.Original,
+                    DateAddedUtc = dateAddedUtc,
                     Tempo = new TempoSettings(
                         127.5d,
                         0.375d,
@@ -237,6 +239,7 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual("track-original", loaded.Tracks[0].Id);
         Assert.AreEqual(originalPath, loaded.Tracks[0].Path);
         Assert.AreEqual(TrackVariant.Original, loaded.Tracks[0].Variant);
+        Assert.AreEqual(dateAddedUtc, loaded.Tracks[0].DateAddedUtc);
         var loadedTempo = loaded.Tracks[0].Tempo;
         Assert.IsNotNull(loadedTempo);
         Assert.AreEqual(127.5d, loadedTempo.Bpm);

@@ -954,6 +954,42 @@ public partial class MainWindow : Window
     private void OnLibraryDragStart(object sender, MouseButtonEventArgs e) =>
         _libraryDragOrigin = e.GetPosition(TrackLibraryList);
 
+    private IReadOnlyList<LocalTrack> GetSelectedLibraryTracks() =>
+        TrackLibraryList.SelectedItems.Cast<LocalTrack>().ToArray();
+
+    private void OnLibrarySelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var selected = GetSelectedLibraryTracks();
+        _viewModel.SelectedLibraryTrack = selected.LastOrDefault();
+        LibrarySelectionSummary.Text = selected.Count == 1
+            ? "1 seleccionada"
+            : $"{selected.Count} seleccionadas";
+        LoadLibrarySelectionButton.IsEnabled =
+            selected.Count == 1 && selected[0].IsAvailable;
+        AddLibrarySelectionButton.IsEnabled = selected.Count > 0;
+        RemoveLibrarySelectionButton.IsEnabled = selected.Count > 0;
+    }
+
+    private void OnLoadLibrarySelectionClick(object sender, RoutedEventArgs e) =>
+        _viewModel.LoadLibrarySelection(GetSelectedLibraryTracks());
+
+    private void OnAddLibrarySelectionToPlaylistClick(object sender, RoutedEventArgs e) =>
+        _viewModel.AddLibrarySelectionToPlaylist(GetSelectedLibraryTracks());
+
+    private void OnRemoveLibrarySelectionClick(object sender, RoutedEventArgs e)
+    {
+        _viewModel.RemoveLibrarySelection(GetSelectedLibraryTracks());
+        UpdateLibrarySelectionControls();
+    }
+
+    private void UpdateLibrarySelectionControls() =>
+        OnLibrarySelectionChanged(
+            TrackLibraryList,
+            new SelectionChangedEventArgs(
+                Selector.SelectionChangedEvent,
+                Array.Empty<object>(),
+                Array.Empty<object>()));
+
     private void OnLibraryPreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed ||
@@ -970,6 +1006,35 @@ public partial class MainWindow : Window
 
     private void OnPlaylistDragStart(object sender, MouseButtonEventArgs e) =>
         _playlistDragOrigin = e.GetPosition(PlaylistItemList);
+
+    private IReadOnlyList<PlaylistItemViewModel> GetSelectedPlaylistItems() =>
+        PlaylistItemList.SelectedItems.Cast<PlaylistItemViewModel>().ToArray();
+
+    private void OnPlaylistSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var selected = GetSelectedPlaylistItems();
+        _viewModel.SelectedPlaylistItem = selected.LastOrDefault();
+        PlaylistItemSelectionSummary.Text = selected.Count == 1
+            ? "1 seleccionado"
+            : $"{selected.Count} seleccionados";
+        var single = selected.Count == 1;
+        PlayPlaylistSelectionButton.IsEnabled = single && selected[0].IsAvailable;
+        MovePlaylistSelectionUpButton.IsEnabled = single;
+        MovePlaylistSelectionDownButton.IsEnabled = single;
+        RemovePlaylistSelectionButton.IsEnabled = selected.Count > 0;
+    }
+
+    private void OnPlayPlaylistSelectionClick(object sender, RoutedEventArgs e) =>
+        _viewModel.PlayPlaylistSelection(GetSelectedPlaylistItems());
+
+    private void OnMovePlaylistSelectionUpClick(object sender, RoutedEventArgs e) =>
+        _viewModel.MovePlaylistSelection(GetSelectedPlaylistItems(), moveUp: true);
+
+    private void OnMovePlaylistSelectionDownClick(object sender, RoutedEventArgs e) =>
+        _viewModel.MovePlaylistSelection(GetSelectedPlaylistItems(), moveUp: false);
+
+    private void OnRemovePlaylistSelectionClick(object sender, RoutedEventArgs e) =>
+        _viewModel.RemovePlaylistSelection(GetSelectedPlaylistItems());
 
     private void OnPlaylistPreviewMouseMove(object sender, MouseEventArgs e)
     {

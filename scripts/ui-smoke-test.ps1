@@ -100,14 +100,23 @@ $requiredTrackControls = @(
     "OutputFolderPathText",
     "ChooseOutputFolderButton",
     "RescanLibraryButton",
+    "LibrarySearchTextBox",
+    "LibrarySortComboBox",
     "TrackLibraryList",
-    "RemoveLibraryTrackButton",
+    "LoadLibrarySelectionButton",
+    "AddLibrarySelectionButton",
+    "RemoveLibrarySelectionButton",
     "PlaylistSelector",
+    "PlaylistSearchTextBox",
+    "PlaylistItemSearchTextBox",
     "PlaylistNameTextBox",
     "NewPlaylistButton",
     "RenamePlaylistButton",
     "DeletePlaylistButton",
-    "AddSelectedTrackToPlaylistButton",
+    "PlayPlaylistSelectionButton",
+    "MovePlaylistSelectionUpButton",
+    "MovePlaylistSelectionDownButton",
+    "RemovePlaylistSelectionButton",
     "OpenPlaylistWindowButton",
     "PlaylistMixList",
     "ClearPlaylistMixButton",
@@ -126,6 +135,31 @@ foreach ($automationId in $requiredTrackControls) {
         throw "La página de pistas no expuso el control $automationId."
     }
 }
+
+$libraryList = Find-ElementByAutomationId "TrackLibraryList"
+$librarySearch = Find-ElementByAutomationId "LibrarySearchTextBox"
+$listItemCondition = New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::ListItem
+)
+$initialLibraryItems = $libraryList.FindAll(
+    [System.Windows.Automation.TreeScope]::Children,
+    $listItemCondition
+).Count
+$searchValue = $librarySearch.GetCurrentPattern(
+    [System.Windows.Automation.ValuePattern]::Pattern
+)
+$searchValue.SetValue("__codex_sin_resultados_9f731__")
+Start-Sleep -Milliseconds 450
+$filteredLibraryItems = $libraryList.FindAll(
+    [System.Windows.Automation.TreeScope]::Children,
+    $listItemCondition
+).Count
+if ($filteredLibraryItems -ne 0) {
+    throw "La búsqueda de la biblioteca no filtró una consulta sin coincidencias."
+}
+$searchValue.SetValue("")
+Start-Sleep -Milliseconds 300
 
 $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonsCondition)
 $youtubePage = $buttons | Where-Object { $_.Current.Name -like "*YouTube" } | Select-Object -First 1
@@ -169,6 +203,8 @@ if (-not $mapping) {
     PracticeControlsVerified = $requiredPracticeControls.Count
     LibrariesVerified = $factory.Current.Name
     TrackControlsVerified = $requiredTrackControls.Count
+    LibraryRowsBeforeSearch = $initialLibraryItems
+    LibraryRowsWithoutMatches = $filteredLibraryItems
     YouTubeControlsVerified = $requiredYouTubeControls.Count
     MidiProfileVerified = $mapping.Current.Name
 }

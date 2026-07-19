@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -233,6 +233,7 @@ public sealed class StudioStateStore
                 Title = track.Title,
                 Path = track.Path,
                 Variant = track.Variant,
+                DateAddedUtc = track.DateAddedUtc,
                 Tempo = TryCreateTempo(track.Tempo)
             });
         }
@@ -380,6 +381,7 @@ public sealed class StudioStateStore
             Title = track.Title,
             Path = track.Path,
             Variant = track.Variant,
+            DateAddedUtc = track.DateAddedUtc,
             Tempo = track.Tempo is null ? null : ToTempoDto(track.Tempo)
         }).ToList(),
         Playlists = state.Playlists.Select(playlist => new PlaylistDto
@@ -799,6 +801,7 @@ public sealed class StudioStateStore
         public string? Title { get; set; }
         public string? Path { get; set; }
         public TrackVariant Variant { get; set; }
+        public DateTimeOffset? DateAddedUtc { get; set; }
         public TempoDto? Tempo { get; set; }
     }
 

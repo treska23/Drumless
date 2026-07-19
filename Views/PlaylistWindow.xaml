@@ -23,7 +23,7 @@
                 <TextBlock Text="{Binding SelectedPlaylistSummary}"
                            Foreground="{StaticResource TextSecondary}" />
             </StackPanel>
-            <ComboBox Grid.Column="1" ItemsSource="{Binding Playlists}"
+            <ComboBox Grid.Column="1" ItemsSource="{Binding VisiblePlaylists}"
                       SelectedItem="{Binding SelectedPlaylist}" VerticalAlignment="Center"
                       AutomationProperties.AutomationId="FloatingPlaylistSelector">
                 <ComboBox.ItemTemplate>
@@ -32,59 +32,83 @@
             </ComboBox>
         </Grid>
 
-        <ListBox x:Name="FloatingPlaylistList" Grid.Row="1" Margin="0,16"
-                 ItemsSource="{Binding PlaylistItems}" SelectedItem="{Binding SelectedPlaylistItem}"
-                 ScrollViewer.VerticalScrollBarVisibility="Auto"
-                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                 ScrollViewer.CanContentScroll="False"
-                 HorizontalContentAlignment="Stretch"
-                 AllowDrop="True" PreviewMouseLeftButtonDown="OnDragStart"
-                 PreviewMouseMove="OnPreviewMouseMove" Drop="OnDrop"
-                 PreviewMouseWheel="OnPlaylistMouseWheel"
-                 MouseDoubleClick="OnItemDoubleClick"
-                 AutomationProperties.AutomationId="FloatingPlaylistList">
-            <ListBox.ItemContainerStyle>
-                <Style TargetType="ListBoxItem">
-                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                </Style>
-            </ListBox.ItemContainerStyle>
-            <ListBox.ItemTemplate>
-                <DataTemplate>
-                    <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="8,12">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="40" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="☰" FontSize="20" Foreground="{StaticResource TextSecondary}"
-                                       VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" Margin="4,0,12,0">
-                                <TextBlock Text="{Binding Title}" FontSize="17" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding AvailabilityLabel}" Foreground="{StaticResource Accent}"
-                                           FontSize="11" />
-                                <TextBlock Text="{Binding Detail}" Foreground="{StaticResource TextSecondary}"
-                                           FontSize="10" TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                            <WrapPanel Grid.Column="2" VerticalAlignment="Center">
-                                <Button Style="{StaticResource PrimaryButton}" Content="Reproducir" Padding="10,7" Margin="0,0,6,0"
-                                        Command="{Binding DataContext.PlayPlaylistItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        CommandParameter="{Binding}" IsEnabled="{Binding IsAvailable}" />
-                                <Button Style="{StaticResource SecondaryButton}" Content="↑" Padding="9,7" Margin="0,0,6,0"
-                                        Command="{Binding DataContext.MovePlaylistItemUpCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        CommandParameter="{Binding}" />
-                                <Button Style="{StaticResource SecondaryButton}" Content="↓" Padding="9,7" Margin="0,0,6,0"
-                                        Command="{Binding DataContext.MovePlaylistItemDownCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        CommandParameter="{Binding}" />
-                                <Button Style="{StaticResource SecondaryButton}" Content="Quitar" Padding="9,7"
-                                        Command="{Binding DataContext.RemovePlaylistItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        CommandParameter="{Binding}" />
-                            </WrapPanel>
-                        </Grid>
-                    </Border>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
+        <Grid Grid.Row="1" Margin="0,16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid Margin="0,0,0,9">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox Text="{Binding PlaylistItemSearchText, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,10,0" ToolTip="Buscar dentro de la playlist"
+                         AutomationProperties.Name="Buscar en la playlist"
+                         AutomationProperties.AutomationId="FloatingPlaylistSearchTextBox" />
+                <StackPanel Grid.Column="1">
+                    <WrapPanel>
+                        <Button x:Name="FloatingPlayButton" Style="{StaticResource PrimaryButton}"
+                                Content="▶" Padding="10,7" Margin="0,0,6,0" IsEnabled="False"
+                                Click="OnPlaySelectionClick" ToolTip="Reproducir el elemento seleccionado" />
+                        <Button x:Name="FloatingMoveUpButton" Style="{StaticResource SecondaryButton}"
+                                Content="↑" Padding="9,7" Margin="0,0,6,0" IsEnabled="False"
+                                Click="OnMoveSelectionUpClick" ToolTip="Subir el elemento seleccionado" />
+                        <Button x:Name="FloatingMoveDownButton" Style="{StaticResource SecondaryButton}"
+                                Content="↓" Padding="9,7" Margin="0,0,6,0" IsEnabled="False"
+                                Click="OnMoveSelectionDownClick" ToolTip="Bajar el elemento seleccionado" />
+                        <Button x:Name="FloatingRemoveButton" Style="{StaticResource SecondaryButton}"
+                                Content="✕" Padding="9,7" IsEnabled="False"
+                                Click="OnRemoveSelectionClick"
+                                ToolTip="Quitar los elementos seleccionados; no elimina los orígenes" />
+                    </WrapPanel>
+                    <TextBlock x:Name="FloatingSelectionSummary" Text="0 seleccionados"
+                               Foreground="{StaticResource TextSecondary}" FontSize="10"
+                               HorizontalAlignment="Right" Margin="0,3,0,0" />
+                </StackPanel>
+            </Grid>
+
+            <ListBox x:Name="FloatingPlaylistList" Grid.Row="1"
+                     ItemsSource="{Binding VisiblePlaylistItems}" SelectedItem="{Binding SelectedPlaylistItem}"
+                     SelectionMode="Extended" SelectionChanged="OnSelectionChanged"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.CanContentScroll="False"
+                     HorizontalContentAlignment="Stretch"
+                     AllowDrop="True" PreviewMouseLeftButtonDown="OnDragStart"
+                     PreviewMouseMove="OnPreviewMouseMove" Drop="OnDrop"
+                     PreviewMouseWheel="OnPlaylistMouseWheel"
+                     MouseDoubleClick="OnItemDoubleClick"
+                     AutomationProperties.AutomationId="FloatingPlaylistList">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="8,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="40" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="☰" FontSize="20" Foreground="{StaticResource TextSecondary}"
+                                           VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1" Margin="4,0,12,0">
+                                    <TextBlock Text="{Binding Title}" FontSize="17" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding AvailabilityLabel}" Foreground="{StaticResource Accent}"
+                                               FontSize="11" />
+                                    <TextBlock Text="{Binding Detail}" Foreground="{StaticResource TextSecondary}"
+                                               FontSize="10" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
 
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>

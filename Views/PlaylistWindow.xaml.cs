@@ -22,6 +22,35 @@ public partial class PlaylistWindow : Window
     private void OnDragStart(object sender, MouseButtonEventArgs e) =>
         _dragOrigin = e.GetPosition(FloatingPlaylistList);
 
+    private IReadOnlyList<PlaylistItemViewModel> SelectedItems() =>
+        FloatingPlaylistList.SelectedItems.Cast<PlaylistItemViewModel>().ToArray();
+
+    private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var selected = SelectedItems();
+        _viewModel.SelectedPlaylistItem = selected.LastOrDefault();
+        FloatingSelectionSummary.Text = selected.Count == 1
+            ? "1 seleccionado"
+            : $"{selected.Count} seleccionados";
+        var single = selected.Count == 1;
+        FloatingPlayButton.IsEnabled = single && selected[0].IsAvailable;
+        FloatingMoveUpButton.IsEnabled = single;
+        FloatingMoveDownButton.IsEnabled = single;
+        FloatingRemoveButton.IsEnabled = selected.Count > 0;
+    }
+
+    private void OnPlaySelectionClick(object sender, RoutedEventArgs e) =>
+        _viewModel.PlayPlaylistSelection(SelectedItems());
+
+    private void OnMoveSelectionUpClick(object sender, RoutedEventArgs e) =>
+        _viewModel.MovePlaylistSelection(SelectedItems(), moveUp: true);
+
+    private void OnMoveSelectionDownClick(object sender, RoutedEventArgs e) =>
+        _viewModel.MovePlaylistSelection(SelectedItems(), moveUp: false);
+
+    private void OnRemoveSelectionClick(object sender, RoutedEventArgs e) =>
+        _viewModel.RemovePlaylistSelection(SelectedItems());
+
     private void OnPreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed ||
