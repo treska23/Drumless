@@ -398,6 +398,21 @@ public sealed class AudioEffectSlotItem : ObservableObject
         }
     }
 
+    public void SelectExternalVst3(Vst3EffectReference reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        if (!Equals(_externalVst3, reference))
+        {
+            ExternalVst3 = reference;
+            return;
+        }
+
+        // Selecting the same entry is an explicit retry after a host failure.
+        OnPropertyChanged(nameof(ExternalVst3));
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(CanOpenEditor));
+    }
+
     public bool IsExternal => Kind == AudioEffectKind.ExternalVst3;
     public bool CanOpenEditor => IsEnabled && ExternalVst3 is not null;
     public string DisplayName => IsExternal

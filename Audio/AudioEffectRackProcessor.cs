@@ -112,7 +112,8 @@ internal sealed class AudioEffectRackProcessor : IDisposable
             requested.Select(effect =>
                 $"{effect.Id}:{effect.ExternalVst3!.ModulePath}:{effect.ExternalVst3.ClassId}:" +
                 effect.ExternalVst3.PresetPath));
-        if (string.Equals(signature, _externalSignature, StringComparison.Ordinal))
+        if (string.Equals(signature, _externalSignature, StringComparison.Ordinal) &&
+            _external.All(effect => effect.Processor.IsAvailable))
         {
             for (var index = 0; index < requested.Length && index < _external.Count; index++)
             {

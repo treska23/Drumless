@@ -12,13 +12,19 @@ param(
     [string] $Version = "",
     [string] $SdkVersion = "",
     [string] $SubCategories = "Fx",
-    [int] $Frames = 256
+    [int] $Frames = 256,
+    [int] $Blocks = 1,
+    [switch] $OpenEditor,
+    [ValidateSet("Debug", "Release")]
+    [string] $BuildConfiguration = "Debug"
 )
 
 $ErrorActionPreference = "Stop"
 
 $executable = Resolve-Path (
-    Join-Path $PSScriptRoot "..\bin\Debug\net10.0-windows10.0.19041.0\DrumPracticeStudio.exe"
+    Join-Path $PSScriptRoot (
+        "..\bin\$BuildConfiguration\net10.0-windows10.0.19041.0\DrumPracticeStudio.exe"
+    )
 )
 $root = Join-Path ([System.IO.Path]::GetTempPath()) (
     "DrumPracticeStudio.Vst3BridgeTest." + [Guid]::NewGuid().ToString("N")
@@ -106,38 +112,54 @@ try {
     $reader = [System.IO.BinaryReader]::new($pipe, $encoding, $true)
     Write-ClientStage "Lectores binarios creados."
 
-    $inputSamples = [single[]]::new($Frames * 2)
-    for ($frame = 0; $frame -lt $Frames; $frame++) {
-        # The physical guitar input is mono. The bridge receives the same sample in L/R
-        # only so a stereo-only effect can consume it without involving another input.
-        $sample = [single](0.01 * [Math]::Sin(2 * [Math]::PI * 220 * $frame / 48000))
-        $inputSamples[$frame * 2] = $sample
-        $inputSamples[($frame * 2) + 1] = $sample
-    }
-    $inputBytes = [byte[]]::new($inputSamples.Length * 4)
-    [System.Buffer]::BlockCopy($inputSamples, 0, $inputBytes, 0, $inputBytes.Length)
-    $writer.Write([int]$Frames)
-    $writer.Write($inputBytes)
-    $writer.Flush()
-    Write-ClientStage "Bloque enviado."
-
-    $outputFrames = $reader.ReadInt32()
-    Write-ClientStage "Cabecera de respuesta recibida."
-    if ($outputFrames -ne $Frames) {
-        throw "El efecto devolvió $outputFrames frames; se esperaban $Frames."
-    }
-    $outputBytes = $reader.ReadBytes($outputFrames * 2 * 4)
-    if ($outputBytes.Length -ne ($outputFrames * 2 * 4)) {
-        throw "La respuesta de audio llegó incompleta."
-    }
-    $outputSamples = [single[]]::new($outputFrames * 2)
-    [System.Buffer]::BlockCopy($outputBytes, 0, $outputSamples, 0, $outputBytes.Length)
-    [double] $peak = 0
-    foreach ($sample in $outputSamples) {
-        if ([single]::IsNaN($sample) -or [single]::IsInfinity($sample)) {
-            throw "El efecto produjo una muestra no finita."
+    if ($OpenEditor) {
+        $writer.Write([int]-1)
+        $writer.Flush()
+        $editorOpened = $reader.ReadBoolean()
+        $editorMessage = $reader.ReadString()
+        if (-not $editorOpened) {
+            throw "No se pudo abrir el editor: $editorMessage"
         }
-        $peak = [Math]::Max($peak, [Math]::Abs($sample))
+    }
+
+    [double] $phase = 0
+    [double] $peak = 0
+    for ($block = 0; $block -lt $Blocks; $block++) {
+        if ($process.HasExited) {
+            throw "El proceso VST3 terminó antes del bloque $block con código $($process.ExitCode)."
+        }
+
+        $inputSamples = [single[]]::new($Frames * 2)
+        for ($frame = 0; $frame -lt $Frames; $frame++) {
+            # The physical guitar input is mono. The bridge receives the same sample in L/R
+            # only so a stereo-only effect can consume it without involving another input.
+            $sample = [single](0.01 * [Math]::Sin($phase))
+            $phase += 2 * [Math]::PI * 220 / 48000
+            $inputSamples[$frame * 2] = $sample
+            $inputSamples[($frame * 2) + 1] = $sample
+        }
+        $inputBytes = [byte[]]::new($inputSamples.Length * 4)
+        [System.Buffer]::BlockCopy($inputSamples, 0, $inputBytes, 0, $inputBytes.Length)
+        $writer.Write([int]$Frames)
+        $writer.Write($inputBytes)
+        $writer.Flush()
+
+        $outputFrames = $reader.ReadInt32()
+        if ($outputFrames -ne $Frames) {
+            throw "El efecto devolvió $outputFrames frames; se esperaban $Frames."
+        }
+        $outputBytes = $reader.ReadBytes($outputFrames * 2 * 4)
+        if ($outputBytes.Length -ne ($outputFrames * 2 * 4)) {
+            throw "La respuesta de audio llegó incompleta en el bloque $block."
+        }
+        $outputSamples = [single[]]::new($outputFrames * 2)
+        [System.Buffer]::BlockCopy($outputBytes, 0, $outputSamples, 0, $outputBytes.Length)
+        foreach ($sample in $outputSamples) {
+            if ([single]::IsNaN($sample) -or [single]::IsInfinity($sample)) {
+                throw "El efecto produjo una muestra no finita en el bloque $block."
+            }
+            $peak = [Math]::Max($peak, [Math]::Abs($sample))
+        }
     }
     if ($peak -gt 8) {
         throw "El efecto produjo un pico inseguro: $peak."
@@ -146,9 +168,10 @@ try {
     $writer.Write([int]0)
     $writer.Flush()
     Write-Output (
-        "VST3_OK Name='{0}' Frames={1} Peak={2:N6} Editor={3} Latency={4}" -f
+        "VST3_OK Name='{0}' Frames={1} Blocks={2} Peak={3:N6} Editor={4} Latency={5}" -f
         $Name,
-        $outputFrames,
+        $Frames,
+        $Blocks,
         $peak,
         $ready.HasEditor,
         $ready.LatencySamples

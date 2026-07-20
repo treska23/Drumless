@@ -32,6 +32,30 @@ public sealed class AudioInputChannelItemTests
     }
 
     [TestMethod]
+    public void EffectSlot_SelectingSamePluginNotifiesAnExplicitRetry()
+    {
+        var effect = Effect("Retry");
+        var slot = new AudioEffectSlotItem(AudioEffectSlotSetting.Create(
+            AudioEffectKind.ExternalVst3))
+        {
+            ExternalVst3 = effect
+        };
+        var notifications = 0;
+        slot.PropertyChanged += (_, eventArgs) =>
+        {
+            if (eventArgs.PropertyName == nameof(AudioEffectSlotItem.ExternalVst3))
+            {
+                notifications++;
+            }
+        };
+
+        slot.SelectExternalVst3(effect);
+
+        Assert.AreEqual(1, notifications);
+        Assert.AreSame(effect, slot.ExternalVst3);
+    }
+
+    [TestMethod]
     public void DisplayName_DisabledChannelUsesSafeLabel()
     {
         var channel = new AudioInputChannelItem(null, "ignored");

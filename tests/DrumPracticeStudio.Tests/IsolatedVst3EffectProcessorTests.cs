@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DrumPracticeStudio.Audio;
 
 namespace DrumPracticeStudio.Tests;
@@ -20,6 +21,25 @@ public sealed class IsolatedVst3EffectProcessorTests
         IsolatedVst3EffectProcessor.DisposeIgnoringErrors(disposable);
 
         Assert.IsTrue(disposable.WasDisposed);
+    }
+
+    [TestMethod]
+    public void AudioBlockWatchdog_OnlyExpiresTheSameLongRunningRequest()
+    {
+        var started = Stopwatch.Frequency;
+
+        Assert.IsFalse(IsolatedVst3EffectProcessor.HasAudioBlockTimedOut(
+            0,
+            started + (Stopwatch.Frequency * 30),
+            TimeSpan.FromSeconds(12)));
+        Assert.IsFalse(IsolatedVst3EffectProcessor.HasAudioBlockTimedOut(
+            started,
+            started + (Stopwatch.Frequency * 11),
+            TimeSpan.FromSeconds(12)));
+        Assert.IsTrue(IsolatedVst3EffectProcessor.HasAudioBlockTimedOut(
+            started,
+            started + (Stopwatch.Frequency * 12),
+            TimeSpan.FromSeconds(12)));
     }
 
     private sealed class ThrowingDisposable(Exception exception) : IDisposable

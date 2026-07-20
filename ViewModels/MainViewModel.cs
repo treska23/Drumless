@@ -1272,7 +1272,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_audio.EffectBusWarning is { } effectWarning &&
             !AudioInputStatus.Contains(effectWarning, StringComparison.Ordinal))
         {
-            AudioInputStatus = effectWarning + " · La señal continúa sin ese plugin.";
+            AudioInputStatus = effectWarning +
+                               " · La señal continúa sin ese plugin. " +
+                               "Vuelve a seleccionarlo para reintentar.";
         }
 
         while (_audio.TryDequeueTrackEnded(out var ended))

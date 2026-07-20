@@ -189,7 +189,8 @@ internal sealed class AudioInputProfileProcessor : IDisposable
                 $"{effect.ExternalVst3.PresetPath}"));
         lock (_externalGate)
         {
-            if (string.Equals(signature, _externalSignature, StringComparison.Ordinal))
+            if (string.Equals(signature, _externalSignature, StringComparison.Ordinal) &&
+                _externalEffects.All(effect => effect.Processor.IsAvailable))
             {
                 for (var index = 0; index < external.Length && index < _externalEffects.Count; index++)
                 {

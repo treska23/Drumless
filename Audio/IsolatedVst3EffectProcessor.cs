@@ -15,11 +15,13 @@ namespace DrumPracticeStudio.Audio;
 internal sealed class IsolatedVst3EffectProcessor : IDisposable
 {
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(35);
-    private static readonly TimeSpan AudioBlockTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan AudioBlockTimeout = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(1);
     private readonly Process _process;
     private readonly Stream _bridgeStream;
     private readonly BinaryWriter _writer;
     private readonly BinaryReader _reader;
+    private readonly string _diagnosticPath;
     private readonly Channel<BridgeRequest> _input;
     private readonly ConcurrentQueue<AudioPacket> _output = new();
     private readonly CancellationTokenSource _cancellation = new();
@@ -28,6 +30,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
     private int _disposed;
     private int _pipelineFrames;
     private int _suspiciousOutputBlocks;
+    private long _activeRequestStartedTimestamp;
     private string? _failure;
 
     private IsolatedVst3EffectProcessor(
@@ -35,10 +38,12 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         Stream bridgeStream,
         Vst3EffectReference reference,
         uint pluginLatencySamples,
-        bool hasEditor)
+        bool hasEditor,
+        string diagnosticPath)
     {
         _process = process;
         _bridgeStream = bridgeStream;
+        _diagnosticPath = diagnosticPath;
         var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         _writer = new BinaryWriter(bridgeStream, utf8, leaveOpen: true);
         _reader = new BinaryReader(bridgeStream, utf8, leaveOpen: true);
@@ -51,7 +56,11 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.Wait
         });
-        _watchdog = new Timer(OnAudioBlockTimeout);
+        _watchdog = new Timer(
+            OnAudioBlockTimeout,
+            state: null,
+            WatchdogInterval,
+            WatchdogInterval);
         _bridge = Task.Run(BridgeAsync);
     }
 
@@ -156,7 +165,8 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
                 bridgePipe,
                 reference,
                 ready.LatencySamples,
-                ready.HasEditor);
+                ready.HasEditor,
+                diagnosticPath);
         }
         catch
         {
@@ -309,8 +319,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             var sample = processed.Buffer[index];
             if (!float.IsFinite(sample) || MathF.Abs(sample) > 8f)
             {
-                Volatile.Write(
-                    ref _failure,
+                ReportFailure(
                     $"{Reference.Name} quedó en bypass de seguridad: produjo audio no válido o fuera de rango.");
                 return false;
             }
@@ -326,8 +335,7 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             return true;
         }
 
-        Volatile.Write(
-            ref _failure,
+        ReportFailure(
             $"{Reference.Name} quedó en bypass de seguridad: detectada una salida sostenida muy alta sin señal de entrada.");
         return false;
     }
@@ -428,11 +436,13 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
         {
         }
+        catch (Exception) when (Volatile.Read(ref _disposed) != 0)
+        {
+            // Replacing or removing a slot closes the pipe intentionally.
+        }
         catch (Exception exception)
         {
-            Volatile.Write(
-                ref _failure,
-                $"{Reference.Name} quedó en bypass: {exception.Message}");
+            ReportFailure(BuildBridgeFailureMessage(exception));
         }
         finally
         {
@@ -455,9 +465,10 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
 
     private void ProcessAudioRequest(AudioRequest packet)
     {
+        var startedTimestamp = Stopwatch.GetTimestamp();
+        Volatile.Write(ref _activeRequestStartedTimestamp, startedTimestamp);
         try
         {
-            _watchdog.Change(AudioBlockTimeout, Timeout.InfiniteTimeSpan);
             _writer.Write(packet.Frames);
             _writer.Write(MemoryMarshal.AsBytes(
                 packet.Buffer.AsSpan(0, packet.Frames * 2)));
@@ -479,7 +490,10 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         }
         finally
         {
-            _watchdog.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            Interlocked.CompareExchange(
+                ref _activeRequestStartedTimestamp,
+                0,
+                startedTimestamp);
             ArrayPool<float>.Shared.Return(packet.Buffer);
         }
     }
@@ -490,15 +504,72 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         {
             return;
         }
-        Volatile.Write(
-            ref _failure,
-            $"{Reference.Name} quedó en bypass de seguridad porque dejó de responder al procesar audio.");
+
+        var startedTimestamp = Volatile.Read(ref _activeRequestStartedTimestamp);
+        if (!HasAudioBlockTimedOut(
+                startedTimestamp,
+                Stopwatch.GetTimestamp(),
+                AudioBlockTimeout) ||
+            Interlocked.CompareExchange(
+                ref _activeRequestStartedTimestamp,
+                -1,
+                startedTimestamp) != startedTimestamp)
+        {
+            return;
+        }
+
+        ReportFailure(
+            $"{Reference.Name} quedó en bypass de seguridad porque el host VST3 no respondió " +
+            $"durante {AudioBlockTimeout.TotalSeconds:0} segundos. Registro: {_diagnosticPath}");
         try
         {
             if (!_process.HasExited)
             {
                 _process.Kill(entireProcessTree: true);
             }
+        }
+        catch
+        {
+        }
+    }
+
+    internal static bool HasAudioBlockTimedOut(
+        long startedTimestamp,
+        long currentTimestamp,
+        TimeSpan timeout) =>
+        startedTimestamp > 0 &&
+        currentTimestamp >= startedTimestamp &&
+        Stopwatch.GetElapsedTime(startedTimestamp, currentTimestamp) >= timeout;
+
+    private string BuildBridgeFailureMessage(Exception exception)
+    {
+        var processDetail = string.Empty;
+        try
+        {
+            if (_process.HasExited)
+            {
+                processDetail = $" El host VST3 terminó con código {_process.ExitCode}.";
+            }
+        }
+        catch
+        {
+        }
+        var reason = exception.Message.Trim().TrimEnd('.');
+        return $"{Reference.Name} quedó en bypass: {reason}.{processDetail} " +
+               $"Registro: {_diagnosticPath}";
+    }
+
+    private void ReportFailure(string message)
+    {
+        if (Interlocked.CompareExchange(ref _failure, message, null) is not null)
+        {
+            return;
+        }
+        try
+        {
+            File.AppendAllText(
+                _diagnosticPath,
+                $"{DateTimeOffset.Now:O} HOST: {message}{Environment.NewLine}");
         }
         catch
         {

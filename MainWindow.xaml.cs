@@ -1116,7 +1116,7 @@ public partial class MainWindow : Window
                 SelectedItem: Vst3EffectItem effect
             })
         {
-            slot.ExternalVst3 = effect.ToReference();
+            slot.SelectExternalVst3(effect.ToReference());
         }
     }
 
