@@ -83,9 +83,29 @@ internal sealed class InProcessVst3EffectCore : IDisposable
 
             var statePath = GetAutomaticStatePath(slotId, reference);
             var loadPath = File.Exists(statePath) ? statePath : reference.PresetPath;
-            if (!string.IsNullOrWhiteSpace(loadPath) && File.Exists(loadPath))
+
+            // A VST3 processor may be perfectly usable for audio while exposing no edit controller.
+            // The vendor host currently reports that situation as ObjectDisposedException when
+            // LoadPreset is attempted. State restore is therefore best-effort and must never prevent
+            // the DSP from loading. This is especially important for shell-style Waves plug-ins.
+            if (plugin.HasEditController &&
+                !string.IsNullOrWhiteSpace(loadPath) &&
+                File.Exists(loadPath))
             {
-                plugin.LoadPreset(loadPath);
+                try
+                {
+                    plugin.LoadPreset(loadPath);
+                }
+                catch (Exception exception) when (exception is
+                    IOException or
+                    UnauthorizedAccessException or
+                    InvalidDataException or
+                    InvalidOperationException or
+                    ObjectDisposedException or
+                    NotSupportedException)
+                {
+                    // An old, corrupt or host-incompatible state must not put a working effect in bypass.
+                }
             }
 
             try
@@ -337,6 +357,10 @@ internal sealed class InProcessVst3EffectCore : IDisposable
     {
         try
         {
+            if (!Plugin.HasEditController)
+            {
+                return;
+            }
             Directory.CreateDirectory(Path.GetDirectoryName(_statePath)!);
             Plugin.SavePreset(_statePath);
         }
