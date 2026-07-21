@@ -14,6 +14,7 @@ namespace DrumPracticeStudio.Audio;
 internal sealed class IsolatedVst3EffectProcessor : IDisposable
 {
     private readonly InProcessVst3EffectCore _core;
+    private bool _shellControllerRecoveryAttempted;
 
     private IsolatedVst3EffectProcessor(InProcessVst3EffectCore core)
     {
@@ -42,19 +43,35 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
     public Task<Vst3EffectEditorResult> OpenEditorAsync(
         CancellationToken cancellationToken = default)
     {
-        // Guitar Rig and other single-object/JUCE VST3s already expose their editor controller
-        // normally. Some WaveShell generations instead leave the processor alive but fail the
-        // initial controller resolution. Recover that separate controller only when it is missing;
-        // the normal path that already works is deliberately left untouched.
-        if (!_core.Plugin.HasEditController && TryGetCoreModule() is { } module)
+        if (!_shellControllerRecoveryAttempted &&
+            LooksLikeWaveShell(Reference) &&
+            TryGetCoreModule() is { } module)
         {
-            _ = Vst3ControllerRecovery.TryRecoverForEditor(_core.Plugin, module);
+            _shellControllerRecoveryAttempted = true;
+
+            // Some WaveShell versions leave a non-null but wrong controller in the generic fallback:
+            // it passes QI(IEditController), yet createView("editor") returns null. Replace that
+            // controller once with the actual non-zero CID advertised by the component. Guitar Rig
+            // and normal VST3s never enter this path, so their already-working editor flow is untouched.
+            _ = Vst3ControllerRecovery.TryRecoverForEditor(
+                _core.Plugin,
+                module,
+                replaceExistingController: true);
+        }
+        else if (!_core.Plugin.HasEditController && TryGetCoreModule() is { } fallbackModule)
+        {
+            _ = Vst3ControllerRecovery.TryRecoverForEditor(_core.Plugin, fallbackModule);
         }
 
         return _core.OpenEditorAsync(cancellationToken);
     }
 
     public void Dispose() => _core.Dispose();
+
+    private static bool LooksLikeWaveShell(Vst3EffectReference reference) =>
+        reference.Vendor.Contains("Waves", StringComparison.OrdinalIgnoreCase) ||
+        reference.ModulePath.Contains("WaveShell", StringComparison.OrdinalIgnoreCase) ||
+        reference.Name.StartsWith("GTR ", StringComparison.OrdinalIgnoreCase);
 
     private Vst3Module? TryGetCoreModule() =>
         typeof(InProcessVst3EffectCore)
