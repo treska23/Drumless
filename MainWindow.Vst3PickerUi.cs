@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using DrumPracticeStudio.Models;
@@ -31,9 +32,9 @@ public partial class MainWindow
             return;
         }
 
-        // The editable ComboBox was doing two incompatible jobs at once: search text and
-        // actual selection. Refreshing its filtered ICollectionView while typing could move
-        // the caret, eat characters and clear SelectedItem. Keep it as a pure selector.
+        // El selector ya no hace de cuadro de búsqueda. Mantener ambas funciones en el mismo
+        // ComboBox hacía que WPF refrescara la vista mientras se escribía, comiera caracteres y
+        // perdiera SelectedItem. El ComboBox queda como selector puro.
         var explicitReference = slot.ExternalVst3;
         comboBox.IsEditable = false;
         comboBox.IsTextSearchEnabled = false;
@@ -46,8 +47,7 @@ public partial class MainWindow
             comboBox.Text = string.Empty;
         }
 
-        // Let the instance Loaded handler finish wrapping ItemsSource in ListCollectionView,
-        // then add the independent search box next to the finished picker.
+        // El Loaded del propio ComboBox termina primero de envolver ItemsSource en ListCollectionView.
         _ = comboBox.Dispatcher.BeginInvoke(
             DispatcherPriority.ContextIdle,
             new Action(() => ConfigureVst3PickerSearch(comboBox, slot, explicitReference)));
@@ -83,44 +83,55 @@ public partial class MainWindow
             Foreground = comboBox.TryFindResource("TextSecondary") as Brush
                          ?? SystemColors.GrayTextBrush
         };
+
+        var searchRow = new Grid
+        {
+            Margin = new Thickness(0, 0, 0, 5)
+        };
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
         var searchBox = new TextBox
         {
             MinHeight = 28,
-            Margin = new Thickness(0, 0, 0, 5),
-            ToolTip = "Escribe para filtrar por nombre, fabricante o tipo"
+            ToolTip = "Escribe el nombre, fabricante o tipo y pulsa Buscar"
         };
+        Grid.SetColumn(searchBox, 0);
+        searchRow.Children.Add(searchBox);
+
+        var searchButton = new Button
+        {
+            Content = "Buscar",
+            Margin = new Thickness(6, 0, 0, 0),
+            Padding = new Thickness(10, 4, 10, 4),
+            ToolTip = "Filtrar la lista de plugins"
+        };
+        searchButton.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryButton");
+        Grid.SetColumn(searchButton, 1);
+        searchRow.Children.Add(searchButton);
 
         parent.Children.Insert(comboIndex, label);
-        parent.Children.Insert(comboIndex + 1, searchBox);
+        parent.Children.Insert(comboIndex + 1, searchRow);
 
-        var timer = new DispatcherTimer(
-            DispatcherPriority.Background,
-            comboBox.Dispatcher)
-        {
-            Interval = TimeSpan.FromMilliseconds(180)
-        };
-        var state = new Vst3PickerSearchState(searchBox, label, timer);
+        var state = new Vst3PickerSearchState(searchBox, label, searchButton, searchRow);
         Vst3PickerSearchStates.Add(comboBox, state);
 
-        timer.Tick += (_, _) =>
+        void RunSearch()
         {
-            timer.Stop();
             ApplyVst3PickerFilter(comboBox, searchBox.Text);
-            if (!string.IsNullOrWhiteSpace(searchBox.Text) &&
-                searchBox.IsKeyboardFocusWithin)
-            {
-                comboBox.IsDropDownOpen = true;
-            }
-        };
+            comboBox.IsDropDownOpen = true;
+        }
 
-        searchBox.TextChanged += (_, _) =>
+        searchButton.Click += (_, _) => RunSearch();
+        searchBox.KeyDown += (_, eventArgs) =>
         {
-            if (state.SuppressSearchChange)
+            if (eventArgs.Key != Key.Enter)
             {
                 return;
             }
-            timer.Stop();
-            timer.Start();
+
+            RunSearch();
+            eventArgs.Handled = true;
         };
 
         comboBox.SelectionChanged += (_, _) =>
@@ -130,16 +141,14 @@ public partial class MainWindow
                 return;
             }
 
-            timer.Stop();
-            state.SuppressSearchChange = true;
+            // Tras elegir un plugin se restaura el catálogo completo. La selección permanece en
+            // el ComboBox y una búsqueda posterior parte de cero.
             searchBox.Clear();
-            state.SuppressSearchChange = false;
             ApplyVst3PickerFilter(comboBox, null);
         };
 
         comboBox.Unloaded += (_, _) =>
         {
-            timer.Stop();
             Vst3PickerSearchStates.Remove(comboBox);
         };
 
@@ -164,9 +173,9 @@ public partial class MainWindow
         AudioEffectSlotItem slot,
         Vst3EffectReference? explicitReference)
     {
-        // A newly-created empty slot must stay empty. In the old editable/synchronised picker,
-        // ICollectionView could promote its first current item into SelectedItem (often a Waves
-        // plug-in), making it look as though the app had chosen a plug-in by itself.
+        // Un slot recién creado debe quedarse vacío. El antiguo selector editable podía promover
+        // el primer elemento actual de ICollectionView a SelectedItem y parecía que la aplicación
+        // había elegido un plugin por su cuenta.
         if (explicitReference is null)
         {
             comboBox.SelectedIndex = -1;
@@ -216,11 +225,12 @@ public partial class MainWindow
     private sealed class Vst3PickerSearchState(
         TextBox searchBox,
         TextBlock label,
-        DispatcherTimer timer)
+        Button searchButton,
+        Grid searchRow)
     {
         public TextBox SearchBox { get; } = searchBox;
         public TextBlock Label { get; } = label;
-        public DispatcherTimer Timer { get; } = timer;
-        public bool SuppressSearchChange { get; set; }
+        public Button SearchButton { get; } = searchButton;
+        public Grid SearchRow { get; } = searchRow;
     }
 }
