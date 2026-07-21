@@ -26,20 +26,30 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         {
             _shellControllerRecoveryAttempted = true;
 
-            // Steinberg especifica que getControllerClassId debe consultarse con el componente en
-            // estado Created, antes de initialize(). El Vst3Plugin genérico ya está inicializado en
-            // este punto, por lo que WaveShell puede devolver un CID vacío o incorrecto. Para Waves
-            // creamos una instancia temporal SIN inicializar, obtenemos de ella el CID correcto y
-            // conectamos ese controlador con la instancia real que procesa audio.
-            _shellControllerRecoverySucceeded = Vst3WaveShellControllerProbe.TryRecover(
+            // Steinberg's host guidance says that when there is no separate edit-controller class,
+            // the host must also query the audio processor for IEditController. The generic host only
+            // queried the component before initialize(), which misses some shell-style plug-ins.
+            // Try the live processor/component COM identities first; this is the closest match to the
+            // single-component compatibility path described by the VST3 SDK.
+            _shellControllerRecoverySucceeded = Vst3SameObjectControllerRecovery.TryRecover(
                 _core.Plugin,
-                module,
                 out _shellControllerRecoveryDiagnostic);
 
-            // Conservamos la recuperación genérica como último recurso, pero el diagnóstico deja
-            // claro si fue necesario porque la ruta correcta previa a initialize no funcionó.
             if (!_shellControllerRecoverySucceeded)
             {
+                // Secondary compatibility path: probe a fresh component while it is still in Created
+                // state and ask for a separate controller CID before initialize().
+                var probeSucceeded = Vst3WaveShellControllerProbe.TryRecover(
+                    _core.Plugin,
+                    module,
+                    out var probeDiagnostic);
+                _shellControllerRecoveryDiagnostic += $"; probe Created: {probeDiagnostic}";
+                _shellControllerRecoverySucceeded = probeSucceeded;
+            }
+
+            if (!_shellControllerRecoverySucceeded)
+            {
+                // Final generic fallback retained for non-standard factories.
                 var genericSucceeded = Vst3ControllerRecovery.TryRecoverForEditor(
                     _core.Plugin,
                     module,
