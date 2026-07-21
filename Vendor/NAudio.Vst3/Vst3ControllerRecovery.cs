@@ -15,12 +15,15 @@ public static class Vst3ControllerRecovery
 {
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
 
-    public static unsafe bool TryRecoverForEditor(Vst3Plugin plugin, Vst3Module module)
+    public static unsafe bool TryRecoverForEditor(
+        Vst3Plugin plugin,
+        Vst3Module module,
+        bool replaceExistingController = false)
     {
         ArgumentNullException.ThrowIfNull(plugin);
         ArgumentNullException.ThrowIfNull(module);
 
-        if (plugin.HasEditController)
+        if (plugin.HasEditController && !replaceExistingController)
         {
             return true;
         }
@@ -34,8 +37,11 @@ public static class Vst3ControllerRecovery
 
         var candidateIds = new List<string>();
 
-        // Some shell plug-ins fill the controller CID correctly but return kResultFalse instead of Ok.
-        // The old host discarded the filled CID solely because of the return code. Trust a non-zero CID.
+        // IMPORTANT: several shell plug-ins (notably some WaveShell generations) fill the
+        // controller CID but return kResultFalse. The former host looked only at the return code,
+        // threw away that perfectly valid CID, and tried the processor CID instead. That can yield
+        // an object which QIs as IEditController but whose createView("editor") returns null.
+        // Trust any non-zero CID written by the component regardless of the tresult value.
         Span<byte> advertisedCid = stackalloc byte[16];
         advertisedCid.Clear();
         fixed (byte* cidPtr = advertisedCid)
@@ -48,8 +54,7 @@ public static class Vst3ControllerRecovery
         }
 
         // Secondary compatibility path: factories such as WaveShell may publish a distinct controller
-        // class. Only consider controller classes whose normalized name matches this processor, so a
-        // shell containing many Waves plug-ins can never attach another plug-in's editor by accident.
+        // class. Only consider controller classes whose normalized name matches this processor.
         var processorName = NormalizeName(plugin.ClassInfo.Name);
         foreach (var candidate in module.GetClasses()
                      .Where(candidate =>
@@ -64,12 +69,12 @@ public static class Vst3ControllerRecovery
             candidateIds.Add(candidate.ClassId);
         }
 
-        // Last fallback retained from the original host for plug-ins that use one CID for both objects.
+        // Last fallback for plug-ins that genuinely use one CID for both objects.
         candidateIds.Add(plugin.ClassInfo.ClassId);
 
         foreach (var classId in candidateIds.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (TryInstallController(plugin, factory, classId))
+            if (TryInstallController(plugin, factory, classId, replaceExistingController))
             {
                 return true;
             }
@@ -81,7 +86,8 @@ public static class Vst3ControllerRecovery
     private static unsafe bool TryInstallController(
         Vst3Plugin plugin,
         IPluginFactory factory,
-        string controllerClassId)
+        string controllerClassId,
+        bool replaceExistingController)
     {
         byte[] cidBytes;
         try
@@ -132,9 +138,22 @@ public static class Vst3ControllerRecovery
                 return false;
             }
 
+            var oldController = GetField<IEditController>(plugin, "_controller");
+            var oldWasSeparate = GetField<bool>(plugin, "_hasSeparateController");
+            var oldWasInitialized = GetField<bool>(plugin, "_controllerInitialized");
+            var oldControllerCpPtr = GetField<IntPtr>(plugin, "_controllerCpPtr");
+            var oldMidiMappingPtr = GetField<IntPtr>(plugin, "_midiMappingPtr");
+            var oldUnitInfoPtr = GetField<IntPtr>(plugin, "_unitInfoPtr");
+
+            if (replaceExistingController && oldWasSeparate && oldController is not null)
+            {
+                DisconnectOldController(plugin, oldControllerCpPtr);
+            }
+
             SetField(plugin, "_controller", controller);
             SetField(plugin, "_hasSeparateController", true);
             SetField(plugin, "_controllerInitialized", true);
+            SetField(plugin, "_connected", false);
 
             var connectionIid = Vst3StandardInterfaceIds.IConnectionPoint;
             Marshal.QueryInterface(verifiedControllerPtr, in connectionIid, out var controllerCpPtr);
@@ -152,6 +171,18 @@ public static class Vst3ControllerRecovery
             InvokePrivate(plugin, "TryConnectComponentAndController");
             InvokePrivate(plugin, "SyncComponentStateToController");
             InitialiseLateParameterSupport(plugin);
+
+            if (replaceExistingController && oldWasSeparate && oldController is not null &&
+                !ReferenceEquals(oldController, controller))
+            {
+                ReleaseOldController(
+                    oldController,
+                    oldWasInitialized,
+                    oldControllerCpPtr,
+                    oldMidiMappingPtr,
+                    oldUnitInfoPtr);
+            }
+
             return true;
         }
         catch
@@ -166,9 +197,6 @@ public static class Vst3ControllerRecovery
                 {
                 }
             }
-            SetField(plugin, "_controller", null);
-            SetField(plugin, "_hasSeparateController", false);
-            SetField(plugin, "_controllerInitialized", false);
             return false;
         }
         finally
@@ -179,8 +207,12 @@ public static class Vst3ControllerRecovery
 
     private static void InstallComponentHandler(Vst3Plugin plugin, IEditController controller)
     {
-        if (GetField<IntPtr>(plugin, "_componentHandlerUnknown") != IntPtr.Zero)
+        var existingHandler = GetField<IntPtr>(plugin, "_componentHandlerUnknown");
+        if (existingHandler != IntPtr.Zero)
         {
+            // The handler belongs to the host/plugin lifetime, not to the old controller. Reuse it
+            // with the recovered controller so editor-driven parameter changes reach the DSP.
+            controller.SetComponentHandler(existingHandler);
             return;
         }
 
@@ -206,6 +238,78 @@ public static class Vst3ControllerRecovery
         finally
         {
             Marshal.Release(identity);
+        }
+    }
+
+    private static unsafe void DisconnectOldController(Vst3Plugin plugin, IntPtr oldControllerCpPtr)
+    {
+        var componentCpPtr = GetField<IntPtr>(plugin, "_componentCpPtr");
+        if (componentCpPtr == IntPtr.Zero || oldControllerCpPtr == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            // IConnectionPoint vtable: IUnknown 0..2, connect 3, disconnect 4, notify 5.
+            var componentVt = *(IntPtr**)componentCpPtr;
+            var controllerVt = *(IntPtr**)oldControllerCpPtr;
+            var componentDisconnect =
+                (delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)componentVt[4];
+            var controllerDisconnect =
+                (delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)controllerVt[4];
+            _ = componentDisconnect(componentCpPtr, oldControllerCpPtr);
+            _ = controllerDisconnect(oldControllerCpPtr, componentCpPtr);
+        }
+        catch
+        {
+            // Best effort. A failed disconnect must not prevent trying the controller Waves advertised.
+        }
+    }
+
+    private static void ReleaseOldController(
+        IEditController oldController,
+        bool wasInitialized,
+        IntPtr oldControllerCpPtr,
+        IntPtr oldMidiMappingPtr,
+        IntPtr oldUnitInfoPtr)
+    {
+        try
+        {
+            if (wasInitialized)
+            {
+                _ = oldController.Terminate();
+            }
+        }
+        catch
+        {
+        }
+
+        ReleasePointer(oldControllerCpPtr);
+        ReleasePointer(oldMidiMappingPtr);
+        ReleasePointer(oldUnitInfoPtr);
+
+        try
+        {
+            ((ComObject)(object)oldController).FinalRelease();
+        }
+        catch
+        {
+        }
+    }
+
+    private static void ReleasePointer(IntPtr pointer)
+    {
+        if (pointer == IntPtr.Zero)
+        {
+            return;
+        }
+        try
+        {
+            Marshal.Release(pointer);
+        }
+        catch
+        {
         }
     }
 
