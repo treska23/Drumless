@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Reflection;
 using DrumPracticeStudio.Models;
+using NAudio.Vst3;
 
 namespace DrumPracticeStudio.Audio;
 
@@ -38,10 +40,26 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
         _core.ProcessStereo(samples, wetMix);
 
     public Task<Vst3EffectEditorResult> OpenEditorAsync(
-        CancellationToken cancellationToken = default) =>
-        _core.OpenEditorAsync(cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        // Guitar Rig and other single-object/JUCE VST3s already expose their editor controller
+        // normally. Some WaveShell generations instead leave the processor alive but fail the
+        // initial controller resolution. Recover that separate controller only when it is missing;
+        // the normal path that already works is deliberately left untouched.
+        if (!_core.Plugin.HasEditController && TryGetCoreModule() is { } module)
+        {
+            _ = Vst3ControllerRecovery.TryRecoverForEditor(_core.Plugin, module);
+        }
+
+        return _core.OpenEditorAsync(cancellationToken);
+    }
 
     public void Dispose() => _core.Dispose();
+
+    private Vst3Module? TryGetCoreModule() =>
+        typeof(InProcessVst3EffectCore)
+            .GetField("_module", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(_core) as Vst3Module;
 
     // Kept for the existing regression tests and for callers that dispose best-effort resources.
     internal static void DisposeIgnoringErrors(IDisposable? disposable)
