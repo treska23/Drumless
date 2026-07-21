@@ -16,22 +16,44 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
     private readonly InProcessVst3EffectCore _core;
     private bool _shellControllerRecoveryAttempted;
     private bool _shellControllerRecoverySucceeded;
+    private string _shellControllerRecoveryDiagnostic = "no ejecutada";
 
     private IsolatedVst3EffectProcessor(InProcessVst3EffectCore core)
     {
         _core = core;
 
-        // WaveShell must be corrected as soon as the effect instance is created, before the
-        // processor is handed to the realtime audio graph. The previous implementation waited
-        // until the user clicked "Abrir interfaz"; by then the plug-in had already been activated
-        // and could have processed many ASIO blocks with the fallback controller.
         if (LooksLikeWaveShell(_core.Reference) && TryGetCoreModule() is { } module)
         {
             _shellControllerRecoveryAttempted = true;
-            _shellControllerRecoverySucceeded = Vst3ControllerRecovery.TryRecoverForEditor(
+
+            // Steinberg especifica que getControllerClassId debe consultarse con el componente en
+            // estado Created, antes de initialize(). El Vst3Plugin genérico ya está inicializado en
+            // este punto, por lo que WaveShell puede devolver un CID vacío o incorrecto. Para Waves
+            // creamos una instancia temporal SIN inicializar, obtenemos de ella el CID correcto y
+            // conectamos ese controlador con la instancia real que procesa audio.
+            _shellControllerRecoverySucceeded = Vst3WaveShellControllerProbe.TryRecover(
                 _core.Plugin,
                 module,
-                replaceExistingController: true);
+                out _shellControllerRecoveryDiagnostic);
+
+            // Conservamos la recuperación genérica como último recurso, pero el diagnóstico deja
+            // claro si fue necesario porque la ruta correcta previa a initialize no funcionó.
+            if (!_shellControllerRecoverySucceeded)
+            {
+                var genericSucceeded = Vst3ControllerRecovery.TryRecoverForEditor(
+                    _core.Plugin,
+                    module,
+                    replaceExistingController: true);
+                if (genericSucceeded)
+                {
+                    _shellControllerRecoverySucceeded = true;
+                    _shellControllerRecoveryDiagnostic += "; fallback genérico correcto";
+                }
+                else
+                {
+                    _shellControllerRecoveryDiagnostic += "; fallback genérico fallido";
+                }
+            }
         }
     }
 
@@ -67,17 +89,22 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
             _shellControllerRecoverySucceeded = Vst3ControllerRecovery.TryRecoverForEditor(
                 _core.Plugin,
                 fallbackModule);
+            _shellControllerRecoveryDiagnostic = _shellControllerRecoverySucceeded
+                ? "fallback genérico correcto"
+                : "fallback genérico fallido";
         }
 
         var result = await _core.OpenEditorAsync(cancellationToken);
         if (!result.Succeeded && LooksLikeWaveShell(Reference))
         {
-            var recovery = _shellControllerRecoveryAttempted
-                ? (_shellControllerRecoverySucceeded ? "ejecutada correctamente" : "fallida")
+            var state = _shellControllerRecoveryAttempted
+                ? (_shellControllerRecoverySucceeded ? "correcta" : "fallida")
                 : "no ejecutada";
             return result with
             {
-                Message = $"{result.Message} [Recuperación WaveShell previa: {recovery}]"
+                Message =
+                    $"{result.Message} [Recuperación WaveShell: {state}. " +
+                    $"Detalle: {_shellControllerRecoveryDiagnostic}]"
             };
         }
 
