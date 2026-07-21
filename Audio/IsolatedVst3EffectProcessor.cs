@@ -15,10 +15,24 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
 {
     private readonly InProcessVst3EffectCore _core;
     private bool _shellControllerRecoveryAttempted;
+    private bool _shellControllerRecoverySucceeded;
 
     private IsolatedVst3EffectProcessor(InProcessVst3EffectCore core)
     {
         _core = core;
+
+        // WaveShell must be corrected as soon as the effect instance is created, before the
+        // processor is handed to the realtime audio graph. The previous implementation waited
+        // until the user clicked "Abrir interfaz"; by then the plug-in had already been activated
+        // and could have processed many ASIO blocks with the fallback controller.
+        if (LooksLikeWaveShell(_core.Reference) && TryGetCoreModule() is { } module)
+        {
+            _shellControllerRecoveryAttempted = true;
+            _shellControllerRecoverySucceeded = Vst3ControllerRecovery.TryRecoverForEditor(
+                _core.Plugin,
+                module,
+                replaceExistingController: true);
+        }
     }
 
     public Vst3EffectReference Reference => _core.Reference;
@@ -40,30 +54,34 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
     public void ProcessStereo(Span<float> samples, float wetMix) =>
         _core.ProcessStereo(samples, wetMix);
 
-    public Task<Vst3EffectEditorResult> OpenEditorAsync(
+    public async Task<Vst3EffectEditorResult> OpenEditorAsync(
         CancellationToken cancellationToken = default)
     {
+        // Non-WaveShell plug-ins keep the normal late fallback in case they genuinely loaded
+        // without an edit controller. Guitar Rig already works through this normal path.
         if (!_shellControllerRecoveryAttempted &&
-            LooksLikeWaveShell(Reference) &&
-            TryGetCoreModule() is { } module)
+            !_core.Plugin.HasEditController &&
+            TryGetCoreModule() is { } fallbackModule)
         {
             _shellControllerRecoveryAttempted = true;
-
-            // Some WaveShell versions leave a non-null but wrong controller in the generic fallback:
-            // it passes QI(IEditController), yet createView("editor") returns null. Replace that
-            // controller once with the actual non-zero CID advertised by the component. Guitar Rig
-            // and normal VST3s never enter this path, so their already-working editor flow is untouched.
-            _ = Vst3ControllerRecovery.TryRecoverForEditor(
+            _shellControllerRecoverySucceeded = Vst3ControllerRecovery.TryRecoverForEditor(
                 _core.Plugin,
-                module,
-                replaceExistingController: true);
-        }
-        else if (!_core.Plugin.HasEditController && TryGetCoreModule() is { } fallbackModule)
-        {
-            _ = Vst3ControllerRecovery.TryRecoverForEditor(_core.Plugin, fallbackModule);
+                fallbackModule);
         }
 
-        return _core.OpenEditorAsync(cancellationToken);
+        var result = await _core.OpenEditorAsync(cancellationToken);
+        if (!result.Succeeded && LooksLikeWaveShell(Reference))
+        {
+            var recovery = _shellControllerRecoveryAttempted
+                ? (_shellControllerRecoverySucceeded ? "ejecutada correctamente" : "fallida")
+                : "no ejecutada";
+            return result with
+            {
+                Message = $"{result.Message} [Recuperación WaveShell previa: {recovery}]"
+            };
+        }
+
+        return result;
     }
 
     public void Dispose() => _core.Dispose();
