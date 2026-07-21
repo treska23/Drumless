@@ -17,7 +17,7 @@ internal sealed class InProcessVst3EffectCore : IDisposable
 {
     private readonly object _gate = new();
     private readonly Vst3Module _module;
-    private readonly Vst3PluginView? _view;
+    private Vst3PluginView? _view;
     private readonly string _statePath;
     private readonly float[] _pluginInput;
     private readonly float[] _pluginOutput;
@@ -46,7 +46,7 @@ internal sealed class InProcessVst3EffectCore : IDisposable
     public uint TotalLatencySamples => Plugin.LatencySamples;
     public string? Failure => Volatile.Read(ref _failure);
     public bool IsAvailable => !_disposed && Failure is null;
-    public bool HasEditor => _view is not null;
+    public bool HasEditor => !_disposed && (_view is not null || Plugin.HasEditController);
 
     public static InProcessVst3EffectCore Start(
         Vst3EffectReference reference,
@@ -57,7 +57,6 @@ internal sealed class InProcessVst3EffectCore : IDisposable
 
         Vst3Module? module = null;
         Vst3Plugin? plugin = null;
-        Vst3PluginView? view = null;
         try
         {
             module = Vst3Module.Load(reference.ModulePath);
@@ -84,10 +83,8 @@ internal sealed class InProcessVst3EffectCore : IDisposable
             var statePath = GetAutomaticStatePath(slotId, reference);
             var loadPath = File.Exists(statePath) ? statePath : reference.PresetPath;
 
-            // A VST3 processor may be perfectly usable for audio while exposing no edit controller.
-            // The vendor host currently reports that situation as ObjectDisposedException when
-            // LoadPreset is attempted. State restore is therefore best-effort and must never prevent
-            // the DSP from loading. This is especially important for shell-style Waves plug-ins.
+            // Un procesador VST3 puede funcionar para audio aunque su controlador de edición no esté
+            // disponible. La restauración de estado es opcional y nunca debe impedir que cargue el DSP.
             if (plugin.HasEditController &&
                 !string.IsNullOrWhiteSpace(loadPath) &&
                 File.Exists(loadPath))
@@ -104,24 +101,17 @@ internal sealed class InProcessVst3EffectCore : IDisposable
                     ObjectDisposedException or
                     NotSupportedException)
                 {
-                    // An old, corrupt or host-incompatible state must not put a working effect in bypass.
+                    // Un estado antiguo, corrupto o incompatible con el host no pone el efecto en bypass.
                 }
             }
 
-            try
-            {
-                view = plugin.CreateView();
-            }
-            catch
-            {
-                // Some effects process correctly even though their native editor cannot be embedded.
-            }
-
-            return new InProcessVst3EffectCore(module, plugin, view, reference, statePath);
+            // A diferencia del antiguo host de efectos, no intentamos crear aquí la interfaz y luego
+            // ocultamos cualquier excepción. La vista se crea al pulsar «Abrir interfaz», en el hilo UI,
+            // igual que el flujo que ya funciona con los instrumentos VST3 directos.
+            return new InProcessVst3EffectCore(module, plugin, null, reference, statePath);
         }
         catch
         {
-            view?.Dispose();
             plugin?.Dispose();
             module?.Dispose();
             throw;
@@ -205,20 +195,42 @@ internal sealed class InProcessVst3EffectCore : IDisposable
         {
             return Task.FromResult(new Vst3EffectEditorResult(false, Failure ?? $"{Reference.Name} no está activo."));
         }
-        if (_view is null)
-        {
-            return Task.FromResult(new Vst3EffectEditorResult(
-                false,
-                $"{Reference.Name} no proporciona una interfaz VST3 compatible."));
-        }
 
         return Application.Current.Dispatcher.InvokeAsync(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (_disposed)
+            {
+                return new Vst3EffectEditorResult(false, $"{Reference.Name} ya no está activo.");
+            }
+
             if (_editor is not null)
             {
                 _editor.Activate();
                 return new Vst3EffectEditorResult(true, $"La interfaz de {Reference.Name} ya estaba abierta.");
+            }
+
+            if (_view is null)
+            {
+                try
+                {
+                    // CreateView debe ejecutarse en el hilo STA de la interfaz. Antes se llamaba al
+                    // cargar el efecto y cualquier fallo se tragaba, dejando _view=null para siempre.
+                    _view = Plugin.CreateView();
+                }
+                catch (Exception exception)
+                {
+                    return new Vst3EffectEditorResult(
+                        false,
+                        $"No se pudo crear la interfaz de {Reference.Name}: {exception.Message}");
+                }
+            }
+
+            if (_view is null)
+            {
+                return new Vst3EffectEditorResult(
+                    false,
+                    $"{Reference.Name} no ha entregado una vista de editor al host VST3.");
             }
 
             _editor = new Vst3EditorWindow(Reference.Name, _view)
@@ -262,6 +274,7 @@ internal sealed class InProcessVst3EffectCore : IDisposable
             }
             _editor = null;
             _view?.Dispose();
+            _view = null;
             Plugin.Dispose();
             _module.Dispose();
         }
