@@ -54,7 +54,6 @@ public sealed partial class SongEffectRecommendationService : IDisposable
             .Select(group => group.First())
             .OrderBy(effect => effect.Reference.Vendor, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(effect => effect.Reference.Name, StringComparer.CurrentCultureIgnoreCase)
-            .Take(MaximumCatalogEntries)
             .ToArray();
         if (available.Length == 0)
         {
@@ -66,7 +65,8 @@ public sealed partial class SongEffectRecommendationService : IDisposable
             $"{request.Artist} {request.SongTitle}",
             cancellationToken);
         var model = await GetFirstModelAsync(cancellationToken);
-        var catalog = available.Select(effect => new
+        var promptCatalog = SelectPromptCatalog(available);
+        var catalog = promptCatalog.Select(effect => new
         {
             id = effect.CatalogId,
             name = effect.Reference.Name,
@@ -88,6 +88,7 @@ public sealed partial class SongEffectRecommendationService : IDisposable
             "Input 1 es siempre guitarra mono e Input 2 es siempre voz mono. " +
             "Sólo puedes escoger identificadores incluidos en installedEffects y sólo efectos: " +
             "nunca instrumentos virtuales ni generadores de sonido. Máximo cuatro slots por cadena. " +
+            "Copia literalmente el campo id en catalogId; no escribas el nombre en catalogId. " +
             "Mantén ganancia prudente y no inventes plugins ni fuentes. webEvidence son fragmentos " +
             "de búsqueda y pueden ser incompletos: señala la incertidumbre en summary. " +
             "Devuelve JSON estricto con este esquema: " +
@@ -133,12 +134,33 @@ public sealed partial class SongEffectRecommendationService : IDisposable
         var byId = available.ToDictionary(
             effect => effect.CatalogId,
             StringComparer.OrdinalIgnoreCase);
-        var guitar = ParseChain(root, "guitar", 0, "Guitarra mono", byId);
-        var voice = ParseChain(root, "voice", 1, "Voz mono", byId);
+        var guitar = ParseChain(root, "guitar", 0, "Guitarra mono", byId, available);
+        var voice = ParseChain(root, "voice", 1, "Voz mono", byId, available);
+        var usedFallback = false;
+        if (guitar.Slots.Count == 0)
+        {
+            guitar = CreateFallbackChain(0, "Guitarra mono", available);
+            usedFallback = guitar.Slots.Count > 0;
+        }
+        if (voice.Slots.Count == 0)
+        {
+            voice = CreateFallbackChain(1, "Voz mono", available);
+            usedFallback = usedFallback || voice.Slots.Count > 0;
+        }
         if (guitar.Slots.Count == 0 && voice.Slots.Count == 0)
         {
             throw new InvalidDataException(
-                "Ollama no eligió ningún plugin válido del catálogo instalado.");
+                "El catálogo no contiene efectos compatibles para guitarra o voz.");
+        }
+
+        var summary = GetString(
+            root,
+            "summary",
+            "Propuesta local basada en los efectos instalados.");
+        if (usedFallback)
+        {
+            summary += " La respuesta de Ollama no identificó todos los plugins por su código; " +
+                       "los huecos se completaron de forma conservadora con efectos instalados.";
         }
 
         return new SongEffectProfile(
@@ -150,9 +172,32 @@ public sealed partial class SongEffectRecommendationService : IDisposable
             request.SongTitle,
             DateTimeOffset.UtcNow,
             model,
-            GetString(root, "summary", "Propuesta local basada en los efectos instalados."),
+            summary,
             guitar,
             voice);
+    }
+
+    private static IReadOnlyList<InstalledEffectDescriptor> SelectPromptCatalog(
+        IReadOnlyList<InstalledEffectDescriptor> available) => available
+        .OrderByDescending(CatalogSuitabilityScore)
+        .ThenBy(effect => effect.Reference.Vendor, StringComparer.CurrentCultureIgnoreCase)
+        .ThenBy(effect => effect.Reference.Name, StringComparer.CurrentCultureIgnoreCase)
+        .Take(MaximumCatalogEntries)
+        .ToArray();
+
+    private static int CatalogSuitabilityScore(InstalledEffectDescriptor effect)
+    {
+        var text = $" {NormalizePluginText(
+            $"{effect.EffectType} {effect.Reference.Name} {effect.Reference.SubCategories}")} ";
+        var score = 0;
+        score += ContainsAny(text, "amp simulator", "amplifier", "guitar rig", "gtr amp") ? 100 : 0;
+        score += ContainsAny(text, "distortion", "overdrive", "saturation") ? 85 : 0;
+        score += ContainsAny(text, "dynamics", "compressor", "vocal", "voice", "deesser") ? 75 : 0;
+        score += ContainsAny(text, "channel strip", "equalizer", " eq ") ? 65 : 0;
+        score += ContainsAny(text, "reverb", "delay", "modulation") ? 45 : 0;
+        score += effect.Reference.Name.Contains("Mono", StringComparison.OrdinalIgnoreCase) ? 20 : 0;
+        score -= effect.Reference.Name.Contains("Surround", StringComparison.OrdinalIgnoreCase) ? 100 : 0;
+        return score;
     }
 
     private async Task<string> GetFirstModelAsync(CancellationToken cancellationToken)
@@ -208,18 +253,25 @@ public sealed partial class SongEffectRecommendationService : IDisposable
         string propertyName,
         int channelIndex,
         string instrument,
-        IReadOnlyDictionary<string, InstalledEffectDescriptor> available)
+        IReadOnlyDictionary<string, InstalledEffectDescriptor> byId,
+        IReadOnlyList<InstalledEffectDescriptor> available)
     {
-        if (!root.TryGetProperty(propertyName, out var chain) ||
-            chain.ValueKind != JsonValueKind.Object)
+        if (!TryGetPropertyIgnoreCase(root, propertyName, out var chain) ||
+            chain.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array))
         {
             return new SongInputEffectChain(channelIndex, instrument, string.Empty, []);
         }
 
         var slots = new List<SongEffectSlotRecommendation>();
         var selectedCatalogIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (chain.TryGetProperty("slots", out var array) &&
-            array.ValueKind == JsonValueKind.Array)
+        var hasArray = chain.ValueKind == JsonValueKind.Array;
+        var array = chain;
+        if (!hasArray && TryGetPropertyIgnoreCase(chain, "slots", out var nestedSlots))
+        {
+            array = nestedSlots;
+            hasArray = array.ValueKind == JsonValueKind.Array;
+        }
+        if (hasArray)
         {
             foreach (var item in array.EnumerateArray())
             {
@@ -228,9 +280,9 @@ public sealed partial class SongEffectRecommendationService : IDisposable
                 {
                     break;
                 }
-                var catalogId = GetString(item, "catalogId", string.Empty);
-                if (!available.TryGetValue(catalogId, out var installed) ||
-                    !selectedCatalogIds.Add(catalogId))
+                var installed = ResolveInstalledEffect(item, byId, available);
+                if (installed is null ||
+                    !selectedCatalogIds.Add(installed.CatalogId))
                 {
                     continue;
                 }
@@ -250,12 +302,197 @@ public sealed partial class SongEffectRecommendationService : IDisposable
         return new SongInputEffectChain(
             channelIndex,
             instrument,
-            GetString(chain, "description", string.Empty),
+            chain.ValueKind == JsonValueKind.Object
+                ? GetString(chain, "description", string.Empty)
+                : string.Empty,
             slots);
     }
 
+    private static InstalledEffectDescriptor? ResolveInstalledEffect(
+        JsonElement item,
+        IReadOnlyDictionary<string, InstalledEffectDescriptor> byId,
+        IReadOnlyList<InstalledEffectDescriptor> available)
+    {
+        var references = new[]
+        {
+            GetString(item, "catalogId", string.Empty),
+            GetString(item, "id", string.Empty),
+            GetString(item, "pluginId", string.Empty),
+            GetString(item, "pluginName", string.Empty),
+            GetString(item, "name", string.Empty),
+            GetString(item, "plugin", string.Empty),
+            TryGetPropertyIgnoreCase(item, "plugin", out var plugin) &&
+            plugin.ValueKind == JsonValueKind.Object
+                ? GetString(plugin, "name", GetString(plugin, "id", string.Empty))
+                : string.Empty
+        }.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
+
+        foreach (var reference in references)
+        {
+            if (byId.TryGetValue(reference, out var exactId))
+            {
+                return exactId;
+            }
+        }
+
+        foreach (var reference in references)
+        {
+            var normalized = NormalizePluginText(reference);
+            var exactName = available.FirstOrDefault(effect =>
+                string.Equals(
+                    NormalizePluginText(effect.Reference.Name),
+                    normalized,
+                    StringComparison.Ordinal) ||
+                string.Equals(
+                    NormalizePluginText($"{effect.Reference.Name} {effect.Reference.Vendor}"),
+                    normalized,
+                    StringComparison.Ordinal));
+            if (exactName is not null)
+            {
+                return exactName;
+            }
+
+            var containedName = normalized.Length < 4
+                ? null
+                : available
+                .Where(effect =>
+                {
+                    var name = NormalizePluginText(effect.Reference.Name);
+                    return name.Length >= 5 &&
+                           (normalized.Contains(name, StringComparison.Ordinal) ||
+                            name.Contains(normalized, StringComparison.Ordinal));
+                })
+                .OrderByDescending(effect =>
+                    effect.Reference.Name.Contains("Mono", StringComparison.OrdinalIgnoreCase))
+                .ThenBy(effect => effect.Reference.Name.Length)
+                .FirstOrDefault();
+            if (containedName is not null)
+            {
+                return containedName;
+            }
+        }
+        return null;
+    }
+
+    private static SongInputEffectChain CreateFallbackChain(
+        int channelIndex,
+        string instrument,
+        IReadOnlyList<InstalledEffectDescriptor> available)
+    {
+        var roles = channelIndex == 0
+            ? new[]
+            {
+                new EffectRole("Amplificación o carácter", ["amp simulator", "guitar rig", "gtr amp", "amplifier", "distortion", "overdrive"]),
+                new EffectRole("Control dinámico", ["dynamics", "compressor"]),
+                new EffectRole("Ecualización", ["channel strip", "equalizer", " eq "]),
+                new EffectRole("Ambiente", ["reverb", "delay"])
+            }
+            : new[]
+            {
+                new EffectRole("Control vocal", ["vocal", "voice", "deesser", "dynamics", "compressor"]),
+                new EffectRole("Ecualización", ["channel strip", "equalizer", " eq "]),
+                new EffectRole("Ambiente", ["reverb"]),
+                new EffectRole("Profundidad", ["delay", "modulation"])
+            };
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var slots = new List<SongEffectSlotRecommendation>();
+        foreach (var role in roles)
+        {
+            var effect = available
+                .Where(candidate => !selected.Contains(candidate.CatalogId))
+                .Select(candidate => new
+                {
+                    Effect = candidate,
+                    Score = FallbackScore(candidate, role.Terms, channelIndex)
+                })
+                .Where(candidate => candidate.Score > 0)
+                .OrderByDescending(candidate => candidate.Score)
+                .ThenBy(candidate => candidate.Effect.Reference.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(candidate => candidate.Effect)
+                .FirstOrDefault();
+            if (effect is null)
+            {
+                continue;
+            }
+            selected.Add(effect.CatalogId);
+            slots.Add(new SongEffectSlotRecommendation(
+                effect.Reference,
+                effect.EffectType,
+                role.Purpose,
+                role.Purpose,
+                role.Purpose is "Ambiente" or "Profundidad" ? 0.25d : 1d));
+        }
+        return new SongInputEffectChain(
+            channelIndex,
+            instrument,
+            "Cadena conservadora completada con efectos instalados.",
+            slots);
+    }
+
+    private static int FallbackScore(
+        InstalledEffectDescriptor effect,
+        IReadOnlyList<string> terms,
+        int channelIndex)
+    {
+        var text = $" {NormalizePluginText($"{effect.EffectType} {effect.Reference.Name} {effect.Reference.SubCategories}")} ";
+        var matches = terms.Count(term => text.Contains(term, StringComparison.Ordinal));
+        if (matches == 0)
+        {
+            return 0;
+        }
+        var score = matches * 25;
+        score += effect.Reference.Name.Contains("Mono", StringComparison.OrdinalIgnoreCase) ? 12 : 0;
+        score -= effect.Reference.Name.Contains("Stereo", StringComparison.OrdinalIgnoreCase) ? 8 : 0;
+        score -= ContainsAny(text, "surround", "quad", "ambi", "5 1", "7 1") ? 100 : 0;
+        if (channelIndex == 0 && ContainsAny(text, "guitar rig", "gtr amp", "amp simulator"))
+        {
+            score += 80;
+        }
+        if (channelIndex == 0 && ContainsAny(text, "vocal", "voice", "deesser"))
+        {
+            score -= 80;
+        }
+        if (channelIndex == 1 && ContainsAny(text, "vocal", "voice", "deesser"))
+        {
+            score += 60;
+        }
+        if (channelIndex == 1 && ContainsAny(text, "guitar rig", "gtr amp", "amp simulator"))
+        {
+            score -= 80;
+        }
+        return score;
+    }
+
+    private static bool TryGetPropertyIgnoreCase(
+        JsonElement element,
+        string name,
+        out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+        }
+        value = default;
+        return false;
+    }
+
+    private static string NormalizePluginText(string value) =>
+        Regex.Replace(value.ToLowerInvariant(), @"[^\p{L}\p{N}]+", " ").Trim();
+
+    private static bool ContainsAny(string text, params string[] terms) =>
+        terms.Any(term => text.Contains(term, StringComparison.Ordinal));
+
+    private sealed record EffectRole(string Purpose, IReadOnlyList<string> Terms);
+
     private static string GetString(JsonElement element, string property, string fallback) =>
-        element.TryGetProperty(property, out var value) &&
+        TryGetPropertyIgnoreCase(element, property, out var value) &&
         value.ValueKind == JsonValueKind.String &&
         !string.IsNullOrWhiteSpace(value.GetString())
             ? value.GetString()!.Trim()

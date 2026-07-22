@@ -56,6 +56,89 @@ public sealed class SongEffectRecommendationServiceTests
         Assert.AreEqual("Vocal Rider", profile.Voice.Slots[0].Effect.Name);
     }
 
+    [TestMethod]
+    public async Task RecommendAsync_AcceptsPluginNamesAndAlternativeFieldsFromOllama()
+    {
+        const string ollamaResult = """
+            {
+              "message": {
+                "content": "{\"summary\":\"Por nombre\",\"guitar\":{\"slots\":[{\"catalogId\":\"Guitar Rig\",\"purpose\":\"Amplificador\"}]},\"voice\":{\"slots\":[{\"pluginName\":\"Vocal Rider · Waves\",\"purpose\":\"Dinámica\"}]}}"
+              }
+            }
+            """;
+        using var internet = new HttpClient(new StaticHandler(_ => string.Empty));
+        using var ollama = new HttpClient(new StaticHandler(request =>
+            request.RequestUri?.AbsolutePath.EndsWith("/api/tags", StringComparison.Ordinal) == true
+                ? "{\"models\":[{\"name\":\"qwen-test\"}]}"
+                : ollamaResult))
+        {
+            BaseAddress = new Uri("http://127.0.0.1:11434/")
+        };
+        using var service = new SongEffectRecommendationService(internet, ollama);
+
+        var profile = await service.RecommendAsync(new SongEffectRecommendationRequest(
+            "local:track-2",
+            "Artist - Song",
+            "Artist",
+            "Song",
+            null,
+            [],
+            [
+                CreateEffect("fx-031", "Guitar Rig", "Amp Simulator"),
+                CreateEffect("fx-205", "Vocal Rider", "Dynamics")
+            ]));
+
+        Assert.AreEqual("Guitar Rig", profile.Guitar.Slots.Single().Effect.Name);
+        Assert.AreEqual("Vocal Rider", profile.Voice.Slots.Single().Effect.Name);
+        Assert.IsFalse(profile.Summary.Contains(
+            "huecos se completaron",
+            StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task RecommendAsync_CompletesInvalidOllamaSelectionWithInstalledEffects()
+    {
+        const string ollamaResult = """
+            {
+              "message": {
+                "content": "{\"summary\":\"Selección incompleta\",\"guitar\":{\"slots\":[{\"catalogId\":\"plugin inventado\"}]},\"voice\":{\"slots\":[]}}"
+              }
+            }
+            """;
+        using var internet = new HttpClient(new StaticHandler(_ => string.Empty));
+        using var ollama = new HttpClient(new StaticHandler(request =>
+            request.RequestUri?.AbsolutePath.EndsWith("/api/tags", StringComparison.Ordinal) == true
+                ? "{\"models\":[{\"name\":\"qwen-test\"}]}"
+                : ollamaResult))
+        {
+            BaseAddress = new Uri("http://127.0.0.1:11434/")
+        };
+        using var service = new SongEffectRecommendationService(internet, ollama);
+        var installed = new[]
+        {
+            CreateEffect("fx-031", "Guitar Rig Mono", "Amp Simulator"),
+            CreateEffect("fx-205", "Vocal Rider Mono", "Dynamics"),
+            CreateEffect("fx-222", "Studio Reverb Mono", "Reverb")
+        };
+
+        var profile = await service.RecommendAsync(new SongEffectRecommendationRequest(
+            "local:track-3",
+            "Artist - Song",
+            "Artist",
+            "Song",
+            null,
+            [],
+            installed));
+
+        Assert.IsTrue(profile.Guitar.Slots.Count > 0);
+        Assert.IsTrue(profile.Voice.Slots.Count > 0);
+        Assert.IsTrue(profile.Guitar.Slots.All(slot =>
+            installed.Any(effect => effect.Reference.Name == slot.Effect.Name)));
+        Assert.IsTrue(profile.Voice.Slots.All(slot =>
+            installed.Any(effect => effect.Reference.Name == slot.Effect.Name)));
+        StringAssert.Contains(profile.Summary, "huecos se completaron");
+    }
+
     private static InstalledEffectDescriptor CreateEffect(
         string id,
         string name,
