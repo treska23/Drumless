@@ -9,6 +9,9 @@ namespace DrumPracticeStudio.ViewModels;
 
 public sealed partial class MainViewModel
 {
+    private static readonly double[] ChordSheetViewerFontSizeSteps =
+        [14d, 16d, 18d, 20d, 22d, 24d, 28d, 32d];
+
     public event EventHandler? ChordSheetWindowRequested;
     public event EventHandler<ChordSheetLineItem?>? CurrentChordSheetLineChanged;
     public event EventHandler<ChordSheetSourceCandidate>? ChordSheetSourceOpenRequested;
@@ -27,6 +30,7 @@ public sealed partial class MainViewModel
     private string _songStructureStatus = "Analiza la pista para proponer sus secciones.";
     private double _chordSheetLeadSeconds = 2d;
     private string _chordSheetViewSwitchTimeText = string.Empty;
+    private double _chordSheetViewerFontSize = 18d;
     private bool _isChordSheetFollowEnabled = true;
     private bool _isSearchingChordSheetSources;
     private ChordSheetSourceCandidate? _selectedChordSheetSource;
@@ -46,6 +50,9 @@ public sealed partial class MainViewModel
     public RelayCommand MoveSelectedChordSheetViewportMarkerCommand { get; private set; } = null!;
     public RelayCommand ClearChordSheetViewSwitchCommand { get; private set; } = null!;
     public RelayCommand ClearAllChordSheetViewSwitchesCommand { get; private set; } = null!;
+    public RelayCommand DecreaseChordSheetZoomCommand { get; private set; } = null!;
+    public RelayCommand ResetChordSheetZoomCommand { get; private set; } = null!;
+    public RelayCommand IncreaseChordSheetZoomCommand { get; private set; } = null!;
     public RelayCommand RealignChordSheetCommand { get; private set; } = null!;
     public RelayCommand ClearChordSheetCommand { get; private set; } = null!;
     public RelayCommand SearchChordSheetSourcesCommand { get; private set; } = null!;
@@ -149,6 +156,23 @@ public sealed partial class MainViewModel
 
     public bool HasChordSheetViewSwitch => ChordSheetViewportMarkers.Count > 0;
 
+    public double ChordSheetViewerFontSize
+    {
+        get => _chordSheetViewerFontSize;
+        private set
+        {
+            if (!SetProperty(ref _chordSheetViewerFontSize, SnapChordSheetFontSize(value)))
+            {
+                return;
+            }
+            OnPropertyChanged(nameof(ChordSheetViewerZoomLabel));
+            ScheduleSettingsSave();
+        }
+    }
+
+    public string ChordSheetViewerZoomLabel =>
+        $"{Math.Round(ChordSheetViewerFontSize / 18d * 100d):0}%";
+
     public bool IsChordSheetFollowEnabled
     {
         get => _isChordSheetFollowEnabled;
@@ -192,6 +216,9 @@ public sealed partial class MainViewModel
         ClearChordSheetViewSwitchCommand = new RelayCommand(ClearChordSheetViewSwitch);
         ClearAllChordSheetViewSwitchesCommand =
             new RelayCommand(ClearAllChordSheetViewSwitches);
+        DecreaseChordSheetZoomCommand = new RelayCommand(() => ChangeChordSheetZoom(-1));
+        ResetChordSheetZoomCommand = new RelayCommand(() => ChordSheetViewerFontSize = 18d);
+        IncreaseChordSheetZoomCommand = new RelayCommand(() => ChangeChordSheetZoom(1));
         RealignChordSheetCommand = new RelayCommand(RealignCurrentChordSheet);
         ClearChordSheetCommand = new RelayCommand(ClearCurrentChordSheet);
         SearchChordSheetSourcesCommand =
@@ -539,6 +566,23 @@ public sealed partial class MainViewModel
         ChordSheetStatus =
             "Todas las marcas automáticas se han eliminado; el texto permanece intacto.";
     }
+
+    private void ChangeChordSheetZoom(int direction)
+    {
+        var currentIndex = Array.IndexOf(
+            ChordSheetViewerFontSizeSteps,
+            SnapChordSheetFontSize(ChordSheetViewerFontSize));
+        var nextIndex = Math.Clamp(
+            currentIndex + Math.Sign(direction),
+            0,
+            ChordSheetViewerFontSizeSteps.Length - 1);
+        ChordSheetViewerFontSize = ChordSheetViewerFontSizeSteps[nextIndex];
+    }
+
+    private static double SnapChordSheetFontSize(double value) =>
+        ChordSheetViewerFontSizeSteps
+            .OrderBy(step => Math.Abs(step - value))
+            .First();
 
     private void RealignCurrentChordSheet()
     {

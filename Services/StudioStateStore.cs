@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 12;
+    public const int CurrentSchemaVersion = 13;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -172,6 +172,10 @@ public sealed class StudioStateStore
                 ? null
                 : document.ActiveKitId,
             TrackVolume = Math.Clamp(document.TrackVolume ?? 0.8d, 0d, 1d),
+            ChordSheetViewerFontSize = Math.Clamp(
+                document.ChordSheetViewerFontSize ?? 18d,
+                14d,
+                32d),
             VstModulePath = string.IsNullOrWhiteSpace(document.VstModulePath)
                 ? null
                 : document.VstModulePath,
@@ -410,6 +414,10 @@ public sealed class StudioStateStore
         ActiveLibraryId = state.ActiveLibraryId,
         ActiveKitId = state.ActiveKitId,
         TrackVolume = Math.Clamp(state.TrackVolume, 0d, 1d),
+        ChordSheetViewerFontSize = Math.Clamp(
+            state.ChordSheetViewerFontSize,
+            14d,
+            32d),
         VstModulePath = state.VstModulePath,
         VstClassId = state.VstClassId,
         AutoLoadVst = state.AutoLoadVst,
@@ -1003,6 +1011,7 @@ public sealed class StudioStateStore
         public string? ActiveLibraryId { get; set; }
         public string? ActiveKitId { get; set; }
         public double? TrackVolume { get; set; }
+        public double? ChordSheetViewerFontSize { get; set; }
         public string? VstModulePath { get; set; }
         public string? VstClassId { get; set; }
         public bool? AutoLoadVst { get; set; }

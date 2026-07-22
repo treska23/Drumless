@@ -59,7 +59,8 @@
                 <StackPanel>
                     <TextBlock Text="{Binding CurrentTrackTitle}"
                                FontSize="22" FontWeight="SemiBold" />
-                    <TextBlock Text="Navega, selecciona la letra y los acordes y pulsa «Extraer selección». El contenido se guarda solo en este equipo."
+                    <TextBlock x:Name="HeaderHelpText"
+                               Text="Navega, selecciona la letra y los acordes y pulsa «Extraer selección». El contenido se guarda solo en este equipo."
                                Foreground="{StaticResource TextSecondary}"
                                TextWrapping="Wrap" Margin="0,4,0,0" />
                 </StackPanel>
@@ -67,21 +68,43 @@
                     <CheckBox Content="Seguir reproducción"
                               IsChecked="{Binding IsChordSheetFollowEnabled}"
                               VerticalAlignment="Center" Margin="0,0,12,0" />
-                    <TextBlock Text="Marcas manuales de cambio sin límite"
+                    <Button Style="{StaticResource SecondaryButton}"
+                            Content="A−"
+                            Padding="8,5"
+                            ToolTip="Reducir texto"
+                            AutomationProperties.AutomationId="DecreaseChordSheetZoomButton"
+                            Command="{Binding DecreaseChordSheetZoomCommand}" />
+                    <Button Style="{StaticResource SecondaryButton}"
+                            Content="{Binding ChordSheetViewerZoomLabel}"
+                            Padding="8,5"
+                            MinWidth="58"
+                            Margin="5,0"
+                            ToolTip="Restablecer zoom"
+                            AutomationProperties.AutomationId="ResetChordSheetZoomButton"
+                            Command="{Binding ResetChordSheetZoomCommand}" />
+                    <Button Style="{StaticResource SecondaryButton}"
+                            Content="A+"
+                            Padding="8,5"
+                            ToolTip="Ampliar texto"
+                            AutomationProperties.AutomationId="IncreaseChordSheetZoomButton"
+                            Command="{Binding IncreaseChordSheetZoomCommand}" />
+                    <TextBlock x:Name="HeaderModeText"
+                               Text="Marcas manuales de cambio sin límite"
                                Foreground="{StaticResource TextSecondary}"
-                               VerticalAlignment="Center" />
+                               VerticalAlignment="Center"
+                               Margin="12,0,0,0" />
                 </WrapPanel>
             </Grid>
         </Border>
 
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.08*" MinWidth="420" />
-                <ColumnDefinition Width="12" />
-                <ColumnDefinition Width="0.92*" MinWidth="380" />
+                <ColumnDefinition x:Name="BrowserColumn" Width="1.08*" MinWidth="420" />
+                <ColumnDefinition x:Name="WorkspaceGapColumn" Width="12" />
+                <ColumnDefinition x:Name="EditorColumn" Width="0.92*" MinWidth="380" />
             </Grid.ColumnDefinitions>
 
-            <Border Style="{StaticResource CardStyle}" Padding="12">
+            <Border x:Name="BrowserPane" Style="{StaticResource CardStyle}" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -120,8 +143,11 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="12">
-                <TabControl Background="Transparent" BorderThickness="0">
+            <Border x:Name="EditorPane" Grid.Column="2" Style="{StaticResource CardStyle}" Padding="12">
+                <TabControl x:Name="ChordWorkspaceTabs"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            SelectionChanged="OnChordWorkspaceTabSelectionChanged">
                     <TabItem Header="OPCIONES">
                         <Grid Margin="0,10,0,0">
                             <Grid.RowDefinitions>
@@ -180,162 +206,181 @@
                             </WrapPanel>
                         </Grid>
                     </TabItem>
-                    <TabItem Header="SEGUIR">
+                    <TabItem x:Name="FollowTab"
+                             Header="SEGUIR"
+                             AutomationProperties.AutomationId="ChordSheetFollowTab">
+                        <ListBox x:Name="ChordLineList"
+                                 Margin="0,10,0,0"
+                                 ItemsSource="{Binding ChordSheetLines}"
+                                 SelectedItem="{Binding SelectedChordSheetLine}"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 PreviewMouseWheel="OnChordLineListPreviewMouseWheel"
+                                 AutomationProperties.AutomationId="ChordSheetLineList">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Padding" Value="8,4" />
+                                    <Setter Property="Margin" Value="0,1" />
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                            <Setter Property="Background" Value="{StaticResource AccentDark}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Text}"
+                                               FontFamily="Consolas"
+                                               FontSize="{Binding DataContext.ChordSheetViewerFontSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                               TextWrapping="Wrap">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Kind}" Value="Chords">
+                                                        <Setter Property="Foreground" Value="{StaticResource Accent}" />
+                                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Kind}" Value="Section">
+                                                        <Setter Property="Foreground" Value="{StaticResource Success}" />
+                                                        <Setter Property="FontWeight" Value="Bold" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </TabItem>
+                    <TabItem x:Name="MarkersTab"
+                             Header="MARCAS"
+                             AutomationProperties.AutomationId="ChordSheetMarkersTab">
                         <Grid Margin="0,10,0,0">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="8" />
-                                <RowDefinition Height="*" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="{Binding ChordSheetStatus}"
-                                       Foreground="{StaticResource TextSecondary}"
-                                       TextWrapping="Wrap" />
-                            <Border Grid.Row="1"
-                                    Margin="0,8,0,0"
-                                    Padding="10"
-                                    Background="#141A23"
-                                    BorderBrush="{StaticResource Stroke}"
-                                    BorderThickness="1"
-                                    CornerRadius="8">
-                                <StackPanel>
-                                    <TextBlock Text="MARCAS DE CAMBIO DE VISTA"
-                                               Foreground="{StaticResource Accent}"
-                                               FontWeight="SemiBold" />
-                                    <TextBlock Text="Para cada cambio, escribe el tiempo o usa la posición actual; después selecciona la primera línea que debe mostrarse."
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1.35*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="0.65*" MinWidth="300" />
+                                </Grid.ColumnDefinitions>
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="8" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="Selecciona la primera línea que debe mostrarse al llegar a la marca."
                                                Foreground="{StaticResource TextSecondary}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,3,0,8" />
-                                    <WrapPanel>
-                                        <TextBlock Text="Tiempo"
-                                                   Foreground="{StaticResource TextSecondary}"
-                                                   VerticalAlignment="Center"
-                                                   Margin="0,0,6,0" />
-                                        <TextBox Text="{Binding ChordSheetViewSwitchTimeText, UpdateSourceTrigger=LostFocus}"
-                                                 Width="78"
-                                                 ToolTip="Segundos, m:ss o h:mm:ss"
-                                                 AutomationProperties.AutomationId="ChordSheetViewSwitchTime" />
-                                        <Button Style="{StaticResource SecondaryButton}"
-                                                Content="Usar posición actual"
-                                                Margin="8,0,0,0"
-                                                Command="{Binding UseCurrentChordSheetViewSwitchTimeCommand}" />
-                                        <Button Style="{StaticResource PrimaryButton}"
-                                                Content="Añadir marca"
-                                                Margin="8,0,0,0"
-                                                Command="{Binding SetChordSheetViewSwitchCommand}"
-                                                AutomationProperties.AutomationId="SetChordSheetViewSwitchButton" />
-                                        <Button Style="{StaticResource SecondaryButton}"
-                                                Content="Mover seleccionada a la línea"
-                                                Margin="8,0,0,0"
-                                                IsEnabled="{Binding HasChordSheetViewSwitch}"
-                                                Command="{Binding MoveSelectedChordSheetViewportMarkerCommand}" />
-                                        <Button Style="{StaticResource SecondaryButton}"
-                                                Content="Quitar marca seleccionada"
-                                                Margin="8,0,0,0"
-                                                IsEnabled="{Binding HasChordSheetViewSwitch}"
-                                                Command="{Binding ClearChordSheetViewSwitchCommand}" />
-                                        <Button Style="{StaticResource SecondaryButton}"
-                                                Content="Quitar todas"
-                                                Margin="8,0,0,0"
-                                                IsEnabled="{Binding HasChordSheetViewSwitch}"
-                                                Command="{Binding ClearAllChordSheetViewSwitchesCommand}" />
-                                    </WrapPanel>
-                                    <ListBox ItemsSource="{Binding ChordSheetViewportMarkers}"
-                                             SelectedItem="{Binding SelectedChordSheetViewportMarker}"
-                                             MaxHeight="82"
-                                             Margin="0,8,0,0"
+                                               TextWrapping="Wrap" />
+                                    <ListBox Grid.Row="2"
+                                             ItemsSource="{Binding ChordSheetLines}"
+                                             SelectedItem="{Binding SelectedChordSheetLine}"
                                              ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                             AutomationProperties.AutomationId="ChordSheetViewportMarkerList">
+                                             AutomationProperties.AutomationId="ChordSheetMarkerTargetLineList">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="7,4" />
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
-                                                <TextBlock Text="{Binding Summary}"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           ToolTip="{Binding Summary}" />
+                                                <StackPanel>
+                                                    <Border x:Name="MarkerLabel"
+                                                            Visibility="Collapsed"
+                                                            Background="{StaticResource AccentDark}"
+                                                            Padding="6,3"
+                                                            Margin="0,0,0,3">
+                                                        <TextBlock Text="{Binding ViewSwitchLabel}"
+                                                                   Foreground="{StaticResource Accent}"
+                                                                   FontSize="10" />
+                                                    </Border>
+                                                    <TextBlock Text="{Binding Text}"
+                                                               FontFamily="Consolas"
+                                                               FontSize="15"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <DataTemplate.Triggers>
+                                                    <DataTrigger Binding="{Binding IsViewSwitchTarget}" Value="True">
+                                                        <Setter TargetName="MarkerLabel" Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </DataTemplate.Triggers>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
-                                    <TextBlock Text="{Binding ChordSheetViewportMarkers.Count, StringFormat={}{0} marcas configuradas}"
-                                               Foreground="{StaticResource TextSecondary}"
-                                               FontSize="11"
-                                               Margin="0,7,0,0" />
-                                </StackPanel>
-                            </Border>
-                            <ListBox x:Name="ChordLineList"
-                                     Grid.Row="3"
-                                     ItemsSource="{Binding ChordSheetLines}"
-                                     SelectedItem="{Binding SelectedChordSheetLine}"
-                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                     PreviewMouseWheel="OnChordLineListPreviewMouseWheel"
-                                     AutomationProperties.AutomationId="ChordSheetLineList">
-                                <ListBox.ItemContainerStyle>
-                                    <Style TargetType="ListBoxItem">
-                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                        <Setter Property="Padding" Value="8,4" />
-                                        <Setter Property="Margin" Value="0,1" />
-                                        <Setter Property="Background" Value="Transparent" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                                <Setter Property="Background" Value="{StaticResource AccentDark}" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </ListBox.ItemContainerStyle>
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel>
-                                            <Border x:Name="ViewSwitchMarker"
-                                                    Visibility="Collapsed"
-                                                    Background="{StaticResource AccentDark}"
-                                                    BorderBrush="{StaticResource Accent}"
-                                                    BorderThickness="0,1,0,0"
-                                                    Padding="8,5"
-                                                    Margin="0,2,0,5">
-                                                <TextBlock Text="{Binding ViewSwitchLabel}"
-                                                           Foreground="{StaticResource Accent}"
-                                                           FontSize="11"
-                                                           FontWeight="SemiBold" />
-                                            </Border>
-                                            <TextBlock Text="{Binding Text}"
-                                                       FontFamily="Consolas"
-                                                       FontSize="17"
-                                                       TextWrapping="NoWrap">
-                                                <TextBlock.Style>
-                                                    <Style TargetType="TextBlock">
-                                                        <Setter Property="Foreground"
-                                                                Value="{StaticResource TextPrimary}" />
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding Kind}" Value="Chords">
-                                                                <Setter Property="Foreground"
-                                                                        Value="{StaticResource Accent}" />
-                                                                <Setter Property="FontWeight" Value="SemiBold" />
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding Kind}" Value="Section">
-                                                                <Setter Property="Foreground"
-                                                                        Value="{StaticResource Success}" />
-                                                                <Setter Property="FontWeight" Value="Bold" />
-                                                                <Setter Property="FontSize" Value="19" />
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </TextBlock.Style>
-                                            </TextBlock>
+                                </Grid>
+                                <Border Grid.Column="2"
+                                        Background="#141A23"
+                                        BorderBrush="{StaticResource Stroke}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="12">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="8" />
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="EDITAR MARCAS"
+                                                   Foreground="{StaticResource Accent}"
+                                                   FontWeight="SemiBold" />
+                                        <WrapPanel Grid.Row="1" Margin="0,8,0,0">
+                                            <TextBox Text="{Binding ChordSheetViewSwitchTimeText, UpdateSourceTrigger=LostFocus}"
+                                                     Width="82"
+                                                     ToolTip="Segundos, m:ss o h:mm:ss"
+                                                     AutomationProperties.AutomationId="ChordSheetViewSwitchTime" />
+                                            <Button Style="{StaticResource SecondaryButton}"
+                                                    Content="Usar posición actual"
+                                                    Margin="6,0,0,0"
+                                                    Command="{Binding UseCurrentChordSheetViewSwitchTimeCommand}" />
+                                            <Button Style="{StaticResource PrimaryButton}"
+                                                    Content="Añadir"
+                                                    Margin="6,0,0,0"
+                                                    Command="{Binding SetChordSheetViewSwitchCommand}"
+                                                    AutomationProperties.AutomationId="SetChordSheetViewSwitchButton" />
+                                        </WrapPanel>
+                                        <ListBox Grid.Row="3"
+                                                 ItemsSource="{Binding ChordSheetViewportMarkers}"
+                                                 SelectedItem="{Binding SelectedChordSheetViewportMarker}"
+                                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                 AutomationProperties.AutomationId="ChordSheetViewportMarkerList">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Summary}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               ToolTip="{Binding Summary}" />
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                        <StackPanel Grid.Row="4" Margin="0,8,0,0">
+                                            <TextBlock Text="{Binding ChordSheetViewportMarkers.Count, StringFormat={}{0} marcas configuradas}"
+                                                       Foreground="{StaticResource TextSecondary}"
+                                                       FontSize="11" />
+                                            <WrapPanel Margin="0,6,0,0">
+                                                <Button Style="{StaticResource SecondaryButton}"
+                                                        Content="Mover a línea"
+                                                        IsEnabled="{Binding HasChordSheetViewSwitch}"
+                                                        Command="{Binding MoveSelectedChordSheetViewportMarkerCommand}" />
+                                                <Button Style="{StaticResource SecondaryButton}"
+                                                        Content="Quitar"
+                                                        Margin="6,0,0,0"
+                                                        IsEnabled="{Binding HasChordSheetViewSwitch}"
+                                                        Command="{Binding ClearChordSheetViewSwitchCommand}" />
+                                                <Button Style="{StaticResource SecondaryButton}"
+                                                        Content="Quitar todas"
+                                                        Margin="6,0,0,0"
+                                                        IsEnabled="{Binding HasChordSheetViewSwitch}"
+                                                        Command="{Binding ClearAllChordSheetViewSwitchesCommand}" />
+                                            </WrapPanel>
                                         </StackPanel>
-                                        <DataTemplate.Triggers>
-                                            <DataTrigger Binding="{Binding IsViewSwitchTarget}" Value="True">
-                                                <Setter TargetName="ViewSwitchMarker"
-                                                        Property="Visibility"
-                                                        Value="Visible" />
-                                            </DataTrigger>
-                                        </DataTemplate.Triggers>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                            <WrapPanel Grid.Row="4" Margin="0,8,0,0">
-                                <Button Style="{StaticResource SecondaryButton}"
-                                        Content="Desvincular hoja"
-                                        Command="{Binding ClearChordSheetCommand}" />
-                            </WrapPanel>
+                                    </Grid>
+                                </Border>
+                            </Grid>
                         </Grid>
                     </TabItem>
                     <TabItem Header="EDITAR TEXTO">
@@ -360,6 +405,10 @@
                                         Content="Importar archivo"
                                         Margin="8,0,0,0"
                                         Command="{Binding ImportChordSheetCommand}" />
+                                <Button Style="{StaticResource SecondaryButton}"
+                                        Content="Desvincular hoja"
+                                        Margin="8,0,0,0"
+                                        Command="{Binding ClearChordSheetCommand}" />
                             </WrapPanel>
                         </Grid>
                     </TabItem>

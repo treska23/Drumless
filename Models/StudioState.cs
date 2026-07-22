@@ -56,6 +56,7 @@ public sealed class StudioState
     public string? ActiveLibraryId { get; set; }
     public string? ActiveKitId { get; set; }
     public double TrackVolume { get; set; } = 0.8d;
+    public double ChordSheetViewerFontSize { get; set; } = 18d;
     public string? VstModulePath { get; set; }
     public string? VstClassId { get; set; }
     public bool AutoLoadVst { get; set; }

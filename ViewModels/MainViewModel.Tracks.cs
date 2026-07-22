@@ -275,6 +275,8 @@ public sealed partial class MainViewModel
             _preferredInternalLibraryId = state.ActiveLibraryId;
             _preferredInternalKitId = state.ActiveKitId;
             _trackVolume = Math.Clamp(state.TrackVolume, 0d, 1d);
+            _chordSheetViewerFontSize = SnapChordSheetFontSize(
+                state.ChordSheetViewerFontSize);
             _preferredVstModulePath = state.VstModulePath;
             _preferredVstClassId = state.VstClassId;
             _autoLoadVst = state.AutoLoadVst;
@@ -1369,6 +1371,7 @@ public sealed partial class MainViewModel
                 ActiveLibraryId = _preferredInternalLibraryId,
                 ActiveKitId = _preferredInternalKitId,
                 TrackVolume = TrackVolume,
+                ChordSheetViewerFontSize = ChordSheetViewerFontSize,
                 VstModulePath = _preferredVstModulePath,
                 VstClassId = _preferredVstClassId,
                 AutoLoadVst = _autoLoadVst,

@@ -91,6 +91,7 @@ public sealed class StudioStateStoreTests
             ActiveLibraryId = "factory.natural",
             ActiveKitId = "factory.natural.studio",
             TrackVolume = 0.62d,
+            ChordSheetViewerFontSize = 24d,
             VstModulePath = @"C:\Program Files\Common Files\VST3\Groove Agent SE.vst3",
             VstClassId = "0123456789ABCDEF0123456789ABCDEF",
             AutoLoadVst = true,
@@ -299,6 +300,7 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual("factory.natural", loaded.ActiveLibraryId);
         Assert.AreEqual("factory.natural.studio", loaded.ActiveKitId);
         Assert.AreEqual(0.62d, loaded.TrackVolume);
+        Assert.AreEqual(24d, loaded.ChordSheetViewerFontSize);
         Assert.AreEqual(
             @"C:\Program Files\Common Files\VST3\Groove Agent SE.vst3",
             loaded.VstModulePath);
@@ -385,6 +387,7 @@ public sealed class StudioStateStoreTests
         Assert.IsTrue(loaded.AutoConnectMidi);
         Assert.AreEqual(72d, loaded.MidiVelocitySensitivity);
         Assert.AreEqual(0.8d, loaded.TrackVolume);
+        Assert.AreEqual(18d, loaded.ChordSheetViewerFontSize);
         Assert.AreEqual(0.8d, loaded.AudioInputGain);
     }
 
@@ -410,6 +413,7 @@ public sealed class StudioStateStoreTests
         Assert.IsTrue(loaded.AutoConnectMidi);
         Assert.AreEqual(72d, loaded.MidiVelocitySensitivity);
         Assert.AreEqual(0.8d, loaded.TrackVolume);
+        Assert.AreEqual(18d, loaded.ChordSheetViewerFontSize);
         Assert.AreEqual(0.8d, loaded.AudioInputGain);
         Assert.IsNull(loaded.AudioInputChannelIndex);
         Assert.IsFalse(loaded.AutoLoadVst);

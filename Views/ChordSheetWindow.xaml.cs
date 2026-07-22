@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
@@ -21,6 +22,7 @@ public partial class ChordSheetWindow : Window
         _viewModel.CurrentChordSheetLineChanged += OnCurrentChordSheetLineChanged;
         _viewModel.ChordSheetSourceOpenRequested += OnChordSheetSourceOpenRequested;
         Closed += OnClosed;
+        Loaded += (_, _) => UpdateChordWorkspaceLayout();
         ContentRendered += async (_, _) =>
         {
             await EnsureWebViewReadyAsync();
@@ -31,6 +33,45 @@ public partial class ChordSheetWindow : Window
         };
         AddressBox.Text =
             $"https://duckduckgo.com/?q={Uri.EscapeDataString(viewModel.CurrentTrackTitle + " letra acordes")}";
+    }
+
+    private void OnChordWorkspaceTabSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs eventArgs)
+    {
+        if (!ReferenceEquals(eventArgs.Source, ChordWorkspaceTabs))
+        {
+            return;
+        }
+        UpdateChordWorkspaceLayout();
+    }
+
+    private void UpdateChordWorkspaceLayout()
+    {
+        if (BrowserColumn is null || ChordWorkspaceTabs is null)
+        {
+            return;
+        }
+        var isFollowMode = ReferenceEquals(ChordWorkspaceTabs.SelectedItem, FollowTab);
+        var isMarkerMode = ReferenceEquals(ChordWorkspaceTabs.SelectedItem, MarkersTab);
+        var useFullViewer = isFollowMode || isMarkerMode;
+
+        BrowserPane.Visibility = useFullViewer ? Visibility.Collapsed : Visibility.Visible;
+        BrowserColumn.MinWidth = useFullViewer ? 0d : 420d;
+        BrowserColumn.Width = useFullViewer
+            ? new GridLength(0d)
+            : new GridLength(1.08d, GridUnitType.Star);
+        WorkspaceGapColumn.Width = new GridLength(useFullViewer ? 0d : 12d);
+        EditorColumn.MinWidth = useFullViewer ? 0d : 380d;
+        EditorColumn.Width = new GridLength(
+            useFullViewer ? 1d : 0.92d,
+            GridUnitType.Star);
+        HeaderHelpText.Visibility = useFullViewer ? Visibility.Collapsed : Visibility.Visible;
+        HeaderModeText.Text = isFollowMode
+            ? "Visor responsive · las marcas no ocupan espacio"
+            : isMarkerMode
+                ? "Editor de marcas"
+                : "Marcas manuales de cambio sin límite";
     }
 
     private async void OnWebViewLoaded(object sender, RoutedEventArgs e) =>
