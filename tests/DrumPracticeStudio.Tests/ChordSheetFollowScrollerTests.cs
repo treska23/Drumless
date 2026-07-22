@@ -38,6 +38,13 @@ public sealed class ChordSheetFollowScrollerTests
             window.Show();
             window.UpdateLayout();
             ChordSheetFollowScroller.ReserveViewportTail(listBox);
+            window.UpdateLayout();
+
+            var firstContainer = (ListBoxItem?)listBox.ItemContainerGenerator
+                .ContainerFromItem(items[0]);
+            Assert.IsNotNull(firstContainer);
+            Assert.IsTrue(firstContainer.ActualHeight > 0d);
+            Assert.IsTrue(firstContainer.IsVisible);
 
             var scrollViewer = ChordSheetFollowScroller
                 .FindVisualChild<ScrollViewer>(listBox);

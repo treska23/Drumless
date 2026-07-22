@@ -215,8 +215,20 @@ public partial class MainWindow : Window
             return;
         }
         _chordSheetWindow = new ChordSheetWindow(_viewModel) { Owner = this };
-        _chordSheetWindow.Closed += (_, _) => _chordSheetWindow = null;
+        _chordSheetWindow.Closed += OnChordSheetWindowClosed;
         _chordSheetWindow.Show();
+    }
+
+    private void OnChordSheetWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is ChordSheetWindow closedWindow)
+        {
+            closedWindow.Closed -= OnChordSheetWindowClosed;
+        }
+        if (ReferenceEquals(_chordSheetWindow, sender))
+        {
+            _chordSheetWindow = null;
+        }
     }
 
     private async void OnClosing(object? sender, CancelEventArgs e)

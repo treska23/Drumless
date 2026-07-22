@@ -281,7 +281,14 @@ public partial class ChordSheetWindow : Window
     {
         _viewModel.CurrentChordSheetLineChanged -= OnCurrentChordSheetLineChanged;
         _viewModel.ChordSheetSourceOpenRequested -= OnChordSheetSourceOpenRequested;
-        ChordWebView.Dispose();
+        try
+        {
+            ChordWebView.Dispose();
+        }
+        catch
+        {
+            // El cierre del navegador no debe impedir liberar y reabrir esta ventana.
+        }
     }
 
     private const string ExtractionScript =

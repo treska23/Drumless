@@ -345,7 +345,6 @@
                                     <Button Style="{StaticResource PrimaryButton}"
                                             Content="Abrir letra y acordes"
                                             Margin="0,0,0,8"
-                                            IsEnabled="{Binding HasTrack}"
                                             Command="{Binding OpenChordSheetWindowCommand}"
                                             AutomationProperties.AutomationId="OpenChordSheetButton" />
                                     <TextBlock Text="{Binding SongStructureStatus}"

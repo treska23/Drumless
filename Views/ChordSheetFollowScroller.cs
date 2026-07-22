@@ -9,10 +9,15 @@ internal static class ChordSheetFollowScroller
     public static void ReserveViewportTail(ListBox listBox)
     {
         var viewportHeight = Math.Max(0d, listBox.ActualHeight);
-        listBox.Padding = new Thickness(
-            listBox.Padding.Left,
-            listBox.Padding.Top,
-            listBox.Padding.Right,
+        var itemsPresenter = FindVisualChild<ItemsPresenter>(listBox);
+        if (itemsPresenter is null)
+        {
+            return;
+        }
+        itemsPresenter.Margin = new Thickness(
+            itemsPresenter.Margin.Left,
+            itemsPresenter.Margin.Top,
+            itemsPresenter.Margin.Right,
             viewportHeight);
     }
 
