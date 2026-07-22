@@ -215,6 +215,7 @@
                                  SelectedItem="{Binding SelectedChordSheetLine}"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.CanContentScroll="False"
                                  PreviewMouseWheel="OnChordLineListPreviewMouseWheel"
                                  AutomationProperties.AutomationId="ChordSheetLineList">
                             <ListBox.ItemContainerStyle>

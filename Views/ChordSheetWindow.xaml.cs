@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
 using DrumPracticeStudio.ViewModels;
@@ -72,6 +73,12 @@ public partial class ChordSheetWindow : Window
             : isMarkerMode
                 ? "Editor de marcas"
                 : "Marcas manuales de cambio sin límite";
+        if (isFollowMode && IsLoaded)
+        {
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.Loaded,
+                _viewModel.RefreshChordSheetFollowViewport);
+        }
     }
 
     private async void OnWebViewLoaded(object sender, RoutedEventArgs e) =>
@@ -256,13 +263,13 @@ public partial class ChordSheetWindow : Window
         object? sender,
         ChordSheetLineItem? line)
     {
-        if (line is null || !IsVisible)
+        if (line is null || !IsVisible || !FollowTab.IsSelected)
         {
             return;
         }
-        Dispatcher.BeginInvoke(() =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
-            ChordLineList.ScrollIntoView(line);
+            ChordSheetFollowScroller.ScrollToTop(ChordLineList, line);
         });
     }
 

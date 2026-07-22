@@ -180,8 +180,22 @@ public sealed partial class MainViewModel
         {
             if (SetProperty(ref _isChordSheetFollowEnabled, value) && value)
             {
-                UpdateChordSheetPlaybackPosition(ResolvePlaybackPosition());
+                RefreshChordSheetFollowViewport();
             }
+        }
+    }
+
+    public void RefreshChordSheetFollowViewport()
+    {
+        if (!IsChordSheetFollowEnabled)
+        {
+            return;
+        }
+        var previousLine = CurrentChordSheetLine;
+        UpdateChordSheetPlaybackPosition(ResolvePlaybackPosition());
+        if (ReferenceEquals(previousLine, CurrentChordSheetLine))
+        {
+            CurrentChordSheetLineChanged?.Invoke(this, CurrentChordSheetLine);
         }
     }
 
@@ -471,7 +485,7 @@ public sealed partial class MainViewModel
         SaveChordSheetFromItems();
         ChordSheetStatus =
             $"Marca añadida en {_chordSheetViewSwitchTimeText}; mostrará «{line.Text}» y lo que sigue. Hay {ChordSheetViewportMarkers.Count}.";
-        UpdateChordSheetPlaybackPosition(seconds);
+        UpdateChordSheetPlaybackPosition(ResolvePlaybackPosition());
     }
 
     private void UseCurrentChordSheetViewSwitchTime()
