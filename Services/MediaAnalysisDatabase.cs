@@ -93,6 +93,13 @@ public sealed class MediaAnalysisDatabase
             : ChordSheetDocument.Normalize(chordSheet);
     }
 
+    public void SetSongEffectProfile(string mediaKey, SongEffectProfile? profile)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mediaKey);
+        var record = GetOrCreate(mediaKey);
+        record.SongEffectProfile = profile;
+    }
+
     public bool Remove(string? mediaKey) =>
         !string.IsNullOrWhiteSpace(mediaKey) && _records.Remove(mediaKey);
 
@@ -128,6 +135,7 @@ public sealed class MediaAnalysisDatabase
         DrumReference = record.DrumReference is null
             ? null
             : DrumReferenceMap.Normalize(record.DrumReference),
+        SongEffectProfile = record.SongEffectProfile,
         PerformanceSessions = record.PerformanceSessions.ToList()
     };
 }

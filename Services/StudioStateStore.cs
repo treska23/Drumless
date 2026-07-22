@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 13;
+    public const int CurrentSchemaVersion = 14;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -522,6 +522,9 @@ public sealed class StudioStateStore
         var drumReference = TryCreateDrumReference(dto.DrumReference);
         var songStructure = TryCreateSongStructure(dto.SongStructure);
         var chordSheet = TryCreateChordSheet(dto.ChordSheet);
+        var songEffectProfile = TryCreateSongEffectProfile(
+            dto.SongEffectProfile,
+            dto.MediaKey);
 
         record = new MediaAnalysisRecord
         {
@@ -532,13 +535,69 @@ public sealed class StudioStateStore
             SongStructure = songStructure,
             ChordSheet = chordSheet,
             DrumReference = drumReference,
+            SongEffectProfile = songEffectProfile,
             PerformanceSessions = sessions
         };
         return tempo is not null ||
                songStructure is not null ||
                chordSheet is not null ||
                drumReference is not null ||
+               songEffectProfile is not null ||
                sessions.Count > 0;
+    }
+
+    private static SongEffectProfile? TryCreateSongEffectProfile(
+        SongEffectProfile? profile,
+        string mediaKey)
+    {
+        if (profile is null ||
+            string.IsNullOrWhiteSpace(profile.Id) ||
+            string.IsNullOrWhiteSpace(profile.TrackTitle) ||
+            string.IsNullOrWhiteSpace(profile.Artist) ||
+            string.IsNullOrWhiteSpace(profile.SongTitle) ||
+            string.IsNullOrWhiteSpace(profile.OllamaModel) ||
+            !string.Equals(profile.MediaKey, mediaKey, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return profile with
+        {
+            Name = string.IsNullOrWhiteSpace(profile.Name)
+                ? "Original aproximado"
+                : profile.Name.Trim(),
+            CreatedAtUtc = profile.CreatedAtUtc == default
+                ? DateTimeOffset.UtcNow
+                : profile.CreatedAtUtc,
+            Summary = profile.Summary?.Trim() ?? string.Empty,
+            Guitar = NormalizeSongEffectChain(profile.Guitar, 0, "Guitarra mono"),
+            Voice = NormalizeSongEffectChain(profile.Voice, 1, "Voz mono")
+        };
+    }
+
+    private static SongInputEffectChain NormalizeSongEffectChain(
+        SongInputEffectChain? chain,
+        int channelIndex,
+        string instrument)
+    {
+        var slots = (chain?.Slots ?? [])
+            .Where(slot => slot?.Effect is not null &&
+                           !string.IsNullOrWhiteSpace(slot.Effect.ModulePath) &&
+                           !string.IsNullOrWhiteSpace(slot.Effect.ClassId) &&
+                           !string.IsNullOrWhiteSpace(slot.Effect.Name))
+            .Take(AudioEffectCatalog.MaximumSlots)
+            .Select(slot => slot with
+            {
+                Purpose = slot.Purpose?.Trim() ?? string.Empty,
+                PresetHint = slot.PresetHint?.Trim() ?? string.Empty,
+                Mix = double.IsFinite(slot.Mix) ? Math.Clamp(slot.Mix, 0d, 1d) : 1d
+            })
+            .ToArray();
+        return new SongInputEffectChain(
+            channelIndex,
+            instrument,
+            chain?.Description?.Trim() ?? string.Empty,
+            slots);
     }
 
     private static SongStructureMap? TryCreateSongStructure(SongStructureDto? dto)
@@ -757,6 +816,7 @@ public sealed class StudioStateStore
                 Confidence = record.DrumReference.Confidence,
                 HitTimesSeconds = record.DrumReference.HitTimesSeconds.ToList()
             },
+        SongEffectProfile = record.SongEffectProfile,
         PerformanceSessions = record.PerformanceSessions.Select(session =>
             new DrumPerformanceSessionDto
             {
@@ -1127,6 +1187,7 @@ public sealed class StudioStateStore
         public SongStructureDto? SongStructure { get; set; }
         public ChordSheetDto? ChordSheet { get; set; }
         public DrumReferenceDto? DrumReference { get; set; }
+        public SongEffectProfile? SongEffectProfile { get; set; }
         public List<DrumPerformanceSessionDto>? PerformanceSessions { get; set; }
     }
 

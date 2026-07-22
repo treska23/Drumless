@@ -200,6 +200,7 @@ public sealed class MediaAnalysisRecord
     public SongStructureMap? SongStructure { get; set; }
     public ChordSheetDocument? ChordSheet { get; set; }
     public DrumReferenceMap? DrumReference { get; set; }
+    public SongEffectProfile? SongEffectProfile { get; set; }
     public List<DrumPerformanceSession> PerformanceSessions { get; set; } = [];
 }
 

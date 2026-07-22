@@ -230,6 +230,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         InitializeTrackCommands();
         InitializeTempoCommands();
         InitializeChordSheetCommands();
+        InitializeSongEffectCommands();
         InitializeRecordingCommands();
 
         _midi.NoteReceived += OnMidiNoteReceived;
@@ -792,6 +793,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _tempoSourceCancellation?.Dispose();
         _chordSheetSourceCancellation?.Cancel();
         _chordSheetSourceCancellation?.Dispose();
+        _songEffectAnalysisCancellation?.Cancel();
+        _songEffectAnalysisCancellation?.Dispose();
         _vstLoadCancellation?.Cancel();
         _vstLoadCancellation?.Dispose();
         _vstEffectScanCancellation?.Cancel();
@@ -818,6 +821,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _midi.Dispose();
         _tempoSourceSearch.Dispose();
         _chordSheetSourceSearch.Dispose();
+        _songEffectRecommendation.Dispose();
         _audio.Dispose();
     }
 
@@ -1518,6 +1522,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         OnPropertyChanged(nameof(IsAudioInputAvailable));
+        ReapplySavedSongEffectsToInputs();
         AudioInputStatus = !_audio.AudioInputChannels.Any()
             ? "La entrada de audio directa está disponible al elegir una salida ASIO."
             : _audio.IsAudioInputMonitoringActive

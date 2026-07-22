@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private YouTubePlaybackRequest? _pendingYouTubePlayback;
     private PlaylistWindow? _playlistWindow;
     private ChordSheetWindow? _chordSheetWindow;
+    private SongEffectProfileWindow? _songEffectProfileWindow;
     private readonly HashSet<ComboBox> _configuredVstEffectPickers = [];
     private readonly Dictionary<ComboBox, int> _vstEffectFilterVersions = [];
 
@@ -102,6 +103,8 @@ public partial class MainWindow : Window
         _viewModel.YouTubeControlRequested += OnYouTubeControlRequested;
         _viewModel.YouTubeMetronomeChanged += OnYouTubeMetronomeChanged;
         _viewModel.ChordSheetWindowRequested += OnChordSheetWindowRequested;
+        _viewModel.SongEffectWindowRequested += OnSongEffectWindowRequested;
+        _viewModel.SongIdentityRequired += OnSongIdentityRequired;
         SourceInitialized += OnSourceInitialized;
         Closing += OnClosing;
         Closed += OnClosed;
@@ -201,9 +204,12 @@ public partial class MainWindow : Window
         _viewModel.YouTubeControlRequested -= OnYouTubeControlRequested;
         _viewModel.YouTubeMetronomeChanged -= OnYouTubeMetronomeChanged;
         _viewModel.ChordSheetWindowRequested -= OnChordSheetWindowRequested;
+        _viewModel.SongEffectWindowRequested -= OnSongEffectWindowRequested;
+        _viewModel.SongIdentityRequired -= OnSongIdentityRequired;
         YouTubeWebView.Dispose();
         _playlistWindow?.Close();
         _chordSheetWindow?.Close();
+        _songEffectProfileWindow?.Close();
         _viewModel.Dispose();
     }
 
@@ -228,6 +234,48 @@ public partial class MainWindow : Window
         if (ReferenceEquals(_chordSheetWindow, sender))
         {
             _chordSheetWindow = null;
+        }
+    }
+
+    private void OnSongEffectWindowRequested(object? sender, EventArgs e)
+    {
+        if (_songEffectProfileWindow is { IsVisible: true })
+        {
+            _songEffectProfileWindow.Activate();
+            return;
+        }
+        _songEffectProfileWindow = new SongEffectProfileWindow(_viewModel) { Owner = this };
+        _songEffectProfileWindow.Closed += OnSongEffectWindowClosed;
+        _songEffectProfileWindow.Show();
+    }
+
+    private void OnSongEffectWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is SongEffectProfileWindow closedWindow)
+        {
+            closedWindow.Closed -= OnSongEffectWindowClosed;
+        }
+        if (ReferenceEquals(_songEffectProfileWindow, sender))
+        {
+            _songEffectProfileWindow = null;
+        }
+    }
+
+    private void OnSongIdentityRequired(
+        object? sender,
+        SongIdentityRequestEventArgs request)
+    {
+        var dialog = new SongIdentityDialog(request.Artist, request.SongTitle)
+        {
+            Owner = _songEffectProfileWindow is { IsVisible: true }
+                ? _songEffectProfileWindow
+                : this
+        };
+        request.IsConfirmed = dialog.ShowDialog() == true;
+        if (request.IsConfirmed)
+        {
+            request.Artist = dialog.Artist;
+            request.SongTitle = dialog.SongTitle;
         }
     }
 

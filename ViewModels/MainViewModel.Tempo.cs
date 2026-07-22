@@ -622,6 +622,7 @@ public sealed partial class MainViewModel
         ClearTransientTempoResults();
         SynchronizeTempoEditor(track?.Tempo, track?.TempoLabel);
         LoadChordSheetForCurrentMedia();
+        RestoreSongEffectProfileForCurrentTrack();
         RefreshDrumReferenceStatus();
         YouTubeMetronomeChanged?.Invoke(this, new YouTubeMetronomeRequest(null));
         OnPropertyChanged(nameof(CanAnalyzeTempo));

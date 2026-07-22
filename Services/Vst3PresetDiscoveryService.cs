@@ -29,6 +29,27 @@ internal sealed class Vst3PresetDiscoveryService
             .FirstOrDefault();
     }
 
+    public string? FindCompatibleEffectPreset(
+        Vst3EffectReference effect,
+        string? toneHint)
+    {
+        ArgumentNullException.ThrowIfNull(effect);
+        var hintTerms = (toneHint ?? string.Empty)
+            .Split(
+                [' ', '-', '_', '.', ',', ';', ':', '/', '\\'],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(term => term.Length >= 3)
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+
+        return _presetRoots
+            .SelectMany(EnumeratePresetFiles)
+            .Where(path => HasClassId(path, effect.ClassId))
+            .OrderByDescending(path => EffectPresetScore(path, effect.Name, hintTerms))
+            .ThenByDescending(GetLastWriteTimeUtcSafe)
+            .FirstOrDefault();
+    }
+
     private static IEnumerable<string> GetStandardPresetRoots()
     {
         yield return Path.Combine(
@@ -147,6 +168,23 @@ internal sealed class Vst3PresetDiscoveryService
             searchable.Contains("init", StringComparison.OrdinalIgnoreCase))
         {
             score -= 8;
+        }
+        return score;
+    }
+
+    private static int EffectPresetScore(
+        string path,
+        string effectName,
+        IReadOnlyList<string> hintTerms)
+    {
+        var searchable = $"{Path.GetFileNameWithoutExtension(path)} {path} {effectName}";
+        var score = hintTerms.Count(term =>
+            searchable.Contains(term, StringComparison.CurrentCultureIgnoreCase)) * 4;
+        if (searchable.Contains("init", StringComparison.OrdinalIgnoreCase) ||
+            searchable.Contains("default", StringComparison.OrdinalIgnoreCase) ||
+            searchable.Contains("empty", StringComparison.OrdinalIgnoreCase))
+        {
+            score -= 6;
         }
         return score;
     }

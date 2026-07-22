@@ -1,0 +1,48 @@
+<Window x:Class="DrumPracticeStudio.Views.SongIdentityDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Identificar canción"
+        Width="520" Height="335"
+        ResizeMode="NoResize"
+        Background="{StaticResource AppBackground}"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock Text="No puedo identificar esta canción con seguridad"
+                   FontSize="21" FontWeight="SemiBold" />
+        <TextBlock Grid.Row="1"
+                   Text="Introduce los datos de la grabación original. Se guardarán con la pista y se usarán para investigar su sonido."
+                   Foreground="{StaticResource TextSecondary}"
+                   TextWrapping="Wrap" Margin="0,7,0,16" />
+        <StackPanel Grid.Row="2" Margin="0,0,0,12">
+            <TextBlock Text="INTÉRPRETE ORIGINAL" FontSize="11"
+                       Foreground="{StaticResource TextSecondary}" />
+            <TextBox x:Name="ArtistTextBox" Margin="0,5,0,0"
+                     AutomationProperties.AutomationId="SongArtistTextBox" />
+        </StackPanel>
+        <StackPanel Grid.Row="3">
+            <TextBlock Text="NOMBRE DE LA CANCIÓN" FontSize="11"
+                       Foreground="{StaticResource TextSecondary}" />
+            <TextBox x:Name="SongTitleTextBox" Margin="0,5,0,0"
+                     AutomationProperties.AutomationId="SongTitleTextBox" />
+        </StackPanel>
+        <TextBlock x:Name="ValidationText" Grid.Row="4"
+                   Foreground="#FF7A7A" Margin="0,10,0,0"
+                   Visibility="Collapsed" />
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Style="{StaticResource SecondaryButton}" Content="Cancelar"
+                    Click="OnCancelClick" />
+            <Button Style="{StaticResource PrimaryButton}" Content="Continuar"
+                    Margin="8,0,0,0" Click="OnContinueClick"
+                    AutomationProperties.AutomationId="ConfirmSongIdentityButton" />
+        </StackPanel>
+    </Grid>
+</Window>
