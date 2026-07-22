@@ -65,6 +65,8 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
                 }
             }
         }
+
+        _core.ApplyConfiguredParameters();
     }
 
     public Vst3EffectReference Reference => _core.Reference;

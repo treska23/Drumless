@@ -177,6 +177,316 @@ public sealed partial class SongEffectRecommendationService : IDisposable
             voice);
     }
 
+    public async Task<SongEffectProfile> TuneParametersAsync(
+        SongEffectProfile profile,
+        IReadOnlyDictionary<string, IReadOnlyList<Vst3ParameterDescriptor>> parameterCatalog,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(parameterCatalog);
+        var guitarCatalog = BuildTuningCatalog(profile.Guitar, "g", parameterCatalog);
+        var voiceCatalog = BuildTuningCatalog(profile.Voice, "v", parameterCatalog);
+        if (guitarCatalog.Count == 0 && voiceCatalog.Count == 0)
+        {
+            throw new InvalidDataException(
+                "Los plugins elegidos no exponen presets ni parámetros configurables.");
+        }
+
+        var context = new
+        {
+            artist = profile.Artist,
+            song = profile.SongTitle,
+            guitar = guitarCatalog.Select(ToPromptSlot),
+            voice = voiceCatalog.Select(ToPromptSlot)
+        };
+        var prompt =
+            "Configura los parámetros reales de estos efectos VST3 para aproximar de forma " +
+            "prudente el sonido de la canción. Input 1 es guitarra mono e Input 2 voz mono. " +
+            "Usa únicamente slotId e ids de parámetros incluidos. normalized debe estar entre " +
+            "0 y 1. Modifica sólo parámetros necesarios; evita subidas de nivel, realimentación " +
+            "y valores extremos. Cada plugin que tenga parámetros debe recibir al menos un ajuste. " +
+            "Devuelve JSON estricto: {\"guitar\":[{\"slotId\":\"g0\",\"parameters\":[" +
+            "{\"id\":1,\"normalized\":0.5,\"reason\":\"...\"}]}],\"voice\":[...]}. " +
+            "No añadas texto fuera del JSON.\n" + JsonSerializer.Serialize(context);
+
+        using var response = await _ollama.PostAsJsonAsync(
+            "api/chat",
+            new
+            {
+                model = profile.OllamaModel,
+                stream = false,
+                format = "json",
+                options = new { temperature = 0.05 },
+                messages = new[]
+                {
+                    new
+                    {
+                        role = "system",
+                        content = "Eres un técnico de mezcla conservador. Configuras sólo parámetros VST3 enumerados."
+                    },
+                    new { role = "user", content = prompt }
+                }
+            },
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+        using var responseDocument = JsonDocument.Parse(
+            await response.Content.ReadAsStreamAsync(cancellationToken));
+        var content = responseDocument.RootElement
+            .GetProperty("message")
+            .GetProperty("content")
+            .GetString();
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            throw new InvalidDataException("Ollama no devolvió ajustes para los plugins.");
+        }
+
+        using var tuningDocument = JsonDocument.Parse(content);
+        var tunedGuitar = ApplyParameterTuning(
+            profile.Guitar,
+            "guitar",
+            guitarCatalog,
+            tuningDocument.RootElement);
+        var tunedVoice = ApplyParameterTuning(
+            profile.Voice,
+            "voice",
+            voiceCatalog,
+            tuningDocument.RootElement);
+        if (tunedGuitar.Slots.Count == 0 || tunedVoice.Slots.Count == 0)
+        {
+            throw new InvalidDataException(
+                "Ollama no configuró una cadena utilizable para los dos inputs.");
+        }
+
+        return profile with
+        {
+            Summary = profile.Summary +
+                      " Los parámetros internos de los plugins se adaptaron para esta canción.",
+            Guitar = tunedGuitar,
+            Voice = tunedVoice
+        };
+    }
+
+    private static IReadOnlyList<TuningSlot> BuildTuningCatalog(
+        SongInputEffectChain chain,
+        string prefix,
+        IReadOnlyDictionary<string, IReadOnlyList<Vst3ParameterDescriptor>> parameterCatalog) =>
+        chain.Slots.Select((slot, index) =>
+        {
+            var key = Vst3EffectItem.GetCatalogId(
+                slot.Effect.ModulePath,
+                slot.Effect.ClassId);
+            parameterCatalog.TryGetValue(key, out var parameters);
+            return new TuningSlot(
+                $"{prefix}{index}",
+                index,
+                slot,
+                SelectTunableParameters(parameters ?? [], slot.Purpose));
+        }).ToArray();
+
+    private static object ToPromptSlot(TuningSlot slot) => new
+    {
+        slotId = slot.SlotId,
+        plugin = slot.Slot.Effect.Name,
+        vendor = slot.Slot.Effect.Vendor,
+        purpose = slot.Slot.Purpose,
+        presetBase = string.IsNullOrWhiteSpace(slot.Slot.Effect.PresetPath)
+            ? null
+            : Path.GetFileNameWithoutExtension(slot.Slot.Effect.PresetPath),
+        parameters = slot.Parameters.Select(parameter => new
+        {
+            id = parameter.Id,
+            title = parameter.Title,
+            shortTitle = parameter.ShortTitle,
+            units = parameter.Units,
+            steps = parameter.StepCount,
+            defaultNormalized = parameter.DefaultNormalizedValue,
+            defaultDisplay = parameter.DefaultDisplayValue,
+            currentNormalized = parameter.CurrentNormalizedValue,
+            currentDisplay = parameter.CurrentDisplayValue
+        })
+    };
+
+    private static IReadOnlyList<Vst3ParameterDescriptor> SelectTunableParameters(
+        IReadOnlyList<Vst3ParameterDescriptor> parameters,
+        string purpose) => parameters
+        .Where(parameter => !IsUnsafeLevelParameter(parameter.Title))
+        .OrderByDescending(parameter => ParameterRelevanceScore(parameter, purpose))
+        .ThenBy(parameter => parameter.Title, StringComparer.CurrentCultureIgnoreCase)
+        .Take(40)
+        .ToArray();
+
+    private static int ParameterRelevanceScore(
+        Vst3ParameterDescriptor parameter,
+        string purpose)
+    {
+        var title = $" {NormalizePluginText(parameter.Title)} ";
+        var purposeTerms = NormalizePluginText(purpose)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var score = purposeTerms.Count(term =>
+            term.Length >= 4 && title.Contains(term, StringComparison.Ordinal)) * 8;
+        score += ContainsAny(
+            title,
+            " drive ", " tone ", " threshold ", " ratio ", " attack ", " release ",
+            " frequency ", " freq ", " band ", " mix ", " wet ", " dry ", " room ",
+            " decay ", " time ", " feedback ", " depth ", " presence ", " bass ",
+            " treble ", " deess ", " reduction ") ? 12 : 0;
+        return score;
+    }
+
+    private static bool IsUnsafeLevelParameter(string title)
+    {
+        var normalized = $" {NormalizePluginText(title)} ";
+        return ContainsAny(
+            normalized,
+            " output ", " master ", " makeup ", " make up ", " input gain ",
+            " output gain ", " volume ", " level ", " vol ", " trim ", " ceiling ",
+            " bypass ", " enable ", " on off ");
+    }
+
+    private static SongInputEffectChain ApplyParameterTuning(
+        SongInputEffectChain chain,
+        string propertyName,
+        IReadOnlyList<TuningSlot> catalog,
+        JsonElement root)
+    {
+        TryGetPropertyIgnoreCase(root, propertyName, out var responseChain);
+        if (responseChain.ValueKind == JsonValueKind.Object &&
+            TryGetPropertyIgnoreCase(responseChain, "slots", out var nested))
+        {
+            responseChain = nested;
+        }
+        var responseSlots = responseChain.ValueKind == JsonValueKind.Array
+            ? responseChain.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.Object).ToArray()
+            : [];
+        var tuned = new List<SongEffectSlotRecommendation>();
+        foreach (var slot in catalog)
+        {
+            var responseSlot = responseSlots.FirstOrDefault(item =>
+                string.Equals(
+                    GetString(item, "slotId", string.Empty),
+                    slot.SlotId,
+                    StringComparison.OrdinalIgnoreCase));
+            if (responseSlot.ValueKind == JsonValueKind.Undefined &&
+                slot.Index < responseSlots.Length)
+            {
+                responseSlot = responseSlots[slot.Index];
+            }
+            var settings = ParseParameterSettings(responseSlot, slot.Parameters);
+            if (settings.Count == 0 && slot.Parameters.Count > 0)
+            {
+                continue;
+            }
+            if (settings.Count == 0 && string.IsNullOrWhiteSpace(slot.Slot.Effect.PresetPath))
+            {
+                continue;
+            }
+            tuned.Add(slot.Slot with
+            {
+                Effect = slot.Slot.Effect with { ParameterSettings = settings }
+            });
+        }
+        return chain with { Slots = tuned };
+    }
+
+    private static IReadOnlyList<Vst3ParameterSetting> ParseParameterSettings(
+        JsonElement slot,
+        IReadOnlyList<Vst3ParameterDescriptor> available)
+    {
+        if (slot.ValueKind != JsonValueKind.Object ||
+            !TryGetPropertyIgnoreCase(slot, "parameters", out var parameters) ||
+            parameters.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+        var byId = available.ToDictionary(parameter => parameter.Id);
+        var selected = new Dictionary<uint, Vst3ParameterSetting>();
+        foreach (var item in parameters.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !TryGetParameterId(item, available, out var id) ||
+                !byId.TryGetValue(id, out var descriptor) ||
+                !TryGetDouble(item, out var value, "normalized", "normalizedValue", "value"))
+            {
+                continue;
+            }
+            selected[id] = new Vst3ParameterSetting(
+                id,
+                descriptor.Title,
+                Math.Clamp(value, 0.02d, 0.98d),
+                GetString(item, "reason", string.Empty));
+            if (selected.Count >= 24)
+            {
+                break;
+            }
+        }
+        return selected.Values.ToArray();
+    }
+
+    private static bool TryGetParameterId(
+        JsonElement item,
+        IReadOnlyList<Vst3ParameterDescriptor> available,
+        out uint id)
+    {
+        foreach (var propertyName in new[] { "id", "parameterId" })
+        {
+            if (!TryGetPropertyIgnoreCase(item, propertyName, out var idElement))
+            {
+                continue;
+            }
+            if (idElement.ValueKind == JsonValueKind.Number && idElement.TryGetUInt32(out id))
+            {
+                return true;
+            }
+            if (idElement.ValueKind == JsonValueKind.String &&
+                uint.TryParse(idElement.GetString(), out id))
+            {
+                return true;
+            }
+        }
+        var title = GetString(item, "title", GetString(item, "name", string.Empty));
+        var descriptor = available.FirstOrDefault(parameter =>
+            string.Equals(parameter.Title, title, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(parameter.ShortTitle, title, StringComparison.OrdinalIgnoreCase));
+        id = descriptor?.Id ?? 0;
+        return descriptor is not null;
+    }
+
+    private static bool TryGetDouble(
+        JsonElement item,
+        out double value,
+        params string[] properties)
+    {
+        foreach (var property in properties)
+        {
+            if (!TryGetPropertyIgnoreCase(item, property, out var element))
+            {
+                continue;
+            }
+            if (element.ValueKind == JsonValueKind.Number && element.TryGetDouble(out value) &&
+                double.IsFinite(value))
+            {
+                return true;
+            }
+            if (element.ValueKind == JsonValueKind.String &&
+                double.TryParse(
+                    element.GetString(),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out value) && double.IsFinite(value))
+            {
+                return true;
+            }
+        }
+        value = 0d;
+        return false;
+    }
+
+    private sealed record TuningSlot(
+        string SlotId,
+        int Index,
+        SongEffectSlotRecommendation Slot,
+        IReadOnlyList<Vst3ParameterDescriptor> Parameters);
+
     private static IReadOnlyList<InstalledEffectDescriptor> SelectPromptCatalog(
         IReadOnlyList<InstalledEffectDescriptor> available) => available
         .OrderByDescending(CatalogSuitabilityScore)

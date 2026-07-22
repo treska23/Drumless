@@ -1,4 +1,6 @@
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using DrumPracticeStudio.Infrastructure;
 using DrumPracticeStudio.Models;
@@ -12,6 +14,7 @@ public sealed partial class MainViewModel
     public event EventHandler<SongIdentityRequestEventArgs>? SongIdentityRequired;
 
     private readonly SongEffectRecommendationService _songEffectRecommendation = new();
+    private readonly Vst3EffectParameterProbeService _vstEffectParameterProbe = new();
     private CancellationTokenSource? _songEffectAnalysisCancellation;
     private SongEffectProfile? _proposedSongEffectProfile;
     private SongEffectProfile? _savedSongEffectProfile;
@@ -157,6 +160,17 @@ public sealed partial class MainViewModel
             profile = await Task.Run(
                 () => ResolveInstalledEffectPresets(profile),
                 cancellation.Token);
+            SongEffectStatus = "Leyendo en procesos aislados los parámetros reales de cada plugin…";
+            var parameterCatalog = await _vstEffectParameterProbe.ProbeAsync(
+                profile.Guitar.Slots.Select(slot => slot.Effect)
+                    .Concat(profile.Voice.Slots.Select(slot => slot.Effect)),
+                cancellation.Token);
+            SongEffectStatus =
+                "Adaptando presets y parámetros VST3 al sonido de esta canción mediante Ollama…";
+            profile = await _songEffectRecommendation.TuneParametersAsync(
+                profile,
+                parameterCatalog,
+                cancellation.Token);
             ProposedSongEffectProfile = profile;
             SongEffectStatus =
                 "Propuesta terminada. Revísala antes de aplicarla a input 1 e input 2.";
@@ -281,8 +295,14 @@ public sealed partial class MainViewModel
     {
         _songEffectApplyErrors.Clear();
         var applied = 0;
-        applied += ApplySongEffectChain(profile.Guitar, AudioInputProfileKind.GuitarDrive) ? 1 : 0;
-        applied += ApplySongEffectChain(profile.Voice, AudioInputProfileKind.Voice) ? 1 : 0;
+        applied += ApplySongEffectChain(
+            profile.MediaKey,
+            profile.Guitar,
+            AudioInputProfileKind.GuitarDrive) ? 1 : 0;
+        applied += ApplySongEffectChain(
+            profile.MediaKey,
+            profile.Voice,
+            AudioInputProfileKind.Voice) ? 1 : 0;
         if (applied > 0)
         {
             RememberAudioInputMonitors();
@@ -292,6 +312,7 @@ public sealed partial class MainViewModel
     }
 
     private bool ApplySongEffectChain(
+        string mediaKey,
         SongInputEffectChain chain,
         AudioInputProfileKind profileKind)
     {
@@ -307,10 +328,18 @@ public sealed partial class MainViewModel
         {
             monitor.Profile = profileKind;
             monitor.LoadEffects(
-                chain.Slots.Select(slot => AudioEffectSlotSetting.Create(
-                    AudioEffectKind.ExternalVst3,
-                    mix: slot.Mix,
-                    externalVst3: slot.Effect)),
+                chain.Slots.Select((slot, index) => AudioEffectSlotSetting.Normalize(
+                    new AudioEffectSlotSetting(
+                        CreateSongEffectSlotId(
+                            mediaKey,
+                            chain.ChannelIndex,
+                            index,
+                            slot.Effect),
+                        AudioEffectKind.ExternalVst3,
+                        IsEnabled: true,
+                        Amount: 0.5d,
+                        Mix: slot.Mix,
+                        ExternalVst3: slot.Effect))),
                 bypassed: false);
         }
         finally
@@ -333,6 +362,23 @@ public sealed partial class MainViewModel
             }
         }
         return true;
+    }
+
+    private static string CreateSongEffectSlotId(
+        string mediaKey,
+        int channelIndex,
+        int slotIndex,
+        Vst3EffectReference effect)
+    {
+        var identity = string.Join(
+            "|",
+            mediaKey.Trim(),
+            channelIndex,
+            slotIndex,
+            effect.ModulePath.Trim(),
+            effect.ClassId.Trim());
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))
+            .ToLowerInvariant();
     }
 
     private void RestoreSongEffectProfileForCurrentTrack(bool applyToInputs = true)

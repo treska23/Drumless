@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 14;
+    public const int CurrentSchemaVersion = 15;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -397,7 +397,8 @@ public sealed class StudioStateStore
                         Version = effect.ExternalVst3.Version,
                         SdkVersion = effect.ExternalVst3.SdkVersion,
                         SubCategories = effect.ExternalVst3.SubCategories,
-                        PresetPath = effect.ExternalVst3.PresetPath
+                        PresetPath = effect.ExternalVst3.PresetPath,
+                        ParameterSettings = effect.ExternalVst3.EffectiveParameterSettings.ToList()
                     }
             }).ToList()
         }).ToList(),
@@ -590,7 +591,12 @@ public sealed class StudioStateStore
             {
                 Purpose = slot.Purpose?.Trim() ?? string.Empty,
                 PresetHint = slot.PresetHint?.Trim() ?? string.Empty,
-                Mix = double.IsFinite(slot.Mix) ? Math.Clamp(slot.Mix, 0d, 1d) : 1d
+                Mix = double.IsFinite(slot.Mix) ? Math.Clamp(slot.Mix, 0d, 1d) : 1d,
+                Effect = slot.Effect with
+                {
+                    ParameterSettings = NormalizeVst3ParameterSettings(
+                        slot.Effect.ParameterSettings)
+                }
             })
             .ToArray();
         return new SongInputEffectChain(
@@ -990,7 +996,8 @@ public sealed class StudioStateStore
                 vst.Version ?? string.Empty,
                 vst.SdkVersion ?? string.Empty,
                 vst.SubCategories ?? string.Empty,
-                vst.PresetPath);
+                vst.PresetPath,
+                NormalizeVst3ParameterSettings(vst.ParameterSettings));
         }
         catch (Exception exception) when (exception is
             ArgumentException or
@@ -1013,8 +1020,25 @@ public sealed class StudioStateStore
         Version = effect.Version,
         SdkVersion = effect.SdkVersion,
         SubCategories = effect.SubCategories,
-        PresetPath = effect.PresetPath
+        PresetPath = effect.PresetPath,
+        ParameterSettings = effect.EffectiveParameterSettings.ToList()
     };
+
+    private static IReadOnlyList<Vst3ParameterSetting> NormalizeVst3ParameterSettings(
+        IEnumerable<Vst3ParameterSetting>? settings) => (settings ?? [])
+        .Where(setting =>
+            setting is not null &&
+            !string.IsNullOrWhiteSpace(setting.Title) &&
+            double.IsFinite(setting.NormalizedValue))
+        .GroupBy(setting => setting.Id)
+        .Select(group => group.Last() with
+        {
+            Title = group.Last().Title.Trim(),
+            NormalizedValue = Math.Clamp(group.Last().NormalizedValue, 0d, 1d),
+            Reason = group.Last().Reason?.Trim()
+        })
+        .Take(64)
+        .ToArray();
 
     private static StemSelection NormalizeStemSelection(
         StemSelection? selection,
@@ -1176,6 +1200,7 @@ public sealed class StudioStateStore
         public string? SdkVersion { get; set; }
         public string? SubCategories { get; set; }
         public string? PresetPath { get; set; }
+        public List<Vst3ParameterSetting>? ParameterSettings { get; set; }
     }
 
     private sealed class MediaAnalysisDto

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace DrumPracticeStudio.Models;
 
 public sealed record InstalledEffectDescriptor(
@@ -28,6 +30,32 @@ public sealed record SongEffectSlotRecommendation(
     public string Detail => string.IsNullOrWhiteSpace(PresetHint)
         ? Purpose
         : $"{Purpose} · preset sugerido: {PresetHint}";
+
+    [JsonIgnore]
+    public string AppliedConfiguration
+    {
+        get
+        {
+            var parameterCount = Effect.EffectiveParameterSettings.Count;
+            if (parameterCount > 0 && !string.IsNullOrWhiteSpace(Effect.PresetPath))
+            {
+                return $"Preset base · {FormatParameters()}";
+            }
+            if (parameterCount > 0)
+            {
+                return FormatParameters();
+            }
+            return string.IsNullOrWhiteSpace(Effect.PresetPath)
+                ? "Sin configuración aplicada"
+                : $"Preset base: {Path.GetFileNameWithoutExtension(Effect.PresetPath)}";
+        }
+    }
+
+    private string FormatParameters() => "Adaptados: " + string.Join(
+        " · ",
+        Effect.EffectiveParameterSettings
+            .Take(6)
+            .Select(setting => $"{setting.Title} {setting.NormalizedValue:P0}"));
 }
 
 public sealed record SongInputEffectChain(

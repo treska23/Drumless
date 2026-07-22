@@ -19,6 +19,7 @@ internal sealed class InProcessVst3EffectCore : IDisposable
     private readonly Vst3Module _module;
     private Vst3PluginView? _view;
     private readonly string _statePath;
+    private readonly bool _loadedAutomaticState;
     private readonly float[] _pluginInput;
     private readonly float[] _pluginOutput;
     private Vst3EditorWindow? _editor;
@@ -30,13 +31,15 @@ internal sealed class InProcessVst3EffectCore : IDisposable
         Vst3Plugin plugin,
         Vst3PluginView? view,
         Vst3EffectReference reference,
-        string statePath)
+        string statePath,
+        bool loadedAutomaticState)
     {
         _module = module;
         Plugin = plugin;
         _view = view;
         Reference = reference;
         _statePath = statePath;
+        _loadedAutomaticState = loadedAutomaticState;
         _pluginInput = new float[Math.Max(1, AudioLatencySettings.VstMaxBlockSize) * Math.Max(1, plugin.InputChannelCount)];
         _pluginOutput = new float[Math.Max(1, AudioLatencySettings.VstMaxBlockSize) * Math.Max(1, plugin.OutputChannelCount)];
     }
@@ -81,7 +84,9 @@ internal sealed class InProcessVst3EffectCore : IDisposable
             }
 
             var statePath = GetAutomaticStatePath(slotId, reference);
-            var loadPath = File.Exists(statePath) ? statePath : reference.PresetPath;
+            var automaticStateExists = File.Exists(statePath);
+            var loadedAutomaticState = false;
+            var loadPath = automaticStateExists ? statePath : reference.PresetPath;
 
             // Un procesador VST3 puede funcionar para audio aunque su controlador de edición no esté
             // disponible. La restauración de estado es opcional y nunca debe impedir que cargue el DSP.
@@ -92,6 +97,7 @@ internal sealed class InProcessVst3EffectCore : IDisposable
                 try
                 {
                     plugin.LoadPreset(loadPath);
+                    loadedAutomaticState = automaticStateExists;
                 }
                 catch (Exception exception) when (exception is
                     IOException or
@@ -108,7 +114,13 @@ internal sealed class InProcessVst3EffectCore : IDisposable
             // A diferencia del antiguo host de efectos, no intentamos crear aquí la interfaz y luego
             // ocultamos cualquier excepción. La vista se crea al pulsar «Abrir interfaz», en el hilo UI,
             // igual que el flujo que ya funciona con los instrumentos VST3 directos.
-            return new InProcessVst3EffectCore(module, plugin, null, reference, statePath);
+            return new InProcessVst3EffectCore(
+                module,
+                plugin,
+                null,
+                reference,
+                statePath,
+                loadedAutomaticState);
         }
         catch
         {
@@ -246,6 +258,37 @@ internal sealed class InProcessVst3EffectCore : IDisposable
             _editor.Activate();
             return new Vst3EffectEditorResult(true, $"Interfaz de {Reference.Name} abierta.");
         }).Task;
+    }
+
+    internal int ApplyConfiguredParameters()
+    {
+        if (_disposed || _loadedAutomaticState || !Plugin.HasEditController)
+        {
+            return 0;
+        }
+
+        var applied = 0;
+        foreach (var setting in Reference.EffectiveParameterSettings)
+        {
+            try
+            {
+                var parameter = Plugin.Parameters.TryGetById(setting.Id, out var byId)
+                    ? byId
+                    : Plugin.Parameters.FindByTitle(setting.Title);
+                if (parameter is null || parameter.IsReadOnly || parameter.IsBypass ||
+                    parameter.IsProgramChange)
+                {
+                    continue;
+                }
+                parameter.NormalizedValue = setting.NormalizedValue;
+                applied++;
+            }
+            catch
+            {
+                // A plugin update may rename or remove a parameter. Other valid adjustments remain.
+            }
+        }
+        return applied;
     }
 
     public void Dispose()
@@ -386,7 +429,9 @@ internal sealed class InProcessVst3EffectCore : IDisposable
     private static string GetAutomaticStatePath(string slotId, Vst3EffectReference reference)
     {
         var identity = Encoding.UTF8.GetBytes(
-            $"{reference.ModulePath}|{reference.ClassId}|{reference.PresetPath}");
+            $"{reference.ModulePath}|{reference.ClassId}|{reference.PresetPath}|" +
+            string.Join(",", reference.EffectiveParameterSettings.Select(setting =>
+                $"{setting.Id}:{setting.NormalizedValue:R}")));
         var fingerprint = Convert.ToHexString(SHA256.HashData(identity))[..16];
         var safeSlotId = string.Concat(slotId.Where(char.IsLetterOrDigit));
         if (string.IsNullOrWhiteSpace(safeSlotId))

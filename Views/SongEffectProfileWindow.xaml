@@ -86,7 +86,7 @@
                                                     <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
                                                     <TextBlock Text="{Binding Detail}" TextWrapping="Wrap"
                                                                Foreground="{StaticResource TextSecondary}" />
-                                                    <TextBlock Text="{Binding Effect.PresetPath, StringFormat=Preset encontrado: {0}}"
+                                                    <TextBlock Text="{Binding AppliedConfiguration}"
                                                                TextWrapping="Wrap" FontSize="11"
                                                                Foreground="{StaticResource Success}" />
                                                 </StackPanel>
@@ -113,7 +113,7 @@
                                                     <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
                                                     <TextBlock Text="{Binding Detail}" TextWrapping="Wrap"
                                                                Foreground="{StaticResource TextSecondary}" />
-                                                    <TextBlock Text="{Binding Effect.PresetPath, StringFormat=Preset encontrado: {0}}"
+                                                    <TextBlock Text="{Binding AppliedConfiguration}"
                                                                TextWrapping="Wrap" FontSize="11"
                                                                Foreground="{StaticResource Success}" />
                                                 </StackPanel>

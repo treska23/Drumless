@@ -139,6 +139,63 @@ public sealed class SongEffectRecommendationServiceTests
         StringAssert.Contains(profile.Summary, "huecos se completaron");
     }
 
+    [TestMethod]
+    public async Task TuneParametersAsync_AppliesOnlyEnumeratedParameterIds()
+    {
+        const string tuningResult = """
+            {
+              "message": {
+                "content": "{\"guitar\":[{\"slotId\":\"g0\",\"parameters\":[{\"id\":17,\"normalized\":0.42},{\"id\":999,\"normalized\":1}]}],\"voice\":[{\"slotId\":\"v0\",\"parameters\":[{\"id\":23,\"normalized\":0.61}]}]}"
+              }
+            }
+            """;
+        using var internet = new HttpClient(new StaticHandler(_ => string.Empty));
+        using var ollama = new HttpClient(new StaticHandler(_ => tuningResult))
+        {
+            BaseAddress = new Uri("http://127.0.0.1:11434/")
+        };
+        using var service = new SongEffectRecommendationService(internet, ollama);
+        var guitarEffect = CreateEffect("guitar", "Guitar Rig", "Amp Simulator").Reference;
+        var voiceEffect = CreateEffect("voice", "Vocal Rider", "Dynamics").Reference;
+        var profile = new SongEffectProfile(
+            "profile",
+            "local:track",
+            "Original aproximado",
+            "Artist - Song",
+            "Artist",
+            "Song",
+            DateTimeOffset.UtcNow,
+            "qwen-test",
+            "Propuesta",
+            new SongInputEffectChain(
+                0,
+                "Guitarra mono",
+                "Drive",
+                [new SongEffectSlotRecommendation(guitarEffect, "Amp", "Drive", "Crunch")]),
+            new SongInputEffectChain(
+                1,
+                "Voz mono",
+                "Control",
+                [new SongEffectSlotRecommendation(voiceEffect, "Dynamics", "Compresión", "Gentle")]));
+        var catalog = new Dictionary<string, IReadOnlyList<Vst3ParameterDescriptor>>
+        {
+            [Vst3EffectItem.GetCatalogId(guitarEffect.ModulePath, guitarEffect.ClassId)] =
+            [new Vst3ParameterDescriptor(17, "Drive", "Drive", "%", 0, 0.2d, "20%", 0.2d, "20%")],
+            [Vst3EffectItem.GetCatalogId(voiceEffect.ModulePath, voiceEffect.ClassId)] =
+            [new Vst3ParameterDescriptor(23, "Threshold", "Thresh", "dB", 0, 0.5d, "-18 dB", 0.5d, "-18 dB")]
+        };
+
+        var tuned = await service.TuneParametersAsync(profile, catalog);
+
+        var guitarSetting = tuned.Guitar.Slots.Single().Effect.EffectiveParameterSettings.Single();
+        var voiceSetting = tuned.Voice.Slots.Single().Effect.EffectiveParameterSettings.Single();
+        Assert.AreEqual(17u, guitarSetting.Id);
+        Assert.AreEqual(0.42d, guitarSetting.NormalizedValue);
+        Assert.AreEqual(23u, voiceSetting.Id);
+        Assert.AreEqual(0.61d, voiceSetting.NormalizedValue);
+        StringAssert.Contains(tuned.Summary, "parámetros internos");
+    }
+
     private static InstalledEffectDescriptor CreateEffect(
         string id,
         string name,

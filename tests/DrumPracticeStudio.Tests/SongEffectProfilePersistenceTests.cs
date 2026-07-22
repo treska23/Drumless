@@ -21,7 +21,8 @@ public sealed class SongEffectProfilePersistenceTests
             "1.0",
             "VST 3.7",
             "Fx|Dynamics",
-            @"C:\Presets\Vocal.vstpreset");
+            @"C:\Presets\Vocal.vstpreset",
+            [new Vst3ParameterSetting(17, "Threshold", 0.42d)]);
         var profile = new SongEffectProfile(
             "profile-1",
             "local:track-1",
@@ -60,5 +61,7 @@ public sealed class SongEffectProfilePersistenceTests
         Assert.AreEqual(1, restored.Voice.ChannelIndex);
         Assert.AreEqual(0.8d, restored.Guitar.Slots[0].Mix);
         Assert.AreEqual(@"C:\Presets\Vocal.vstpreset", restored.Guitar.Slots[0].Effect.PresetPath);
+        Assert.AreEqual(17u, restored.Guitar.Slots[0].Effect.EffectiveParameterSettings[0].Id);
+        Assert.AreEqual(0.42d, restored.Guitar.Slots[0].Effect.EffectiveParameterSettings[0].NormalizedValue);
     }
 }

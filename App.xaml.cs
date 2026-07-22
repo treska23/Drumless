@@ -40,6 +40,18 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length == 2 &&
+            string.Equals(
+                e.Args[0],
+                Vst3ParameterProbeProtocol.Argument,
+                StringComparison.Ordinal))
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var exitCode = Vst3ParameterProbeProtocol.Execute(e.Args[1]);
+            Shutdown(exitCode);
+            return;
+        }
+
         if (e.Args.Length == 3 &&
             string.Equals(e.Args[0], Vst3RuntimeProtocol.Argument, StringComparison.Ordinal))
         {

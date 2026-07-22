@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 using DrumPracticeStudio.Infrastructure;
 
 namespace DrumPracticeStudio.Models;
@@ -62,6 +63,12 @@ public static class AudioEffectCatalog
         Options.FirstOrDefault(option => option.Kind == kind)?.Label ?? kind.ToString();
 }
 
+public sealed record Vst3ParameterSetting(
+    uint Id,
+    string Title,
+    double NormalizedValue,
+    string? Reason = null);
+
 public sealed record Vst3EffectReference(
     string ModulePath,
     string ModuleName,
@@ -72,7 +79,24 @@ public sealed record Vst3EffectReference(
     string Version,
     string SdkVersion,
     string SubCategories,
-    string? PresetPath = null);
+    string? PresetPath = null,
+    IReadOnlyList<Vst3ParameterSetting>? ParameterSettings = null)
+{
+    [JsonIgnore]
+    public IReadOnlyList<Vst3ParameterSetting> EffectiveParameterSettings =>
+        (ParameterSettings ?? [])
+        .Where(setting =>
+            !string.IsNullOrWhiteSpace(setting.Title) &&
+            double.IsFinite(setting.NormalizedValue))
+        .GroupBy(setting => setting.Id)
+        .Select(group => group.Last() with
+        {
+            Title = group.Last().Title.Trim(),
+            NormalizedValue = Math.Clamp(group.Last().NormalizedValue, 0d, 1d),
+            Reason = group.Last().Reason?.Trim()
+        })
+        .ToArray();
+}
 
 public sealed record AudioEffectSlotSetting(
     string Id,
