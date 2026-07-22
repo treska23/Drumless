@@ -31,6 +31,7 @@ public sealed partial class MainViewModel
     private double _chordSheetLeadSeconds = 2d;
     private string _chordSheetViewSwitchTimeText = string.Empty;
     private double _chordSheetViewerFontSize = 18d;
+    private string? _activeChordSheetViewportMarkerId;
     private bool _isChordSheetFollowEnabled = true;
     private bool _isSearchingChordSheetSources;
     private ChordSheetSourceCandidate? _selectedChordSheetSource;
@@ -191,12 +192,7 @@ public sealed partial class MainViewModel
         {
             return;
         }
-        var previousLine = CurrentChordSheetLine;
-        UpdateChordSheetPlaybackPosition(ResolvePlaybackPosition());
-        if (ReferenceEquals(previousLine, CurrentChordSheetLine))
-        {
-            CurrentChordSheetLineChanged?.Invoke(this, CurrentChordSheetLine);
-        }
+        UpdateChordSheetPlaybackPosition(ResolvePlaybackPosition(), forceNotification: true);
     }
 
     public bool HasChordSheet => ChordSheetLines.Count > 0;
@@ -751,22 +747,46 @@ public sealed partial class MainViewModel
         }
     }
 
-    private void UpdateChordSheetPlaybackPosition(double seconds)
+    private void UpdateChordSheetPlaybackPosition(
+        double seconds,
+        bool forceNotification = false)
     {
         if (!IsChordSheetFollowEnabled)
         {
             return;
         }
-        var anchorId = ChordSheetViewportPolicy.ResolveAnchorLineId(
-            ChordSheetLines.Select(line => line.ToModel()).ToArray(),
+        var lineModels = ChordSheetLines.Select(line => line.ToModel()).ToArray();
+        var markerModels = ChordSheetViewportMarkers
+            .Select(marker => marker.ToModel())
+            .ToArray();
+        var activeMarker = ChordSheetViewportPolicy.ResolveActiveMarker(
+            lineModels,
             seconds,
-            ChordSheetViewportMarkers.Select(marker => marker.ToModel()).ToArray());
+            markerModels);
+        var markerChanged = !string.Equals(
+            _activeChordSheetViewportMarkerId,
+            activeMarker?.Id,
+            StringComparison.Ordinal);
+        _activeChordSheetViewportMarkerId = activeMarker?.Id;
+        var anchorId = ChordSheetViewportPolicy.ResolveAnchorLineId(
+            lineModels,
+            seconds,
+            markerModels);
         if (anchorId is null)
         {
             return;
         }
-        CurrentChordSheetLine = ChordSheetLines.FirstOrDefault(line =>
+        var targetLine = ChordSheetLines.FirstOrDefault(line =>
             string.Equals(line.Id, anchorId, StringComparison.Ordinal));
+        if (ReferenceEquals(CurrentChordSheetLine, targetLine))
+        {
+            if ((markerChanged || forceNotification) && targetLine is not null)
+            {
+                CurrentChordSheetLineChanged?.Invoke(this, targetLine);
+            }
+            return;
+        }
+        CurrentChordSheetLine = targetLine;
     }
 
     private double ResolvePlaybackPosition() => CurrentTrack is not null

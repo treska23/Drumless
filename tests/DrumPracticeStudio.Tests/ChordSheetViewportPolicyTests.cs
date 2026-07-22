@@ -53,6 +53,28 @@ public sealed class ChordSheetViewportPolicyTests
     }
 
     [TestMethod]
+    public void ResolveActiveMarker_ChangesAtEveryBoundaryAndAfterBacktracking()
+    {
+        var lines = new[] { Line("top", 0), Line("same", 1) };
+        var markers = new[]
+        {
+            Marker("first", 10d, "same"),
+            Marker("second", 20d, "same"),
+            Marker("third", 30d, "top")
+        };
+
+        Assert.IsNull(ChordSheetViewportPolicy.ResolveActiveMarker(lines, 9d, markers));
+        Assert.AreEqual("first", ChordSheetViewportPolicy.ResolveActiveMarker(
+            lines, 10d, markers)?.Id);
+        Assert.AreEqual("second", ChordSheetViewportPolicy.ResolveActiveMarker(
+            lines, 25d, markers)?.Id);
+        Assert.AreEqual("third", ChordSheetViewportPolicy.ResolveActiveMarker(
+            lines, 35d, markers)?.Id);
+        Assert.AreEqual("first", ChordSheetViewportPolicy.ResolveActiveMarker(
+            lines, 15d, markers)?.Id);
+    }
+
+    [TestMethod]
     public void Normalize_MigratesLegacySingleMarker()
     {
         var document = ChordSheetDocument.Normalize(new ChordSheetDocument(

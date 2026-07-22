@@ -216,7 +216,7 @@
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  ScrollViewer.CanContentScroll="False"
-                                 PreviewMouseWheel="OnChordLineListPreviewMouseWheel"
+                                 SizeChanged="OnChordLineListSizeChanged"
                                  AutomationProperties.AutomationId="ChordSheetLineList">
                             <ListBox.ItemContainerStyle>
                                 <Style TargetType="ListBoxItem">

@@ -5,6 +5,25 @@ namespace DrumPracticeStudio.Services;
 
 public static class ChordSheetViewportPolicy
 {
+    public static ChordSheetViewportMarker? ResolveActiveMarker(
+        IReadOnlyList<ChordSheetLine> lines,
+        double playbackSeconds,
+        IReadOnlyList<ChordSheetViewportMarker>? markers)
+    {
+        var lineIds = lines.Select(line => line.Id).ToHashSet(StringComparer.Ordinal);
+        var position = Math.Max(0d, playbackSeconds);
+        return (markers ?? [])
+            .Where(marker =>
+                marker is not null &&
+                double.IsFinite(marker.Seconds) &&
+                marker.Seconds >= 0d &&
+                marker.Seconds <= position &&
+                !string.IsNullOrWhiteSpace(marker.LineId) &&
+                lineIds.Contains(marker.LineId))
+            .OrderBy(marker => marker.Seconds)
+            .LastOrDefault();
+    }
+
     public static string? ResolveAnchorLineId(
         IReadOnlyList<ChordSheetLine> lines,
         double playbackSeconds,
@@ -17,18 +36,7 @@ public static class ChordSheetViewportPolicy
 
         var firstVisible = lines.FirstOrDefault(line => line.Kind != ChordSheetLineKind.Empty)
                            ?? lines[0];
-        var lineIds = lines.Select(line => line.Id).ToHashSet(StringComparer.Ordinal);
-        var position = Math.Max(0d, playbackSeconds);
-        var activeMarker = (markers ?? [])
-            .Where(marker =>
-                marker is not null &&
-                double.IsFinite(marker.Seconds) &&
-                marker.Seconds >= 0d &&
-                marker.Seconds <= position &&
-                !string.IsNullOrWhiteSpace(marker.LineId) &&
-                lineIds.Contains(marker.LineId))
-            .OrderBy(marker => marker.Seconds)
-            .LastOrDefault();
+        var activeMarker = ResolveActiveMarker(lines, playbackSeconds, markers);
         return activeMarker?.LineId ?? firstVisible.Id;
     }
 

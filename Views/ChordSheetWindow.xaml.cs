@@ -75,6 +75,7 @@ public partial class ChordSheetWindow : Window
                 : "Marcas manuales de cambio sin límite";
         if (isFollowMode && IsLoaded)
         {
+            ChordSheetFollowScroller.ReserveViewportTail(ChordLineList);
             Dispatcher.BeginInvoke(
                 DispatcherPriority.Loaded,
                 _viewModel.RefreshChordSheetFollowViewport);
@@ -273,17 +274,8 @@ public partial class ChordSheetWindow : Window
         });
     }
 
-    private void OnChordLineListPreviewMouseWheel(
-        object sender,
-        MouseWheelEventArgs e)
-    {
-        if (_viewModel.IsChordSheetFollowEnabled)
-        {
-            _viewModel.IsChordSheetFollowEnabled = false;
-            BrowserStatus.Text =
-                "Seguimiento pausado por desplazamiento manual. Actívalo de nuevo en la cabecera.";
-        }
-    }
+    private void OnChordLineListSizeChanged(object sender, SizeChangedEventArgs e) =>
+        ChordSheetFollowScroller.ReserveViewportTail(ChordLineList);
 
     private void OnClosed(object? sender, EventArgs e)
     {

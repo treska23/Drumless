@@ -8,15 +8,15 @@ namespace DrumPracticeStudio.Tests;
 public sealed class ChordSheetFollowScrollerTests
 {
     [STATestMethod]
-    public void ScrollToTop_PlacesMarkedLineAtTheStartOfTheViewer()
+    public void ScrollToTop_PlacesEverySuccessiveMarkerAtTheStartOfTheViewer()
     {
-        var items = Enumerable.Range(0, 80)
+        var items = Enumerable.Range(0, 74)
             .Select(index => $"Línea {index}")
             .ToArray();
         var listBox = new ListBox
         {
             ItemsSource = items,
-            Height = 180d,
+            Height = 620d,
             Width = 420d
         };
         ScrollViewer.SetVerticalScrollBarVisibility(listBox, ScrollBarVisibility.Auto);
@@ -26,7 +26,7 @@ public sealed class ChordSheetFollowScrollerTests
         {
             Content = listBox,
             Width = 440d,
-            Height = 220d,
+            Height = 660d,
             Left = -10_000d,
             Top = -10_000d,
             ShowInTaskbar = false,
@@ -37,21 +37,28 @@ public sealed class ChordSheetFollowScrollerTests
         {
             window.Show();
             window.UpdateLayout();
+            ChordSheetFollowScroller.ReserveViewportTail(listBox);
 
-            Assert.IsTrue(ChordSheetFollowScroller.ScrollToTop(listBox, items[45]));
-
-            var container = (ListBoxItem?)listBox.ItemContainerGenerator
-                .ContainerFromItem(items[45]);
             var scrollViewer = ChordSheetFollowScroller
                 .FindVisualChild<ScrollViewer>(listBox);
-            Assert.IsNotNull(container);
             Assert.IsNotNull(scrollViewer);
-            var relativeTop = container
-                .TransformToAncestor(scrollViewer)
-                .Transform(new Point(0d, 0d))
-                .Y;
-            Assert.AreEqual(0d, relativeTop, 1.5d);
-            Assert.IsTrue(scrollViewer.VerticalOffset > 0d);
+            foreach (var index in new[] { 17, 30, 43, 61, 17 })
+            {
+                Assert.IsTrue(ChordSheetFollowScroller.ScrollToTop(listBox, items[index]));
+
+                var container = (ListBoxItem?)listBox.ItemContainerGenerator
+                    .ContainerFromItem(items[index]);
+                Assert.IsNotNull(container);
+                var relativeTop = container
+                    .TransformToAncestor(scrollViewer)
+                    .Transform(new Point(0d, 0d))
+                    .Y;
+                Assert.AreEqual(
+                    0d,
+                    relativeTop,
+                    1.5d,
+                    $"La línea {index} no quedó arriba.");
+            }
         }
         finally
         {

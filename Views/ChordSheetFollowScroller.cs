@@ -6,8 +6,19 @@ namespace DrumPracticeStudio.Views;
 
 internal static class ChordSheetFollowScroller
 {
+    public static void ReserveViewportTail(ListBox listBox)
+    {
+        var viewportHeight = Math.Max(0d, listBox.ActualHeight);
+        listBox.Padding = new Thickness(
+            listBox.Padding.Left,
+            listBox.Padding.Top,
+            listBox.Padding.Right,
+            viewportHeight);
+    }
+
     public static bool ScrollToTop(ListBox listBox, object item)
     {
+        ReserveViewportTail(listBox);
         listBox.ScrollIntoView(item);
         listBox.UpdateLayout();
 
