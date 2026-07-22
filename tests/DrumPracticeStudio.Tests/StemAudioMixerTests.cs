@@ -1,6 +1,7 @@
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
 using NAudio.Wave;
+using DrumlessAudioFileReader = DrumPracticeStudio.Services.AudioFileReader;
 
 namespace DrumPracticeStudio.Tests;
 
@@ -22,7 +23,7 @@ public sealed class StemAudioMixerTests
             StemSelection.Drums | StemSelection.Bass,
             destination);
 
-        using var reader = new AudioFileReader(destination);
+        using var reader = new DrumlessAudioFileReader(destination);
         var samples = new float[64];
         var read = ((ISampleProvider)reader).Read(samples.AsSpan());
 

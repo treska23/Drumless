@@ -1,5 +1,6 @@
 using DrumPracticeStudio.Audio;
 using NAudio.Wave;
+using DrumlessAudioFileReader = DrumPracticeStudio.Audio.AudioFileReader;
 
 namespace DrumPracticeStudio.Tests;
 
@@ -23,7 +24,7 @@ public sealed class OutputRecordingSinkTests
         var result = await sink.StopAsync();
 
         Assert.AreEqual(path, result);
-        using var reader = new AudioFileReader(path);
+        using var reader = new DrumlessAudioFileReader(path);
         var actual = new float[expected.Length];
         var read = ((ISampleProvider)reader).Read(actual.AsSpan());
         Assert.AreEqual(expected.Length, read);
@@ -47,7 +48,7 @@ public sealed class OutputRecordingSinkTests
         provider.Read(rendered);
         await sink.StopAsync();
 
-        using var reader = new AudioFileReader(path);
+        using var reader = new DrumlessAudioFileReader(path);
         var recorded = new float[rendered.Length];
         ((ISampleProvider)reader).Read(recorded);
         CollectionAssert.AreEqual(rendered, recorded);

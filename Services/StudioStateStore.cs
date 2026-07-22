@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 10;
+    public const int CurrentSchemaVersion = 11;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -612,7 +612,9 @@ public sealed class StudioStateStore
             dto.RawText ?? string.Empty,
             dto.UpdatedAtUtc,
             dto.LeadSeconds ?? 2d,
-            lines));
+            lines,
+            dto.ViewSwitchSeconds,
+            dto.ViewSwitchLineId));
     }
 
     private static bool TryCreatePerformanceSession(
@@ -712,6 +714,8 @@ public sealed class StudioStateStore
                 RawText = record.ChordSheet.RawText,
                 UpdatedAtUtc = record.ChordSheet.UpdatedAtUtc,
                 LeadSeconds = record.ChordSheet.LeadSeconds,
+                ViewSwitchSeconds = record.ChordSheet.ViewSwitchSeconds,
+                ViewSwitchLineId = record.ChordSheet.ViewSwitchLineId,
                 Lines = record.ChordSheet.Lines.Select(line => new ChordSheetLineDto
                 {
                     Id = line.Id,
@@ -1132,6 +1136,8 @@ public sealed class StudioStateStore
         public string? RawText { get; set; }
         public DateTimeOffset UpdatedAtUtc { get; set; }
         public double? LeadSeconds { get; set; }
+        public double? ViewSwitchSeconds { get; set; }
+        public string? ViewSwitchLineId { get; set; }
         public List<ChordSheetLineDto>? Lines { get; set; }
     }
 

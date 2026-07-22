@@ -134,7 +134,9 @@ public sealed record ChordSheetDocument(
     string RawText,
     DateTimeOffset UpdatedAtUtc,
     double LeadSeconds,
-    IReadOnlyList<ChordSheetLine> Lines)
+    IReadOnlyList<ChordSheetLine> Lines,
+    double? ViewSwitchSeconds = null,
+    string? ViewSwitchLineId = null)
 {
     public static ChordSheetDocument Normalize(ChordSheetDocument document)
     {
@@ -144,6 +146,18 @@ public sealed record ChordSheetDocument(
             .OrderBy(line => line.Order)
             .Take(20_000)
             .ToArray();
+        var viewSwitchSeconds = document.ViewSwitchSeconds is { } switchSeconds &&
+                                double.IsFinite(switchSeconds) &&
+                                switchSeconds >= 0d
+            ? switchSeconds
+            : (double?)null;
+        var viewSwitchLineId = !string.IsNullOrWhiteSpace(document.ViewSwitchLineId) &&
+                               lines.Any(line => string.Equals(
+                                   line.Id,
+                                   document.ViewSwitchLineId,
+                                   StringComparison.Ordinal))
+            ? document.ViewSwitchLineId
+            : null;
         return document with
         {
             Id = string.IsNullOrWhiteSpace(document.Id)
@@ -166,7 +180,9 @@ public sealed record ChordSheetDocument(
             LeadSeconds = double.IsFinite(document.LeadSeconds)
                 ? Math.Clamp(document.LeadSeconds, -10d, 20d)
                 : 2d,
-            Lines = lines
+            Lines = lines,
+            ViewSwitchSeconds = viewSwitchSeconds,
+            ViewSwitchLineId = viewSwitchLineId
         };
     }
 }

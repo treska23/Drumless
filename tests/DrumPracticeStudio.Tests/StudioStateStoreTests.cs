@@ -212,7 +212,9 @@ public sealed class StudioStateStoreTests
                         1.2d,
                         1d,
                         "Estrofa")
-                ]),
+                ],
+                75d,
+                "line-2"),
             DrumReference = new DrumReferenceMap(
                 "reference-v1",
                 originalPath,
@@ -343,6 +345,8 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(2, loadedAnalysis.ChordSheet.Lines.Count);
         Assert.AreEqual(1.2d, loadedAnalysis.ChordSheet.Lines[1].StartSeconds);
         Assert.AreEqual(1.5d, loadedAnalysis.ChordSheet.LeadSeconds);
+        Assert.AreEqual(75d, loadedAnalysis.ChordSheet.ViewSwitchSeconds);
+        Assert.AreEqual("line-2", loadedAnalysis.ChordSheet.ViewSwitchLineId);
         Assert.AreEqual(1, loadedAnalysis.PerformanceSessions.Count);
         Assert.IsNotNull(loadedAnalysis.DrumReference);
         Assert.AreEqual("reference-v1", loadedAnalysis.DrumReference.Version);

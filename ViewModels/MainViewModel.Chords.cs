@@ -25,6 +25,11 @@ public sealed partial class MainViewModel
         "Importa o pega una letra con acordes. Todo se guarda únicamente en este equipo.";
     private string _songStructureStatus = "Analiza la pista para proponer sus secciones.";
     private double _chordSheetLeadSeconds = 2d;
+    private double? _chordSheetViewSwitchSeconds;
+    private string? _chordSheetViewSwitchLineId;
+    private string _chordSheetViewSwitchTimeText = string.Empty;
+    private ChordSheetLineItem? _topChordSheetLine;
+    private ChordSheetLineItem? _viewSwitchTargetLine;
     private bool _isChordSheetFollowEnabled = true;
     private bool _isSearchingChordSheetSources;
     private ChordSheetSourceCandidate? _selectedChordSheetSource;
@@ -38,6 +43,9 @@ public sealed partial class MainViewModel
     public RelayCommand ImportChordSheetCommand { get; private set; } = null!;
     public RelayCommand SaveChordSheetTextCommand { get; private set; } = null!;
     public RelayCommand MarkChordLineNowCommand { get; private set; } = null!;
+    public RelayCommand SetChordSheetViewSwitchCommand { get; private set; } = null!;
+    public RelayCommand UseCurrentChordSheetViewSwitchTimeCommand { get; private set; } = null!;
+    public RelayCommand ClearChordSheetViewSwitchCommand { get; private set; } = null!;
     public RelayCommand RealignChordSheetCommand { get; private set; } = null!;
     public RelayCommand ClearChordSheetCommand { get; private set; } = null!;
     public RelayCommand SearchChordSheetSourcesCommand { get; private set; } = null!;
@@ -101,10 +109,46 @@ public sealed partial class MainViewModel
         }
     }
 
+    public string ChordSheetViewSwitchTimeText
+    {
+        get => _chordSheetViewSwitchTimeText;
+        set
+        {
+            if (!SetProperty(ref _chordSheetViewSwitchTimeText, value ?? string.Empty))
+            {
+                return;
+            }
+            if (!ChordSheetViewportPolicy.TryParseTimestamp(value, out var seconds))
+            {
+                ChordSheetStatus =
+                    "Tiempo no válido. Usa segundos, m:ss o h:mm:ss; por ejemplo 1:35.";
+                return;
+            }
+            _chordSheetViewSwitchSeconds = seconds;
+            OnPropertyChanged(nameof(HasChordSheetViewSwitch));
+            UpdateChordSheetSwitchMarkers();
+            SaveChordSheetFromItems();
+            UpdateChordSheetPlaybackPosition(ResolvePlaybackPosition());
+            ChordSheetStatus = _chordSheetViewSwitchLineId is null
+                ? "Tiempo guardado. Selecciona la primera línea de la parte inferior y crea la marca."
+                : $"Cambio de vista actualizado a {ChordSheetViewportPolicy.FormatTimestamp(seconds)}.";
+        }
+    }
+
+    public bool HasChordSheetViewSwitch =>
+        _chordSheetViewSwitchSeconds is not null &&
+        _viewSwitchTargetLine is not null;
+
     public bool IsChordSheetFollowEnabled
     {
         get => _isChordSheetFollowEnabled;
-        set => SetProperty(ref _isChordSheetFollowEnabled, value);
+        set
+        {
+            if (SetProperty(ref _isChordSheetFollowEnabled, value) && value)
+            {
+                UpdateChordSheetPlaybackPosition(ResolvePlaybackPosition());
+            }
+        }
     }
 
     public bool HasChordSheet => ChordSheetLines.Count > 0;
@@ -129,7 +173,11 @@ public sealed partial class MainViewModel
             () => ChordSheetWindowRequested?.Invoke(this, EventArgs.Empty));
         ImportChordSheetCommand = new RelayCommand(ImportChordSheet);
         SaveChordSheetTextCommand = new RelayCommand(SaveChordSheetText);
-        MarkChordLineNowCommand = new RelayCommand(MarkSelectedChordLineNow);
+        MarkChordLineNowCommand = new RelayCommand(SetChordSheetViewSwitch);
+        SetChordSheetViewSwitchCommand = new RelayCommand(SetChordSheetViewSwitch);
+        UseCurrentChordSheetViewSwitchTimeCommand =
+            new RelayCommand(UseCurrentChordSheetViewSwitchTime);
+        ClearChordSheetViewSwitchCommand = new RelayCommand(ClearChordSheetViewSwitch);
         RealignChordSheetCommand = new RelayCommand(RealignCurrentChordSheet);
         ClearChordSheetCommand = new RelayCommand(ClearCurrentChordSheet);
         SearchChordSheetSourcesCommand =
@@ -228,9 +276,9 @@ public sealed partial class MainViewModel
                 string.IsNullOrWhiteSpace(title) ? CurrentTrackTitle : title,
                 ChordSheetSourceKind.WebSelection,
                 sourceUrl),
-            realign: true);
+            realign: false);
         ChordSheetStatus =
-            "Texto web guardado localmente y alineado de forma preliminar. Revisa las marcas amarillas.";
+            "Texto web guardado. Selecciona dónde debe empezar la parte inferior y crea una única marca.";
     }
 
     private void ImportChordSheet()
@@ -259,7 +307,7 @@ public sealed partial class MainViewModel
                     text,
                     Path.GetFileNameWithoutExtension(dialog.FileName),
                     ChordSheetSourceKind.ImportedFile),
-                realign: true);
+                realign: false);
             ChordSheetStatus = $"Importado y procesado: {Path.GetFileName(dialog.FileName)}";
         }
         catch (Exception exception) when (exception is
@@ -288,9 +336,9 @@ public sealed partial class MainViewModel
                 ChordSheetTextDraft,
                 CurrentTrackTitle,
                 ChordSheetSourceKind.UserText),
-            realign: true);
+            realign: false);
         ChordSheetStatus =
-            "Hoja guardada localmente. La alineación automática es una propuesta editable.";
+            "Hoja guardada localmente. Configura una sola marca si necesitas mostrar la parte inferior.";
     }
 
     private void SaveChordSheet(ChordSheetDocument document, bool realign)
@@ -329,42 +377,70 @@ public sealed partial class MainViewModel
         {
             UpdatedAtUtc = DateTimeOffset.UtcNow,
             LeadSeconds = ChordSheetLeadSeconds,
-            Lines = ChordSheetLines.Select(item => item.ToModel()).ToArray()
+            Lines = ChordSheetLines.Select(item => item.ToModel()).ToArray(),
+            ViewSwitchSeconds = _chordSheetViewSwitchSeconds,
+            ViewSwitchLineId = _chordSheetViewSwitchLineId
         });
         _analysisDatabase.SetChordSheet(mediaKey, updated);
         ScheduleSettingsSave();
     }
 
-    private void MarkSelectedChordLineNow()
+    private void SetChordSheetViewSwitch()
     {
         var line = SelectedChordSheetLine;
         if (line is null)
         {
-            ChordSheetStatus = "Selecciona la línea que empieza en la posición actual.";
+            ChordSheetStatus =
+                "Selecciona la primera línea que quieres ver después del cambio.";
             return;
         }
-        var seconds = ResolvePlaybackPosition();
-        line.SetManualStart(seconds);
-        var index = ChordSheetLines.IndexOf(line);
-        var next = ChordSheetLines
-            .Skip(index + 1)
-            .FirstOrDefault(item => item.StartSeconds is { } start && start > seconds);
-        var unsynchronized = ChordSheetLines
-            .Skip(index + 1)
-            .TakeWhile(item => item != next)
-            .Where(item => item.Kind != ChordSheetLineKind.Empty)
-            .ToArray();
-        if (next?.StartSeconds is { } end && unsynchronized.Length > 0)
+        double seconds;
+        if (string.IsNullOrWhiteSpace(_chordSheetViewSwitchTimeText))
         {
-            for (var offset = 0; offset < unsynchronized.Length; offset++)
-            {
-                unsynchronized[offset].StartSeconds =
-                    seconds + ((end - seconds) * (offset + 1d) / (unsynchronized.Length + 1d));
-            }
+            seconds = ResolvePlaybackPosition();
         }
+        else if (!ChordSheetViewportPolicy.TryParseTimestamp(
+                     _chordSheetViewSwitchTimeText,
+                     out seconds))
+        {
+            ChordSheetStatus =
+                "Tiempo no válido. Usa segundos, m:ss o h:mm:ss; por ejemplo 1:35.";
+            return;
+        }
+        _chordSheetViewSwitchSeconds = seconds;
+        _chordSheetViewSwitchLineId = line.Id;
+        _chordSheetViewSwitchTimeText = ChordSheetViewportPolicy.FormatTimestamp(seconds);
+        OnPropertyChanged(nameof(ChordSheetViewSwitchTimeText));
+        UpdateChordSheetSwitchMarkers();
         SaveChordSheetFromItems();
-        ChordSheetStatus = $"Marca fijada en {TimeSpan.FromSeconds(seconds):mm\\:ss\\.f}.";
+        ChordSheetStatus =
+            $"Cambio único fijado en {_chordSheetViewSwitchTimeText}; mostrará «{line.Text}» y lo que sigue.";
         UpdateChordSheetPlaybackPosition(seconds);
+    }
+
+    private void UseCurrentChordSheetViewSwitchTime()
+    {
+        var seconds = ResolvePlaybackPosition();
+        _chordSheetViewSwitchSeconds = seconds;
+        _chordSheetViewSwitchTimeText = ChordSheetViewportPolicy.FormatTimestamp(seconds);
+        OnPropertyChanged(nameof(ChordSheetViewSwitchTimeText));
+        UpdateChordSheetSwitchMarkers();
+        SaveChordSheetFromItems();
+        ChordSheetStatus =
+            $"Tiempo preparado en {_chordSheetViewSwitchTimeText}. Selecciona la línea inferior y aplícalo.";
+    }
+
+    private void ClearChordSheetViewSwitch()
+    {
+        _chordSheetViewSwitchSeconds = null;
+        _chordSheetViewSwitchLineId = null;
+        _chordSheetViewSwitchTimeText = string.Empty;
+        CurrentChordSheetLine = null;
+        UpdateChordSheetSwitchMarkers();
+        OnPropertyChanged(nameof(ChordSheetViewSwitchTimeText));
+        SaveChordSheetFromItems();
+        ChordSheetStatus =
+            "Cambio automático eliminado. La hoja queda disponible para desplazamiento manual.";
     }
 
     private void RealignCurrentChordSheet()
@@ -430,17 +506,31 @@ public sealed partial class MainViewModel
             }
             _chordSheetTextDraft = document.RawText;
             _chordSheetLeadSeconds = document.LeadSeconds;
-            ChordSheetStatus = $"{ChordSheetLines.Count} líneas · seguimiento preparado.";
+            _chordSheetViewSwitchSeconds = document.ViewSwitchSeconds;
+            _chordSheetViewSwitchLineId = document.ViewSwitchLineId;
+            _chordSheetViewSwitchTimeText =
+                ChordSheetViewportPolicy.FormatTimestamp(document.ViewSwitchSeconds);
+            UpdateChordSheetSwitchMarkers();
+            ChordSheetStatus = HasChordSheetViewSwitch
+                ? $"{ChordSheetLines.Count} líneas · un cambio automático configurado."
+                : $"{ChordSheetLines.Count} líneas · desplazamiento manual; puedes crear una marca única.";
         }
         else
         {
             _chordSheetTextDraft = string.Empty;
             _chordSheetLeadSeconds = 2d;
+            _chordSheetViewSwitchSeconds = null;
+            _chordSheetViewSwitchLineId = null;
+            _chordSheetViewSwitchTimeText = string.Empty;
+            _topChordSheetLine = null;
+            _viewSwitchTargetLine = null;
             ChordSheetStatus =
                 "Importa o pega una letra con acordes. Todo se guarda únicamente en este equipo.";
         }
         OnPropertyChanged(nameof(ChordSheetTextDraft));
         OnPropertyChanged(nameof(ChordSheetLeadSeconds));
+        OnPropertyChanged(nameof(ChordSheetViewSwitchTimeText));
+        OnPropertyChanged(nameof(HasChordSheetViewSwitch));
         OnPropertyChanged(nameof(HasChordSheet));
     }
 
@@ -470,37 +560,43 @@ public sealed partial class MainViewModel
         if (string.Equals(mediaKey, CurrentAnalysisMediaKey, StringComparison.Ordinal))
         {
             LoadSongStructure(structure);
-            var chordSheet = _analysisDatabase.Get(mediaKey)?.ChordSheet;
-            if (chordSheet is not null)
-            {
-                var aligned = _chordSheetAlignment.Align(
-                    chordSheet,
-                    structure,
-                    structure.DurationSeconds);
-                _analysisDatabase.SetChordSheet(mediaKey, aligned);
-                LoadChordSheet(aligned);
-            }
         }
         SaveTrackWorkspace(silent: true);
     }
 
+    private void UpdateChordSheetSwitchMarkers()
+    {
+        _topChordSheetLine = ChordSheetLines.FirstOrDefault(line =>
+                                 line.Kind != ChordSheetLineKind.Empty)
+                             ?? ChordSheetLines.FirstOrDefault();
+        _viewSwitchTargetLine = ChordSheetLines.FirstOrDefault(line =>
+            string.Equals(line.Id, _chordSheetViewSwitchLineId, StringComparison.Ordinal));
+        foreach (var line in ChordSheetLines)
+        {
+            line.SetViewSwitchTarget(
+                line == _viewSwitchTargetLine && _chordSheetViewSwitchSeconds is not null,
+                _chordSheetViewSwitchSeconds);
+        }
+        OnPropertyChanged(nameof(HasChordSheetViewSwitch));
+    }
+
     private void UpdateChordSheetPlaybackPosition(double seconds)
     {
-        if (!IsChordSheetFollowEnabled || ChordSheetLines.Count == 0)
+        if (!IsChordSheetFollowEnabled)
         {
             return;
         }
-        var target = Math.Max(0d, seconds + ChordSheetLeadSeconds);
-        ChordSheetLineItem? selected = null;
-        foreach (var line in ChordSheetLines)
+        var anchorId = ChordSheetViewportPolicy.ResolveAnchorLineId(
+            ChordSheetLines.Select(line => line.ToModel()).ToArray(),
+            seconds,
+            _chordSheetViewSwitchSeconds,
+            _chordSheetViewSwitchLineId);
+        if (anchorId is null)
         {
-            if (line.StartSeconds is not { } start || start > target)
-            {
-                continue;
-            }
-            selected = line;
+            return;
         }
-        CurrentChordSheetLine = selected;
+        CurrentChordSheetLine = ChordSheetLines.FirstOrDefault(line =>
+            string.Equals(line.Id, anchorId, StringComparison.Ordinal));
     }
 
     private double ResolvePlaybackPosition() => CurrentTrack is not null

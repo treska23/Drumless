@@ -1,5 +1,6 @@
 using DrumPracticeStudio.Services;
 using NAudio.Wave;
+using DrumlessAudioFileReader = DrumPracticeStudio.Services.AudioFileReader;
 
 namespace DrumPracticeStudio.Tests;
 
@@ -18,7 +19,7 @@ public sealed class AudioFileMixServiceTests
 
         await AudioFileMixService.MixAsync([main, vst], destination);
 
-        using var reader = new AudioFileReader(destination);
+        using var reader = new DrumlessAudioFileReader(destination);
         var samples = new float[128];
         ((ISampleProvider)reader).Read(samples);
         foreach (var sample in samples)
