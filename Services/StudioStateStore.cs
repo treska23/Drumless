@@ -6,7 +6,7 @@ namespace DrumPracticeStudio.Services;
 
 public sealed class StudioStateStore
 {
-    public const int CurrentSchemaVersion = 11;
+    public const int CurrentSchemaVersion = 12;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -614,7 +614,13 @@ public sealed class StudioStateStore
             dto.LeadSeconds ?? 2d,
             lines,
             dto.ViewSwitchSeconds,
-            dto.ViewSwitchLineId));
+            dto.ViewSwitchLineId,
+            (dto.ViewportMarkers ?? [])
+                .Select(marker => new ChordSheetViewportMarker(
+                    marker.Id ?? string.Empty,
+                    marker.Seconds ?? -1d,
+                    marker.LineId ?? string.Empty))
+                .ToArray()));
     }
 
     private static bool TryCreatePerformanceSession(
@@ -714,8 +720,14 @@ public sealed class StudioStateStore
                 RawText = record.ChordSheet.RawText,
                 UpdatedAtUtc = record.ChordSheet.UpdatedAtUtc,
                 LeadSeconds = record.ChordSheet.LeadSeconds,
-                ViewSwitchSeconds = record.ChordSheet.ViewSwitchSeconds,
-                ViewSwitchLineId = record.ChordSheet.ViewSwitchLineId,
+                ViewportMarkers = (record.ChordSheet.ViewportMarkers ?? [])
+                    .Select(marker => new ChordSheetViewportMarkerDto
+                    {
+                        Id = marker.Id,
+                        Seconds = marker.Seconds,
+                        LineId = marker.LineId
+                    })
+                    .ToList(),
                 Lines = record.ChordSheet.Lines.Select(line => new ChordSheetLineDto
                 {
                     Id = line.Id,
@@ -1138,7 +1150,15 @@ public sealed class StudioStateStore
         public double? LeadSeconds { get; set; }
         public double? ViewSwitchSeconds { get; set; }
         public string? ViewSwitchLineId { get; set; }
+        public List<ChordSheetViewportMarkerDto>? ViewportMarkers { get; set; }
         public List<ChordSheetLineDto>? Lines { get; set; }
+    }
+
+    private sealed class ChordSheetViewportMarkerDto
+    {
+        public string? Id { get; set; }
+        public double? Seconds { get; set; }
+        public string? LineId { get; set; }
     }
 
     private sealed class ChordSheetLineDto

@@ -7,32 +7,94 @@ namespace DrumPracticeStudio.Tests;
 public sealed class ChordSheetViewportPolicyTests
 {
     [TestMethod]
-    public void ResolveAnchorLineId_ChangesOnlyOnceAtConfiguredTime()
+    public void ResolveAnchorLineId_UsesLatestReachedMarkerAndSupportsBacktracking()
     {
         var lines = new[]
         {
             Line("top", 0),
             Line("middle", 1),
-            Line("lower", 2)
+            Line("lower", 2),
+            Line("ending", 3)
+        };
+        var markers = new[]
+        {
+            Marker("a", 30d, "middle"),
+            Marker("b", 60d, "lower"),
+            Marker("c", 90d, "ending"),
+            Marker("d", 150d, "middle")
         };
 
         Assert.AreEqual("top", ChordSheetViewportPolicy.ResolveAnchorLineId(
-            lines, 89.9d, 90d, "lower"));
+            lines, 29.9d, markers));
+        Assert.AreEqual("middle", ChordSheetViewportPolicy.ResolveAnchorLineId(
+            lines, 30d, markers));
         Assert.AreEqual("lower", ChordSheetViewportPolicy.ResolveAnchorLineId(
-            lines, 90d, 90d, "lower"));
-        Assert.AreEqual("lower", ChordSheetViewportPolicy.ResolveAnchorLineId(
-            lines, 180d, 90d, "lower"));
+            lines, 75d, markers));
+        Assert.AreEqual("ending", ChordSheetViewportPolicy.ResolveAnchorLineId(
+            lines, 120d, markers));
+        Assert.AreEqual("middle", ChordSheetViewportPolicy.ResolveAnchorLineId(
+            lines, 160d, markers));
+        Assert.AreEqual("middle", ChordSheetViewportPolicy.ResolveAnchorLineId(
+            lines, 45d, markers));
     }
 
     [TestMethod]
-    public void ResolveAnchorLineId_RequiresACompleteValidMarker()
+    public void ResolveAnchorLineId_IgnoresInvalidMarkers()
     {
         var lines = new[] { Line("top", 0), Line("lower", 1) };
+        var markers = new[]
+        {
+            Marker("negative", -1d, "lower"),
+            Marker("missing", 10d, "not-a-line")
+        };
 
-        Assert.IsNull(ChordSheetViewportPolicy.ResolveAnchorLineId(
-            lines, 100d, null, "lower"));
-        Assert.IsNull(ChordSheetViewportPolicy.ResolveAnchorLineId(
-            lines, 100d, 90d, "missing"));
+        Assert.AreEqual("top", ChordSheetViewportPolicy.ResolveAnchorLineId(
+            lines, 100d, markers));
+    }
+
+    [TestMethod]
+    public void Normalize_MigratesLegacySingleMarker()
+    {
+        var document = ChordSheetDocument.Normalize(new ChordSheetDocument(
+            "sheet",
+            "Song",
+            ChordSheetSourceKind.UserText,
+            null,
+            "Line",
+            DateTimeOffset.UtcNow,
+            0d,
+            [Line("lower", 0)],
+            42d,
+            "lower"));
+
+        Assert.AreEqual(1, document.ViewportMarkers?.Count);
+        Assert.AreEqual(42d, document.ViewportMarkers?[0].Seconds);
+        Assert.AreEqual("lower", document.ViewportMarkers?[0].LineId);
+        Assert.IsNull(document.ViewSwitchSeconds);
+        Assert.IsNull(document.ViewSwitchLineId);
+    }
+
+    [TestMethod]
+    public void Normalize_PreservesRepeatedTargetLineAtDifferentTimes()
+    {
+        var document = ChordSheetDocument.Normalize(new ChordSheetDocument(
+            "sheet",
+            "Song",
+            ChordSheetSourceKind.UserText,
+            null,
+            "Chorus",
+            DateTimeOffset.UtcNow,
+            0d,
+            [Line("chorus", 0)],
+            ViewportMarkers:
+            [
+                Marker("first", 30d, "chorus"),
+                Marker("repeat", 120d, "chorus")
+            ]));
+
+        Assert.AreEqual(2, document.ViewportMarkers?.Count);
+        Assert.AreEqual(30d, document.ViewportMarkers?[0].Seconds);
+        Assert.AreEqual(120d, document.ViewportMarkers?[1].Seconds);
     }
 
     [TestMethod]
@@ -60,4 +122,9 @@ public sealed class ChordSheetViewportPolicyTests
         id,
         null,
         1d);
+
+    private static ChordSheetViewportMarker Marker(
+        string id,
+        double seconds,
+        string lineId) => new(id, seconds, lineId);
 }

@@ -213,8 +213,12 @@ public sealed class StudioStateStoreTests
                         1d,
                         "Estrofa")
                 ],
-                75d,
-                "line-2"),
+                ViewportMarkers:
+                [
+                    new ChordSheetViewportMarker("marker-1", 25d, "line-1"),
+                    new ChordSheetViewportMarker("marker-2", 75d, "line-2"),
+                    new ChordSheetViewportMarker("marker-3", 125d, "line-1")
+                ]),
             DrumReference = new DrumReferenceMap(
                 "reference-v1",
                 originalPath,
@@ -345,8 +349,13 @@ public sealed class StudioStateStoreTests
         Assert.AreEqual(2, loadedAnalysis.ChordSheet.Lines.Count);
         Assert.AreEqual(1.2d, loadedAnalysis.ChordSheet.Lines[1].StartSeconds);
         Assert.AreEqual(1.5d, loadedAnalysis.ChordSheet.LeadSeconds);
-        Assert.AreEqual(75d, loadedAnalysis.ChordSheet.ViewSwitchSeconds);
-        Assert.AreEqual("line-2", loadedAnalysis.ChordSheet.ViewSwitchLineId);
+        Assert.AreEqual(3, loadedAnalysis.ChordSheet.ViewportMarkers?.Count);
+        Assert.AreEqual(25d, loadedAnalysis.ChordSheet.ViewportMarkers?[0].Seconds);
+        Assert.AreEqual("line-1", loadedAnalysis.ChordSheet.ViewportMarkers?[0].LineId);
+        Assert.AreEqual(75d, loadedAnalysis.ChordSheet.ViewportMarkers?[1].Seconds);
+        Assert.AreEqual("line-2", loadedAnalysis.ChordSheet.ViewportMarkers?[1].LineId);
+        Assert.AreEqual(125d, loadedAnalysis.ChordSheet.ViewportMarkers?[2].Seconds);
+        Assert.AreEqual("line-1", loadedAnalysis.ChordSheet.ViewportMarkers?[2].LineId);
         Assert.AreEqual(1, loadedAnalysis.PerformanceSessions.Count);
         Assert.IsNotNull(loadedAnalysis.DrumReference);
         Assert.AreEqual("reference-v1", loadedAnalysis.DrumReference.Version);

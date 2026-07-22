@@ -126,6 +126,11 @@ public sealed record ChordSheetLine(
     }
 }
 
+public sealed record ChordSheetViewportMarker(
+    string Id,
+    double Seconds,
+    string LineId);
+
 public sealed record ChordSheetDocument(
     string Id,
     string Title,
@@ -136,7 +141,8 @@ public sealed record ChordSheetDocument(
     double LeadSeconds,
     IReadOnlyList<ChordSheetLine> Lines,
     double? ViewSwitchSeconds = null,
-    string? ViewSwitchLineId = null)
+    string? ViewSwitchLineId = null,
+    IReadOnlyList<ChordSheetViewportMarker>? ViewportMarkers = null)
 {
     public static ChordSheetDocument Normalize(ChordSheetDocument document)
     {
@@ -146,18 +152,44 @@ public sealed record ChordSheetDocument(
             .OrderBy(line => line.Order)
             .Take(20_000)
             .ToArray();
-        var viewSwitchSeconds = document.ViewSwitchSeconds is { } switchSeconds &&
-                                double.IsFinite(switchSeconds) &&
-                                switchSeconds >= 0d
-            ? switchSeconds
-            : (double?)null;
-        var viewSwitchLineId = !string.IsNullOrWhiteSpace(document.ViewSwitchLineId) &&
-                               lines.Any(line => string.Equals(
-                                   line.Id,
-                                   document.ViewSwitchLineId,
-                                   StringComparison.Ordinal))
-            ? document.ViewSwitchLineId
-            : null;
+        var availableLineIds = lines
+            .Select(line => line.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        var markerCandidates = (document.ViewportMarkers ?? [])
+            .Where(marker => marker is not null)
+            .ToList();
+        if (markerCandidates.Count == 0 &&
+            document.ViewSwitchSeconds is { } legacySeconds &&
+            double.IsFinite(legacySeconds) &&
+            legacySeconds >= 0d &&
+            !string.IsNullOrWhiteSpace(document.ViewSwitchLineId))
+        {
+            markerCandidates.Add(new ChordSheetViewportMarker(
+                "legacy-view-switch",
+                legacySeconds,
+                document.ViewSwitchLineId));
+        }
+
+        var usedIds = new HashSet<string>(StringComparer.Ordinal);
+        var usedTimes = new HashSet<double>();
+        var viewportMarkers = markerCandidates
+            .Where(marker =>
+                double.IsFinite(marker.Seconds) &&
+                marker.Seconds >= 0d &&
+                !string.IsNullOrWhiteSpace(marker.LineId) &&
+                availableLineIds.Contains(marker.LineId))
+            .OrderBy(marker => marker.Seconds)
+            .Where(marker => usedTimes.Add(marker.Seconds))
+            .Select(marker =>
+            {
+                var id = !string.IsNullOrWhiteSpace(marker.Id) && usedIds.Add(marker.Id)
+                    ? marker.Id
+                    : Guid.NewGuid().ToString("N");
+                usedIds.Add(id);
+                return marker with { Id = id };
+            })
+            .Take(1_000)
+            .ToArray();
         return document with
         {
             Id = string.IsNullOrWhiteSpace(document.Id)
@@ -181,8 +213,9 @@ public sealed record ChordSheetDocument(
                 ? Math.Clamp(document.LeadSeconds, -10d, 20d)
                 : 2d,
             Lines = lines,
-            ViewSwitchSeconds = viewSwitchSeconds,
-            ViewSwitchLineId = viewSwitchLineId
+            ViewSwitchSeconds = null,
+            ViewSwitchLineId = null,
+            ViewportMarkers = viewportMarkers
         };
     }
 }

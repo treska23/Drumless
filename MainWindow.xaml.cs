@@ -70,6 +70,23 @@ public partial class MainWindow : Window
         slider.Focus();
         eventArgs.Handled = true;
     }
+
+    private void OnPracticeSidebarPreviewMouseWheel(
+        object sender,
+        MouseWheelEventArgs eventArgs)
+    {
+        if (sender is not ScrollViewer scrollViewer)
+        {
+            return;
+        }
+
+        scrollViewer.ScrollToVerticalOffset(Math.Clamp(
+            scrollViewer.VerticalOffset - eventArgs.Delta,
+            0d,
+            scrollViewer.ScrollableHeight));
+        eventArgs.Handled = true;
+    }
+
     private Point? _libraryDragOrigin;
     private Point? _playlistDragOrigin;
     private Point? _effectSlotDragOrigin;

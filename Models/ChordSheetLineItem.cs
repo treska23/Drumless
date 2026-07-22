@@ -67,11 +67,11 @@ public sealed class ChordSheetLineItem : ObservableObject
         Confidence = 1d;
     }
 
-    public void SetViewSwitchTarget(bool isTarget, double? seconds)
+    public void SetViewSwitchTargets(IReadOnlyList<double> markerTimes)
     {
-        IsViewSwitchTarget = isTarget;
-        ViewSwitchLabel = isTarget
-            ? $"CAMBIO DE VISTA · {Services.ChordSheetViewportPolicy.FormatTimestamp(seconds)}"
+        IsViewSwitchTarget = markerTimes.Count > 0;
+        ViewSwitchLabel = markerTimes.Count > 0
+            ? $"CAMBIOS DE VISTA · {string.Join(" · ", markerTimes.Select(seconds => Services.ChordSheetViewportPolicy.FormatTimestamp(seconds)))}"
             : string.Empty;
     }
 

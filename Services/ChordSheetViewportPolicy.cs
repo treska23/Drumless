@@ -8,24 +8,28 @@ public static class ChordSheetViewportPolicy
     public static string? ResolveAnchorLineId(
         IReadOnlyList<ChordSheetLine> lines,
         double playbackSeconds,
-        double? switchSeconds,
-        string? switchLineId)
+        IReadOnlyList<ChordSheetViewportMarker>? markers)
     {
-        if (lines.Count == 0 ||
-            switchSeconds is not { } threshold ||
-            !double.IsFinite(threshold) ||
-            threshold < 0d ||
-            string.IsNullOrWhiteSpace(switchLineId) ||
-            lines.All(line => !string.Equals(line.Id, switchLineId, StringComparison.Ordinal)))
+        if (lines.Count == 0)
         {
             return null;
         }
 
         var firstVisible = lines.FirstOrDefault(line => line.Kind != ChordSheetLineKind.Empty)
                            ?? lines[0];
-        return Math.Max(0d, playbackSeconds) >= threshold
-            ? switchLineId
-            : firstVisible.Id;
+        var lineIds = lines.Select(line => line.Id).ToHashSet(StringComparer.Ordinal);
+        var position = Math.Max(0d, playbackSeconds);
+        var activeMarker = (markers ?? [])
+            .Where(marker =>
+                marker is not null &&
+                double.IsFinite(marker.Seconds) &&
+                marker.Seconds >= 0d &&
+                marker.Seconds <= position &&
+                !string.IsNullOrWhiteSpace(marker.LineId) &&
+                lineIds.Contains(marker.LineId))
+            .OrderBy(marker => marker.Seconds)
+            .LastOrDefault();
+        return activeMarker?.LineId ?? firstVisible.Id;
     }
 
     public static bool TryParseTimestamp(string? text, out double seconds)

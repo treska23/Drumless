@@ -128,7 +128,7 @@
                             <ColumnDefinition Width="330" />
                         </Grid.ColumnDefinitions>
 
-                        <StackPanel Margin="0,0,22,0">
+                        <StackPanel x:Name="PracticeMainColumn" Margin="0,0,22,0">
                             <TextBlock Text="Practicar" FontSize="30" FontWeight="SemiBold" />
                             <TextBlock Text="Elige una pista, carga un kit y empieza a tocar."
                                        Foreground="{StaticResource TextSecondary}" FontSize="14" Margin="0,5,0,22" />
@@ -267,7 +267,14 @@
                             </ItemsControl>
                         </StackPanel>
 
-                        <StackPanel Grid.Column="1">
+                        <ScrollViewer x:Name="PracticeSidebarScrollViewer"
+                                      Grid.Column="1"
+                                      Height="{Binding ElementName=PracticeMainColumn, Path=ActualHeight}"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      CanContentScroll="False"
+                                      PreviewMouseWheel="OnPracticeSidebarPreviewMouseWheel">
+                        <StackPanel Margin="0,0,8,0">
                             <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16">
                                 <StackPanel>
                                     <TextBlock Text="KIT ACTIVO" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
@@ -537,6 +544,7 @@
                                 </StackPanel>
                             </Border>
                         </StackPanel>
+                        </ScrollViewer>
                     </Grid>
 
                     <!-- LIBRERÍAS -->

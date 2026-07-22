@@ -67,7 +67,7 @@
                     <CheckBox Content="Seguir reproducción"
                               IsChecked="{Binding IsChordSheetFollowEnabled}"
                               VerticalAlignment="Center" Margin="0,0,12,0" />
-                    <TextBlock Text="Un solo cambio automático por canción"
+                    <TextBlock Text="Marcas manuales de cambio sin límite"
                                Foreground="{StaticResource TextSecondary}"
                                VerticalAlignment="Center" />
                 </WrapPanel>
@@ -200,10 +200,10 @@
                                     BorderThickness="1"
                                     CornerRadius="8">
                                 <StackPanel>
-                                    <TextBlock Text="MARCA ÚNICA DE CAMBIO"
+                                    <TextBlock Text="MARCAS DE CAMBIO DE VISTA"
                                                Foreground="{StaticResource Accent}"
                                                FontWeight="SemiBold" />
-                                    <TextBlock Text="Escribe el tiempo o usa la posición actual; después selecciona abajo la primera línea de la parte inferior."
+                                    <TextBlock Text="Para cada cambio, escribe el tiempo o usa la posición actual; después selecciona la primera línea que debe mostrarse."
                                                Foreground="{StaticResource TextSecondary}"
                                                TextWrapping="Wrap"
                                                Margin="0,3,0,8" />
@@ -221,16 +221,44 @@
                                                 Margin="8,0,0,0"
                                                 Command="{Binding UseCurrentChordSheetViewSwitchTimeCommand}" />
                                         <Button Style="{StaticResource PrimaryButton}"
-                                                Content="Aplicar a línea seleccionada"
+                                                Content="Añadir marca"
                                                 Margin="8,0,0,0"
                                                 Command="{Binding SetChordSheetViewSwitchCommand}"
                                                 AutomationProperties.AutomationId="SetChordSheetViewSwitchButton" />
                                         <Button Style="{StaticResource SecondaryButton}"
-                                                Content="Quitar marca"
+                                                Content="Mover seleccionada a la línea"
+                                                Margin="8,0,0,0"
+                                                IsEnabled="{Binding HasChordSheetViewSwitch}"
+                                                Command="{Binding MoveSelectedChordSheetViewportMarkerCommand}" />
+                                        <Button Style="{StaticResource SecondaryButton}"
+                                                Content="Quitar marca seleccionada"
                                                 Margin="8,0,0,0"
                                                 IsEnabled="{Binding HasChordSheetViewSwitch}"
                                                 Command="{Binding ClearChordSheetViewSwitchCommand}" />
+                                        <Button Style="{StaticResource SecondaryButton}"
+                                                Content="Quitar todas"
+                                                Margin="8,0,0,0"
+                                                IsEnabled="{Binding HasChordSheetViewSwitch}"
+                                                Command="{Binding ClearAllChordSheetViewSwitchesCommand}" />
                                     </WrapPanel>
+                                    <ListBox ItemsSource="{Binding ChordSheetViewportMarkers}"
+                                             SelectedItem="{Binding SelectedChordSheetViewportMarker}"
+                                             MaxHeight="82"
+                                             Margin="0,8,0,0"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                             AutomationProperties.AutomationId="ChordSheetViewportMarkerList">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Summary}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding Summary}" />
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <TextBlock Text="{Binding ChordSheetViewportMarkers.Count, StringFormat={}{0} marcas configuradas}"
+                                               Foreground="{StaticResource TextSecondary}"
+                                               FontSize="11"
+                                               Margin="0,7,0,0" />
                                 </StackPanel>
                             </Border>
                             <ListBox x:Name="ChordLineList"
