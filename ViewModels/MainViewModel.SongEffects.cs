@@ -63,6 +63,7 @@ public sealed partial class MainViewModel
                 OnPropertyChanged(nameof(CanAnalyzeSongEffects));
                 AnalyzeSongEffectsCommand?.RaiseCanExecuteChanged();
                 CancelSongEffectAnalysisCommand?.RaiseCanExecuteChanged();
+                ApplySongEffectProfileCommand?.RaiseCanExecuteChanged();
             }
         }
     }
