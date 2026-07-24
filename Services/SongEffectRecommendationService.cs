@@ -186,10 +186,11 @@ public sealed partial class SongEffectRecommendationService : IDisposable
         ArgumentNullException.ThrowIfNull(parameterCatalog);
         var guitarCatalog = BuildTuningCatalog(profile.Guitar, "g", parameterCatalog);
         var voiceCatalog = BuildTuningCatalog(profile.Voice, "v", parameterCatalog);
-        if (guitarCatalog.Count == 0 && voiceCatalog.Count == 0)
+        if (!guitarCatalog.Any(slot => slot.Parameters.Count > 0) ||
+            !voiceCatalog.Any(slot => slot.Parameters.Count > 0))
         {
             throw new InvalidDataException(
-                "Los plugins elegidos no exponen presets ni parámetros configurables.");
+                "Los plugins elegidos no exponen parámetros configurables para los dos inputs.");
         }
 
         var context = new
@@ -372,11 +373,7 @@ public sealed partial class SongEffectRecommendationService : IDisposable
                 responseSlot = responseSlots[slot.Index];
             }
             var settings = ParseParameterSettings(responseSlot, slot.Parameters);
-            if (settings.Count == 0 && slot.Parameters.Count > 0)
-            {
-                continue;
-            }
-            if (settings.Count == 0 && string.IsNullOrWhiteSpace(slot.Slot.Effect.PresetPath))
+            if (settings.Count == 0)
             {
                 continue;
             }
