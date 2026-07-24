@@ -53,9 +53,6 @@ public partial class MainWindow
         advancedButton.SetBinding(
             Button.CommandProperty,
             new Binding("CreateAdvancedStemsCommand"));
-        advancedButton.SetBinding(
-            IsEnabledProperty,
-            new Binding("CanCreateDrumless"));
         AutomationProperties.SetAutomationId(advancedButton, "CreateAdvancedStemsButton");
         buttons.Children.Add(advancedButton);
         parent.Children.Add(buttons);
