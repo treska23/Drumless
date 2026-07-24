@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
-using System.Windows.Data;
 using System.Windows.Media;
 
 namespace DrumPracticeStudio;
@@ -9,10 +8,13 @@ namespace DrumPracticeStudio;
 public partial class MainWindow
 {
     private bool _advancedStemButtonInjected;
+    private bool _libraryRemovalRewired;
 
     protected override void OnContentRendered(EventArgs e)
     {
         base.OnContentRendered(e);
+
+        RewireLibraryRemoval();
         if (_advancedStemButtonInjected)
         {
             return;
@@ -47,16 +49,37 @@ public partial class MainWindow
         {
             Content = "Crear mezcla avanzada",
             Padding = new Thickness(12, 8, 12, 8),
-            ToolTip = "Elige qué conservar: voz principal, coros, guitarra solista, guitarra rítmica y los stems base. Solo se añade la mezcla final."
+            ToolTip = "Elige qué conservar: voz principal, coros, guitarra solista, guitarra rítmica y los stems base. Solo se añade la mezcla final.",
+            Command = _viewModel.CreateAdvancedStemsCommand
         };
         advancedButton.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryButton");
-        advancedButton.SetBinding(
-            Button.CommandProperty,
-            new Binding("CreateAdvancedStemsCommand"));
         AutomationProperties.SetAutomationId(advancedButton, "CreateAdvancedStemsButton");
         buttons.Children.Add(advancedButton);
         parent.Children.Add(buttons);
         _advancedStemButtonInjected = true;
+    }
+
+    private void RewireLibraryRemoval()
+    {
+        if (_libraryRemovalRewired)
+        {
+            return;
+        }
+
+        _viewModel.EnablePermanentTrackDeletionPrompt();
+        RemoveLibrarySelectionButton.Click -= OnRemoveLibrarySelectionClick;
+        RemoveLibrarySelectionButton.Click += OnRemoveLibrarySelectionWithDeletePromptClick;
+        RemoveLibrarySelectionButton.ToolTip =
+            "Quitar de la biblioteca o eliminar también el archivo del disco";
+        _libraryRemovalRewired = true;
+    }
+
+    private void OnRemoveLibrarySelectionWithDeletePromptClick(
+        object sender,
+        RoutedEventArgs eventArgs)
+    {
+        _viewModel.RemoveLibrarySelectionWithDeletePrompt(GetSelectedLibraryTracks());
+        UpdateLibrarySelectionControls();
     }
 
     private static T? FindByAutomationId<T>(DependencyObject root, string automationId)
