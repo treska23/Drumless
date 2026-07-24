@@ -50,6 +50,16 @@ public static class AdvancedStemMixPlan
         return advanced == AdvancedStemSelection.None ? AdvancedStemSelection.All : advanced;
     }
 
+    public static bool RequiresAdvancedSplit(AdvancedStemSelection selection)
+    {
+        Validate(selection);
+        var splitVocals = selection.HasFlag(AdvancedStemSelection.LeadVocal) ^
+                          selection.HasFlag(AdvancedStemSelection.BackVocal);
+        var splitGuitars = selection.HasFlag(AdvancedStemSelection.LeadGuitar) ^
+                           selection.HasFlag(AdvancedStemSelection.RhythmGuitar);
+        return splitVocals || splitGuitars;
+    }
+
     public static string FileSuffix(AdvancedStemSelection selection) => Sanitize(Describe(selection));
 
     public static void Validate(AdvancedStemSelection selection)
