@@ -49,14 +49,20 @@ public partial class MainWindow
         {
             Content = "Crear mezcla avanzada",
             Padding = new Thickness(12, 8, 12, 8),
-            ToolTip = "Elige qué conservar: voz principal, coros, guitarra solista, guitarra rítmica y los stems base. Solo se añade la mezcla final.",
-            Command = _viewModel.CreateAdvancedStemsCommand
+            ToolTip = "Elige qué conservar: voz principal, coros, guitarra solista, guitarra rítmica y los stems base. Solo se añade la mezcla final."
         };
         advancedButton.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryButton");
+        advancedButton.Click += OnCreateAdvancedStemMixClick;
         AutomationProperties.SetAutomationId(advancedButton, "CreateAdvancedStemsButton");
         buttons.Children.Add(advancedButton);
         parent.Children.Add(buttons);
         _advancedStemButtonInjected = true;
+    }
+
+    private void OnCreateAdvancedStemMixClick(object sender, RoutedEventArgs eventArgs)
+    {
+        _viewModel.CreateAdvancedStemsCommand.Execute(null);
+        eventArgs.Handled = true;
     }
 
     private void RewireLibraryRemoval()
