@@ -5,7 +5,6 @@ public static class AppPaths
     public const string DataRootEnvironmentVariable = "DRUM_PRACTICE_STUDIO_DATA_ROOT";
 
     public static string Root { get; } = ResolveRoot();
-
     public static string FactoryContent { get; } = Path.Combine(Root, "FactoryContent", "v2");
     public static string UserLibraries { get; } = Path.Combine(Root, "Libraries");
     public static string DerivedTracks { get; } = Path.Combine(Root, "DerivedTracks");
@@ -13,6 +12,9 @@ public static class AppPaths
     public static string SeparationRuntime { get; } = Path.Combine(Root, "Runtimes", "Demucs");
     public static string SeparationPython { get; } = Path.Combine(SeparationRuntime, ".venv", "Scripts", "python.exe");
     public static string SeparationModels { get; } = Path.Combine(Root, "Models", "Torch");
+    public static string AdvancedSeparationRuntime { get; } = Path.Combine(Root, "Runtimes", "AdvancedSeparation");
+    public static string AdvancedSeparationPython { get; } = Path.Combine(AdvancedSeparationRuntime, ".venv", "Scripts", "python.exe");
+    public static string AdvancedSeparationModels { get; } = Path.Combine(Root, "Models", "AudioSeparator");
     public static string SeparationWork { get; } = Path.Combine(Root, "Work", "Separation");
     public static string RecordingWork { get; } = Path.Combine(Root, "Work", "Recording");
     public static string VstStates { get; } = Path.Combine(Root, "VstStates");
@@ -29,6 +31,8 @@ public static class AppPaths
         Directory.CreateDirectory(DerivedTracks);
         Directory.CreateDirectory(SeparationRuntime);
         Directory.CreateDirectory(SeparationModels);
+        Directory.CreateDirectory(AdvancedSeparationRuntime);
+        Directory.CreateDirectory(AdvancedSeparationModels);
         Directory.CreateDirectory(SeparationWork);
         Directory.CreateDirectory(RecordingWork);
         Directory.CreateDirectory(VstStates);
