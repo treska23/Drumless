@@ -1,21 +1,40 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
+import urllib.error
+import urllib.request
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import librosa
 import numpy as np
 import soundfile as sf
 from scipy.ndimage import gaussian_filter, median_filter
+
+
+KARAOKE_PRESET_RETRIES = 2
+KARAOKE_TWO_MODEL_ENSEMBLE = [
+    "mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt",
+    "mel_band_roformer_karaoke_gabox_v2.ckpt",
+]
+KARAOKE_FALLBACK_MODEL = "UVR_MDXNET_KARA_2.onnx"
+KARAOKE_FALLBACK_SHA256 = "bf32e15105a09c0f7dddd2b67346146334d6f3ecb399ed7638eba2ab07cbf5f4"
+KARAOKE_FALLBACK_MIRRORS = [
+    "https://huggingface.co/seanghay/uvr_models/resolve/main/UVR_MDXNET_KARA_2.onnx?download=true",
+    "https://huggingface.co/lissette/uvr/resolve/main/MDX-Net/UVR_MDXNET_KARA_2.onnx?download=true",
+]
 
 
 def report(message: str, percent: float | None = None) -> None:
@@ -112,45 +131,255 @@ def peak_normalize(audio: np.ndarray, ceiling: float = 0.98) -> np.ndarray:
     return audio * (ceiling / peak)
 
 
-def split_vocals(vocals_path: Path, output_dir: Path, model_dir: Path) -> tuple[Path, Path]:
+def clean_failed_model_download(model_dir: Path, error: Exception) -> None:
+    """Removes only incomplete files mentioned by a failed model download."""
+    model_dir.mkdir(parents=True, exist_ok=True)
+    error_text = str(error)
+    for raw_url in re.findall(r"https?://[^\s]+", error_text):
+        raw_url = raw_url.rstrip(".,);]}")
+        file_name = unquote(Path(urlparse(raw_url).path).name)
+        if not file_name:
+            continue
+        candidate = model_dir / file_name
+        try:
+            if candidate.is_file() and candidate.stat().st_size < 8 * 1024 * 1024:
+                candidate.unlink()
+        except OSError:
+            pass
+
+    for pattern in ("*.part", "*.tmp", "*.download"):
+        for candidate in model_dir.glob(pattern):
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+
+
+def resolve_generated_path(path: str | Path, output_dir: Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = output_dir / resolved
+    return resolved
+
+
+def resolve_vocal_outputs(generated: list[Path]) -> tuple[Path, Path]:
+    lead_source = next(
+        (path for path in generated if path.stem.lower() == "lead-vocal"),
+        None,
+    )
+    back_source = next(
+        (path for path in generated if path.stem.lower() == "back-vocal"),
+        None,
+    )
+    if lead_source is None:
+        lead_source = next(
+            (path for path in generated if "(vocals)" in path.name.lower()),
+            None,
+        )
+    if back_source is None:
+        back_source = next(
+            (path for path in generated if "(instrumental)" in path.name.lower()),
+            None,
+        )
+    if lead_source is None or back_source is None:
+        names = ", ".join(path.name for path in generated)
+        raise RuntimeError(
+            f"Audio Separator no devolvió los stems vocales esperados: {names}"
+        )
+    if not lead_source.is_file() or not back_source.is_file():
+        raise FileNotFoundError(
+            f"Audio Separator anunció archivos que no existen: {lead_source}, {back_source}"
+        )
+    return lead_source, back_source
+
+
+def run_vocal_separator(
+    vocals_path: Path,
+    attempt_dir: Path,
+    model_dir: Path,
+    *,
+    ensemble_preset: str | None = None,
+    model_filenames: str | list[str] | None = None,
+) -> tuple[Path, Path]:
     from audio_separator.separator import Separator
 
-    report("Voz avanzada · preparando modelos UVR karaoke", 0.08)
-    temp_dir = Path(tempfile.mkdtemp(prefix="drumless-vocals-", dir=output_dir))
-    try:
-        separator = Separator(
-            output_dir=str(temp_dir),
-            model_file_dir=str(model_dir),
-            output_format="WAV",
-            sample_rate=44_100,
-            use_soundfile=True,
-            ensemble_preset="karaoke",
-        )
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    separator_options: dict[str, object] = {
+        "output_dir": str(attempt_dir),
+        "model_file_dir": str(model_dir),
+        "output_format": "WAV",
+        "sample_rate": 44_100,
+        "use_soundfile": True,
+    }
+    if ensemble_preset is not None:
+        separator_options["ensemble_preset"] = ensemble_preset
+    elif isinstance(model_filenames, list):
+        separator_options["ensemble_algorithm"] = "avg_wave"
+
+    separator = Separator(**separator_options)
+    if model_filenames is None:
         separator.load_model()
-        report("Voz avanzada · separando voz principal y coros", 0.18)
-        output_names = {
-            "Vocals": "lead-vocal",
-            "Instrumental": "back-vocal",
-        }
-        generated = [Path(path) for path in separator.separate(str(vocals_path), output_names)]
+    else:
+        separator.load_model(model_filename=model_filenames)
 
-        lead_source = next((path for path in generated if path.stem.lower() == "lead-vocal"), None)
-        back_source = next((path for path in generated if path.stem.lower() == "back-vocal"), None)
-        if lead_source is None:
-            lead_source = next((path for path in generated if "(vocals)" in path.name.lower()), None)
-        if back_source is None:
-            back_source = next((path for path in generated if "(instrumental)" in path.name.lower()), None)
-        if lead_source is None or back_source is None:
-            names = ", ".join(path.name for path in generated)
-            raise RuntimeError(f"Audio Separator no devolvió los stems vocales esperados: {names}")
+    output_names = {
+        "Vocals": "lead-vocal",
+        "Instrumental": "back-vocal",
+    }
+    generated = [
+        resolve_generated_path(path, attempt_dir)
+        for path in separator.separate(str(vocals_path), output_names)
+    ]
+    return resolve_vocal_outputs(generated)
 
-        lead_target = output_dir / "lead-vocal.wav"
-        back_target = output_dir / "back-vocal.wav"
-        shutil.copy2(lead_source, lead_target)
-        shutil.copy2(back_source, back_target)
-        return lead_target, back_target
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def ensure_fallback_karaoke_model(model_dir: Path) -> Path:
+    model_dir.mkdir(parents=True, exist_ok=True)
+    target = model_dir / KARAOKE_FALLBACK_MODEL
+    if target.is_file():
+        try:
+            if file_sha256(target) == KARAOKE_FALLBACK_SHA256:
+                return target
+        except OSError:
+            pass
+        try:
+            target.unlink()
+        except OSError:
+            pass
+
+    last_error: Exception | None = None
+    for mirror_index, url in enumerate(KARAOKE_FALLBACK_MIRRORS, start=1):
+        for attempt in range(1, 4):
+            partial = target.with_suffix(target.suffix + ".part")
+            try:
+                partial.unlink(missing_ok=True)
+                report(
+                    "Voz avanzada · descargando modelo alternativo estable "
+                    f"({mirror_index}/{len(KARAOKE_FALLBACK_MIRRORS)}, intento {attempt}/3)",
+                    0.13,
+                )
+                request = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "DrumPracticeStudio/0.1"},
+                )
+                with urllib.request.urlopen(request, timeout=90) as response, partial.open("wb") as output:
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                if file_sha256(partial) != KARAOKE_FALLBACK_SHA256:
+                    raise RuntimeError("La suma SHA-256 del modelo alternativo no coincide")
+                partial.replace(target)
+                return target
+            except (OSError, RuntimeError, urllib.error.URLError) as error:
+                last_error = error
+                try:
+                    partial.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                if attempt < 3:
+                    time.sleep(2.5 * attempt)
+
+    raise RuntimeError(
+        "No se pudo descargar el modelo vocal alternativo desde ninguno de los servidores"
+        + (f": {last_error}" if last_error is not None else "")
+    )
+
+
+def copy_vocal_results(
+    lead_source: Path,
+    back_source: Path,
+    output_dir: Path,
+) -> tuple[Path, Path]:
+    lead_target = output_dir / "lead-vocal.wav"
+    back_target = output_dir / "back-vocal.wav"
+    shutil.copy2(lead_source, lead_target)
+    shutil.copy2(back_source, back_target)
+    return lead_target, back_target
+
+
+def split_vocals(vocals_path: Path, output_dir: Path, model_dir: Path) -> tuple[Path, Path]:
+    report("Voz avanzada · preparando modelos UVR karaoke", 0.08)
+    temp_root = Path(tempfile.mkdtemp(prefix="drumless-vocals-", dir=output_dir))
+    errors: list[str] = []
+    try:
+        for attempt in range(1, KARAOKE_PRESET_RETRIES + 1):
+            attempt_dir = temp_root / f"preset-{attempt}"
+            try:
+                report(
+                    f"Voz avanzada · cargando ensemble karaoke (intento {attempt}/{KARAOKE_PRESET_RETRIES})",
+                    0.09,
+                )
+                lead, back = run_vocal_separator(
+                    vocals_path,
+                    attempt_dir,
+                    model_dir,
+                    ensemble_preset="karaoke",
+                )
+                report("Voz avanzada · separando voz principal y coros", 0.18)
+                return copy_vocal_results(lead, back, output_dir)
+            except Exception as error:
+                errors.append(f"ensemble completo: {type(error).__name__}: {error}")
+                clean_failed_model_download(model_dir, error)
+                shutil.rmtree(attempt_dir, ignore_errors=True)
+                if attempt < KARAOKE_PRESET_RETRIES:
+                    report(
+                        "El servidor del modelo principal no respondió; reintentando automáticamente",
+                        0.10,
+                    )
+                    time.sleep(3.0 * attempt)
+
+        try:
+            report(
+                "Voz avanzada · usando ensemble karaoke de dos modelos",
+                0.11,
+            )
+            two_model_dir = temp_root / "two-model"
+            lead, back = run_vocal_separator(
+                vocals_path,
+                two_model_dir,
+                model_dir,
+                model_filenames=KARAOKE_TWO_MODEL_ENSEMBLE,
+            )
+            report("Voz avanzada · separando voz principal y coros", 0.18)
+            return copy_vocal_results(lead, back, output_dir)
+        except Exception as error:
+            errors.append(f"ensemble de dos modelos: {type(error).__name__}: {error}")
+            clean_failed_model_download(model_dir, error)
+            shutil.rmtree(temp_root / "two-model", ignore_errors=True)
+
+        report(
+            "Los modelos principales no están disponibles; usando el modelo karaoke alternativo",
+            0.12,
+        )
+        ensure_fallback_karaoke_model(model_dir)
+        fallback_dir = temp_root / "fallback"
+        try:
+            lead, back = run_vocal_separator(
+                vocals_path,
+                fallback_dir,
+                model_dir,
+                model_filenames=KARAOKE_FALLBACK_MODEL,
+            )
+            report("Voz avanzada · separando voz principal y coros", 0.18)
+            return copy_vocal_results(lead, back, output_dir)
+        except Exception as error:
+            errors.append(f"modelo alternativo: {type(error).__name__}: {error}")
+            raise RuntimeError(" | ".join(errors)) from error
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        shutil.rmtree(temp_root, ignore_errors=True)
 
 
 def build_melody_mask(mono: np.ndarray, sample_rate: int, n_fft: int, hop_length: int) -> np.ndarray:
@@ -307,7 +536,6 @@ def split_guitar(guitar_path: Path, output_dir: Path) -> tuple[Path, Path]:
     lead = lead_accumulator / weights
     rhythm = rhythm_accumulator / weights
 
-    # Preserve complementarity: any numerical reconstruction residue stays in rhythm guitar.
     residue = stereo - (lead + rhythm)
     rhythm += residue
     lead = peak_normalize(lead)
