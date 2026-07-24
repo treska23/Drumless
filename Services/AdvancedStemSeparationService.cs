@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using DrumPracticeStudio.Models;
 using NAudio.Wave;
@@ -14,6 +16,7 @@ public sealed record AdvancedStemSeparationResult(
 
 public sealed class AdvancedStemSeparationService
 {
+    private const string CacheVersion = "advanced-demucs-v2";
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public AdvancedStemSeparationService() => AppPaths.EnsureCreated();
@@ -80,27 +83,9 @@ public sealed class AdvancedStemSeparationService
         ArgumentNullException.ThrowIfNull(progress);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
 
-        if (track.Variant != TrackVariant.Original)
-        {
-            throw new InvalidOperationException(
-                "La separación avanzada solo se aplica a pistas originales.");
-        }
-        if (!File.Exists(track.Path))
-        {
-            throw new FileNotFoundException("La pista original ya no existe.", track.Path);
-        }
-        if (!File.Exists(AppPaths.SeparationPython))
-        {
-            throw new InvalidOperationException(
-                "Demucs debe estar instalado antes de ejecutar la separación avanzada.");
-        }
-        if (!IsInstalled)
-        {
-            throw new InvalidOperationException(
-                "El motor de separación avanzada todavía no está instalado.");
-        }
-
+        ValidateRequest(track);
         await _gate.WaitAsync(cancellationToken);
+
         var jobRoot = Path.Combine(AppPaths.SeparationWork, $"advanced-{Guid.NewGuid():N}");
         Directory.CreateDirectory(jobRoot);
         try
@@ -109,26 +94,62 @@ public sealed class AdvancedStemSeparationService
             progress.Report(new DrumRemovalProgress(0.02d, "Preparando audio para separación avanzada"));
             await NormalizeInputAsync(track.Path, normalizedInput, cancellationToken);
 
-            var demucsRoot = Path.Combine(jobRoot, "demucs");
-            progress.Report(new DrumRemovalProgress(0.06d, "Extrayendo primero voz y guitarra completas"));
-            var demucs = BuildDemucsProcess(normalizedInput, demucsRoot, jobRoot);
-            var demucsResult = await RunProcessAsync(
-                demucs,
-                line => progress.Report(ParseDemucsProgress(line)),
-                cancellationToken);
-            if (demucsResult.ExitCode != 0)
+            var cacheRoot = GetCacheRoot(track.Path);
+            var cachedVocals = Path.Combine(cacheRoot, "vocals.wav");
+            var cachedGuitar = Path.Combine(cacheRoot, "guitar.wav");
+            string vocalsPath;
+            string guitarPath;
+
+            if (IsUsableStem(cachedVocals) && IsUsableStem(cachedGuitar))
             {
-                throw new InvalidOperationException(
-                    string.IsNullOrWhiteSpace(demucsResult.LastError)
-                        ? $"Demucs terminó con el código {demucsResult.ExitCode}."
-                        : $"Demucs falló: {demucsResult.LastError}");
+                vocalsPath = cachedVocals;
+                guitarPath = cachedGuitar;
+                progress.Report(new DrumRemovalProgress(
+                    0.34d,
+                    "Reutilizando voz y guitarra ya extraídas para esta canción"));
+            }
+            else
+            {
+                Directory.CreateDirectory(cacheRoot);
+                var demucsRoot = Path.Combine(jobRoot, "demucs");
+                var device = await DetectDemucsDeviceAsync(cancellationToken);
+                var cpuJobs = ResolveCpuJobs();
+                var engineLabel = device == "cuda"
+                    ? "GPU NVIDIA"
+                    : $"CPU · {cpuJobs} procesos paralelos";
+                progress.Report(new DrumRemovalProgress(
+                    0.06d,
+                    $"Extrayendo voz y guitarra · {engineLabel}"));
+
+                var demucs = BuildDemucsProcess(
+                    normalizedInput,
+                    demucsRoot,
+                    jobRoot,
+                    device,
+                    cpuJobs);
+                var demucsResult = await RunProcessAsync(
+                    demucs,
+                    line => progress.Report(ParseDemucsProgress(line, engineLabel)),
+                    cancellationToken);
+                if (demucsResult.ExitCode != 0)
+                {
+                    throw new InvalidOperationException(
+                        string.IsNullOrWhiteSpace(demucsResult.LastError)
+                            ? $"Demucs terminó con el código {demucsResult.ExitCode}."
+                            : $"Demucs falló: {demucsResult.LastError}");
+                }
+
+                var generatedVocals = FindStem(demucsRoot, "vocals.wav");
+                var generatedGuitar = FindStem(demucsRoot, "guitar.wav");
+                vocalsPath = StoreCachedStem(generatedVocals, cachedVocals);
+                guitarPath = StoreCachedStem(generatedGuitar, cachedGuitar);
+                progress.Report(new DrumRemovalProgress(
+                    0.34d,
+                    "Voz y guitarra guardadas; no se repetirán si el proceso falla después"));
             }
 
-            var vocalsPath = FindStem(demucsRoot, "vocals.wav");
-            var guitarPath = FindStem(demucsRoot, "guitar.wav");
             var advancedRoot = Path.Combine(jobRoot, "advanced");
             Directory.CreateDirectory(advancedRoot);
-
             var script = Path.Combine(AppContext.BaseDirectory, "scripts", "advanced-separate.py");
             if (!File.Exists(script))
             {
@@ -137,27 +158,12 @@ public sealed class AdvancedStemSeparationService
                     script);
             }
 
-            var advanced = new ProcessStartInfo
-            {
-                FileName = AppPaths.AdvancedSeparationPython,
-                WorkingDirectory = jobRoot,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-            advanced.Environment["PYTHONUTF8"] = "1";
-            advanced.Environment["PYTHONUNBUFFERED"] = "1";
-            advanced.ArgumentList.Add(script);
-            advanced.ArgumentList.Add("--vocals");
-            advanced.ArgumentList.Add(vocalsPath);
-            advanced.ArgumentList.Add("--guitar");
-            advanced.ArgumentList.Add(guitarPath);
-            advanced.ArgumentList.Add("--output");
-            advanced.ArgumentList.Add(advancedRoot);
-            advanced.ArgumentList.Add("--models");
-            advanced.ArgumentList.Add(AppPaths.AdvancedSeparationModels);
-
+            var advanced = BuildAdvancedProcess(
+                script,
+                vocalsPath,
+                guitarPath,
+                advancedRoot,
+                jobRoot);
             progress.Report(new DrumRemovalProgress(
                 0.35d,
                 "Separando voz principal, coros, guitarra solista y guitarra rítmica"));
@@ -210,10 +216,30 @@ public sealed class AdvancedStemSeparationService
         }
     }
 
+    private static void ValidateRequest(LocalTrack track)
+    {
+        if (track.Variant != TrackVariant.Original)
+        {
+            throw new InvalidOperationException(
+                "La separación avanzada solo se aplica a pistas originales.");
+        }
+        if (!File.Exists(track.Path))
+        {
+            throw new FileNotFoundException("La pista original ya no existe.", track.Path);
+        }
+        if (!File.Exists(AppPaths.SeparationPython))
+        {
+            throw new InvalidOperationException(
+                "Demucs debe estar instalado antes de ejecutar la separación avanzada.");
+        }
+    }
+
     private static ProcessStartInfo BuildDemucsProcess(
         string input,
         string output,
-        string workingDirectory)
+        string workingDirectory,
+        string device,
+        int cpuJobs)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -232,15 +258,150 @@ public sealed class AdvancedStemSeparationService
         startInfo.ArgumentList.Add("-n");
         startInfo.ArgumentList.Add("htdemucs_6s");
         startInfo.ArgumentList.Add("-d");
-        startInfo.ArgumentList.Add("cpu");
+        startInfo.ArgumentList.Add(device);
         startInfo.ArgumentList.Add("--shifts");
         startInfo.ArgumentList.Add("0");
+        startInfo.ArgumentList.Add("--overlap");
+        startInfo.ArgumentList.Add("0.1");
+        startInfo.ArgumentList.Add("--segment");
+        startInfo.ArgumentList.Add("7.8");
+        if (device == "cpu")
+        {
+            startInfo.ArgumentList.Add("-j");
+            startInfo.ArgumentList.Add(cpuJobs.ToString());
+        }
         startInfo.ArgumentList.Add("-o");
         startInfo.ArgumentList.Add(output);
         startInfo.ArgumentList.Add("--filename");
         startInfo.ArgumentList.Add("{stem}.{ext}");
         startInfo.ArgumentList.Add(input);
         return startInfo;
+    }
+
+    private static ProcessStartInfo BuildAdvancedProcess(
+        string script,
+        string vocalsPath,
+        string guitarPath,
+        string advancedRoot,
+        string jobRoot)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = AppPaths.AdvancedSeparationPython,
+            WorkingDirectory = jobRoot,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.Environment["PYTHONUTF8"] = "1";
+        startInfo.Environment["PYTHONUNBUFFERED"] = "1";
+        startInfo.ArgumentList.Add(script);
+        startInfo.ArgumentList.Add("--vocals");
+        startInfo.ArgumentList.Add(vocalsPath);
+        startInfo.ArgumentList.Add("--guitar");
+        startInfo.ArgumentList.Add(guitarPath);
+        startInfo.ArgumentList.Add("--output");
+        startInfo.ArgumentList.Add(advancedRoot);
+        startInfo.ArgumentList.Add("--models");
+        startInfo.ArgumentList.Add(AppPaths.AdvancedSeparationModels);
+        return startInfo;
+    }
+
+    private static async Task<string> DetectDemucsDeviceAsync(CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = AppPaths.SeparationPython,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add(
+            "import torch; print('cuda' if torch.cuda.is_available() else 'cpu')");
+
+        using var process = new Process { StartInfo = startInfo };
+        try
+        {
+            if (!process.Start())
+            {
+                return "cpu";
+            }
+            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+            var output = (await outputTask).Trim();
+            return process.ExitCode == 0 && output.Equals("cuda", StringComparison.OrdinalIgnoreCase)
+                ? "cuda"
+                : "cpu";
+        }
+        catch when (!cancellationToken.IsCancellationRequested)
+        {
+            return "cpu";
+        }
+    }
+
+    private static int ResolveCpuJobs()
+    {
+        var processors = Math.Max(1, Environment.ProcessorCount);
+        return Math.Clamp(processors / 2, 2, 4);
+    }
+
+    private static string GetCacheRoot(string sourcePath)
+    {
+        var info = new FileInfo(sourcePath);
+        var identity = string.Join('|',
+            CacheVersion,
+            Path.GetFullPath(sourcePath).ToUpperInvariant(),
+            info.Length,
+            info.LastWriteTimeUtc.Ticks);
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..24];
+        return Path.Combine(AppPaths.SeparationWork, "Cache", "Advanced", hash);
+    }
+
+    private static bool IsUsableStem(string path)
+    {
+        try
+        {
+            StemAudioMixer.ValidateWave(path);
+            return true;
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch
+            {
+            }
+            return false;
+        }
+    }
+
+    private static string StoreCachedStem(string source, string destination)
+    {
+        StemAudioMixer.ValidateWave(source);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        var temporary = destination + $".{Guid.NewGuid():N}.tmp";
+        File.Copy(source, temporary, overwrite: true);
+        try
+        {
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch
+            {
+            }
+        }
+        StemAudioMixer.ValidateWave(destination);
+        return destination;
     }
 
     private static async Task NormalizeInputAsync(
@@ -265,7 +426,7 @@ public sealed class AdvancedStemSeparationService
         cancellationToken.ThrowIfCancellationRequested();
     }, cancellationToken);
 
-    private static DrumRemovalProgress ParseDemucsProgress(string line)
+    private static DrumRemovalProgress ParseDemucsProgress(string line, string engineLabel)
     {
         var cleaned = CleanLine(line);
         var percentIndex = cleaned.IndexOf('%');
@@ -280,12 +441,14 @@ public sealed class AdvancedStemSeparationService
             {
                 return new DrumRemovalProgress(
                     0.06d + (Math.Clamp(percent, 0d, 100d) / 100d * 0.28d),
-                    $"Extrayendo voz y guitarra · {percent:0}%");
+                    $"Extrayendo voz y guitarra · {engineLabel} · {percent:0}%");
             }
         }
-        return new DrumRemovalProgress(null, string.IsNullOrWhiteSpace(cleaned)
-            ? "Extrayendo voz y guitarra"
-            : cleaned);
+        return new DrumRemovalProgress(
+            null,
+            string.IsNullOrWhiteSpace(cleaned)
+                ? $"Extrayendo voz y guitarra · {engineLabel}"
+                : cleaned);
     }
 
     private static DrumRemovalProgress? ParseAdvancedProgress(string line)
@@ -359,7 +522,7 @@ public sealed class AdvancedStemSeparationService
         CancellationToken cancellationToken)
     {
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        var lastError = string.Empty;
+        var errors = new Queue<string>();
         process.OutputDataReceived += (_, args) =>
         {
             if (!string.IsNullOrWhiteSpace(args.Data))
@@ -369,11 +532,16 @@ public sealed class AdvancedStemSeparationService
         };
         process.ErrorDataReceived += (_, args) =>
         {
-            if (!string.IsNullOrWhiteSpace(args.Data))
+            if (string.IsNullOrWhiteSpace(args.Data))
             {
-                lastError = args.Data;
-                onOutput(args.Data);
+                return;
             }
+            if (errors.Count >= 12)
+            {
+                errors.Dequeue();
+            }
+            errors.Enqueue(args.Data);
+            onOutput(args.Data);
         };
 
         if (!process.Start())
@@ -397,16 +565,9 @@ public sealed class AdvancedStemSeparationService
             }
         });
 
-        try
-        {
-            await process.WaitForExitAsync(cancellationToken);
-            process.WaitForExit();
-            return new ProcessResult(process.ExitCode, lastError);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
+        await process.WaitForExitAsync(cancellationToken);
+        process.WaitForExit();
+        return new ProcessResult(process.ExitCode, string.Join(Environment.NewLine, errors));
     }
 
     private static void SafeDeleteJob(string jobRoot)
