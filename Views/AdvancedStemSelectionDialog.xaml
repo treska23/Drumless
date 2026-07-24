@@ -1,0 +1,114 @@
+<Window x:Class="DrumPracticeStudio.Views.AdvancedStemSelectionDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Separación avanzada"
+        Width="590"
+        Height="610"
+        MinWidth="540"
+        MinHeight="560"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="Crear una mezcla avanzada" FontSize="25" FontWeight="SemiBold" />
+            <TextBlock Text="Marca lo que quieres conservar. Lo que desmarques se eliminará del archivo final. Los stems intermedios se guardan solo como caché y no aparecerán en la biblioteca."
+                       Foreground="{StaticResource TextSecondary}"
+                       TextWrapping="Wrap"
+                       Margin="0,8,0,0" />
+        </StackPanel>
+
+        <Border Grid.Row="1"
+                Style="{StaticResource CardStyle}"
+                Padding="16"
+                Margin="0,18,0,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="CONSERVAR EN EL ARCHIVO FINAL"
+                               Foreground="{StaticResource Accent}"
+                               FontSize="11"
+                               FontWeight="Bold" />
+                    <TextBlock x:Name="SelectionSummary"
+                               Foreground="{StaticResource TextSecondary}"
+                               TextWrapping="Wrap"
+                               Margin="0,5,12,0" />
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Style="{StaticResource SecondaryButton}"
+                        Content="Seleccionar todo"
+                        Padding="12,7"
+                        Click="OnSelectAllClick" />
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <Border Style="{StaticResource CardStyle}" Padding="16" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="BASE" Foreground="{StaticResource TextSecondary}" FontSize="10" FontWeight="Bold" />
+                        <CheckBox x:Name="DrumsCheckBox" Content="Batería" Margin="0,10,0,8" Checked="OnSelectionChanged" Unchecked="OnSelectionChanged" />
+                        <CheckBox x:Name="BassCheckBox" Content="Bajo" Margin="0,0,0,8" Checked="OnSelectionChanged" Unchecked="OnSelectionChanged" />
+                        <CheckBox x:Name="PianoCheckBox" Content="Piano y teclados" Margin="0,0,0,8" Checked="OnSelectionChanged" Unchecked="OnSelectionChanged" />
+                        <CheckBox x:Name="OtherCheckBox" Content="Otros" Checked="OnSelectionChanged" Unchecked="OnSelectionChanged" />
+                    </StackPanel>
+                </Border>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Style="{StaticResource CardStyle}" Padding="16">
+                        <StackPanel>
+                            <TextBlock Text="VOCES" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
+                            <CheckBox x:Name="LeadVocalCheckBox" Content="Voz principal" Margin="0,10,0,8" Checked="OnSelectionChanged" Unchecked="OnSelectionChanged" />
+                            <CheckBox x:Name="BackVocalCheckBox" Content="Coros" Checked="OnSelectionChanged" Unchecked="OnSelectionChanged" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="16">
+                        <StackPanel>
+                            <TextBlock Text="GUITARRAS · EXPERIMENTAL" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold" />
+                            <CheckBox x:Name="LeadGuitarCheckBox" Content="Guitarra solista" Margin="0,10,0,8" Checked="OnSelectionChanged" Unchecked="OnSelectionChanged" />
+                            <CheckBox x:Name="RhythmGuitarCheckBox" Content="Guitarra rítmica" Checked="OnSelectionChanged" Unchecked="OnSelectionChanged" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Grid Grid.Row="3" Margin="0,18,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Solo se añadirá una mezcla final a la biblioteca."
+                       Foreground="{StaticResource TextSecondary}"
+                       VerticalAlignment="Center" />
+            <Button Grid.Column="1"
+                    Style="{StaticResource SecondaryButton}"
+                    Content="Cancelar"
+                    Margin="12,0,8,0"
+                    Click="OnCancelClick" />
+            <Button x:Name="CreateButton"
+                    Grid.Column="2"
+                    Style="{StaticResource PrimaryButton}"
+                    Content="Crear mezcla"
+                    Click="OnCreateClick" />
+        </Grid>
+    </Grid>
+</Window>
