@@ -8,15 +8,30 @@ using NAudio.Wave.SampleProviders;
 
 namespace DrumPracticeStudio.Services;
 
-public sealed record AdvancedStemSeparationResult(
-    string LeadVocalPath,
-    string BackVocalPath,
-    string LeadGuitarPath,
-    string RhythmGuitarPath);
+public sealed record AdvancedStemSeparationResult(string MixedPath);
 
 public sealed class AdvancedStemSeparationService
 {
-    private const string CacheVersion = "advanced-demucs-v2";
+    private const string CacheVersion = "advanced-demucs-v3";
+
+    private static readonly string[] BaseStemFileNames =
+    [
+        "drums.wav",
+        "bass.wav",
+        "vocals.wav",
+        "guitar.wav",
+        "piano.wav",
+        "other.wav"
+    ];
+
+    private static readonly string[] AdvancedStemFileNames =
+    [
+        "lead-vocal.wav",
+        "back-vocal.wav",
+        "lead-guitar.wav",
+        "rhythm-guitar.wav"
+    ];
+
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public AdvancedStemSeparationService() => AppPaths.EnsureCreated();
@@ -76,143 +91,254 @@ public sealed class AdvancedStemSeparationService
     public async Task<AdvancedStemSeparationResult> CreateAsync(
         LocalTrack track,
         string outputDirectory,
+        AdvancedStemSelection selection,
         IProgress<DrumRemovalProgress> progress,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(track);
         ArgumentNullException.ThrowIfNull(progress);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
-
+        AdvancedStemMixPlan.Validate(selection);
         ValidateRequest(track);
-        await _gate.WaitAsync(cancellationToken);
 
+        await _gate.WaitAsync(cancellationToken);
         var jobRoot = Path.Combine(AppPaths.SeparationWork, $"advanced-{Guid.NewGuid():N}");
         Directory.CreateDirectory(jobRoot);
         try
         {
-            var normalizedInput = Path.Combine(jobRoot, "input.wav");
-            progress.Report(new DrumRemovalProgress(0.02d, "Preparando audio para separación avanzada"));
-            await NormalizeInputAsync(track.Path, normalizedInput, cancellationToken);
-
             var cacheRoot = GetCacheRoot(track.Path);
-            var cachedVocals = Path.Combine(cacheRoot, "vocals.wav");
-            var cachedGuitar = Path.Combine(cacheRoot, "guitar.wav");
-            string vocalsPath;
-            string guitarPath;
+            Directory.CreateDirectory(cacheRoot);
 
-            if (IsUsableStem(cachedVocals) && IsUsableStem(cachedGuitar))
-            {
-                vocalsPath = cachedVocals;
-                guitarPath = cachedGuitar;
-                progress.Report(new DrumRemovalProgress(
-                    0.34d,
-                    "Reutilizando voz y guitarra ya extraídas para esta canción"));
-            }
-            else
-            {
-                Directory.CreateDirectory(cacheRoot);
-                var demucsRoot = Path.Combine(jobRoot, "demucs");
-                var device = await DetectDemucsDeviceAsync(cancellationToken);
-                var cpuJobs = ResolveCpuJobs();
-                var engineLabel = device == "cuda"
-                    ? "GPU NVIDIA"
-                    : $"CPU · {cpuJobs} procesos paralelos";
-                progress.Report(new DrumRemovalProgress(
-                    0.06d,
-                    $"Extrayendo voz y guitarra · {engineLabel}"));
+            await EnsureBaseStemsAsync(
+                track,
+                cacheRoot,
+                jobRoot,
+                progress,
+                cancellationToken);
 
-                var demucs = BuildDemucsProcess(
-                    normalizedInput,
-                    demucsRoot,
-                    jobRoot,
-                    device,
-                    cpuJobs);
-                var demucsResult = await RunProcessAsync(
-                    demucs,
-                    line => progress.Report(ParseDemucsProgress(line, engineLabel)),
-                    cancellationToken);
-                if (demucsResult.ExitCode != 0)
+            if (AdvancedStemMixPlan.RequiresAdvancedSplit(selection))
+            {
+                if (!IsInstalled)
                 {
                     throw new InvalidOperationException(
-                        string.IsNullOrWhiteSpace(demucsResult.LastError)
-                            ? $"Demucs terminó con el código {demucsResult.ExitCode}."
-                            : $"Demucs falló: {demucsResult.LastError}");
+                        "El motor avanzado todavía no está instalado.");
                 }
 
-                var generatedVocals = FindStem(demucsRoot, "vocals.wav");
-                var generatedGuitar = FindStem(demucsRoot, "guitar.wav");
-                vocalsPath = StoreCachedStem(generatedVocals, cachedVocals);
-                guitarPath = StoreCachedStem(generatedGuitar, cachedGuitar);
-                progress.Report(new DrumRemovalProgress(
-                    0.34d,
-                    "Voz y guitarra guardadas; no se repetirán si el proceso falla después"));
+                await EnsureAdvancedStemsAsync(
+                    cacheRoot,
+                    jobRoot,
+                    progress,
+                    cancellationToken);
             }
 
-            var advancedRoot = Path.Combine(jobRoot, "advanced");
-            Directory.CreateDirectory(advancedRoot);
-            var script = Path.Combine(AppContext.BaseDirectory, "scripts", "advanced-separate.py");
-            if (!File.Exists(script))
-            {
-                throw new FileNotFoundException(
-                    "No se encontró el procesador de separación avanzada.",
-                    script);
-            }
-
-            var advanced = BuildAdvancedProcess(
-                script,
-                vocalsPath,
-                guitarPath,
-                advancedRoot,
-                jobRoot);
-            progress.Report(new DrumRemovalProgress(
-                0.35d,
-                "Separando voz principal, coros, guitarra solista y guitarra rítmica"));
-            var advancedResult = await RunProcessAsync(
-                advanced,
-                line =>
-                {
-                    var parsed = ParseAdvancedProgress(line);
-                    if (parsed is not null)
-                    {
-                        progress.Report(parsed);
-                    }
-                },
-                cancellationToken);
-            if (advancedResult.ExitCode != 0)
-            {
-                throw new InvalidOperationException(
-                    string.IsNullOrWhiteSpace(advancedResult.LastError)
-                        ? $"El motor avanzado terminó con el código {advancedResult.ExitCode}."
-                        : $"El motor avanzado falló: {advancedResult.LastError}");
-            }
-
+            var mixPaths = ResolveMixPaths(cacheRoot, selection);
             var resolvedOutputDirectory = Path.GetFullPath(outputDirectory);
             Directory.CreateDirectory(resolvedOutputDirectory);
             var safeTitle = SanitizeFileName(track.Title);
-            var leadVocal = CopyResult(
-                FindStem(advancedRoot, "lead-vocal.wav"),
-                CreateUniqueDestination(resolvedOutputDirectory, safeTitle, "voz-principal"));
-            var backVocal = CopyResult(
-                FindStem(advancedRoot, "back-vocal.wav"),
-                CreateUniqueDestination(resolvedOutputDirectory, safeTitle, "coros"));
-            var leadGuitar = CopyResult(
-                FindStem(advancedRoot, "lead-guitar.wav"),
-                CreateUniqueDestination(resolvedOutputDirectory, safeTitle, "guitarra-solista-experimental"));
-            var rhythmGuitar = CopyResult(
-                FindStem(advancedRoot, "rhythm-guitar.wav"),
-                CreateUniqueDestination(resolvedOutputDirectory, safeTitle, "guitarra-ritmica-experimental"));
+            var destination = CreateUniqueDestination(
+                resolvedOutputDirectory,
+                safeTitle,
+                $"mezcla-avanzada-{AdvancedStemMixPlan.FileSuffix(selection)}");
 
-            progress.Report(new DrumRemovalProgress(1d, "Separación avanzada terminada"));
-            return new AdvancedStemSeparationResult(
-                leadVocal,
-                backVocal,
-                leadGuitar,
-                rhythmGuitar);
+            progress.Report(new DrumRemovalProgress(
+                0.98d,
+                $"Creando archivo final · {AdvancedStemMixPlan.Describe(selection)}"));
+            await StemAudioMixer.MixFilesAsync(mixPaths, destination, cancellationToken);
+            progress.Report(new DrumRemovalProgress(1d, "Mezcla avanzada terminada"));
+            return new AdvancedStemSeparationResult(destination);
         }
         finally
         {
             SafeDeleteJob(jobRoot);
             _gate.Release();
+        }
+    }
+
+    private static async Task EnsureBaseStemsAsync(
+        LocalTrack track,
+        string cacheRoot,
+        string jobRoot,
+        IProgress<DrumRemovalProgress> progress,
+        CancellationToken cancellationToken)
+    {
+        var cachedPaths = BaseStemFileNames
+            .ToDictionary(fileName => fileName, fileName => Path.Combine(cacheRoot, fileName));
+        if (cachedPaths.Values.All(IsUsableStem))
+        {
+            progress.Report(new DrumRemovalProgress(
+                0.34d,
+                "Reutilizando stems base ya extraídos para esta canción"));
+            return;
+        }
+
+        var normalizedInput = Path.Combine(jobRoot, "input.wav");
+        progress.Report(new DrumRemovalProgress(0.02d, "Preparando audio para separación avanzada"));
+        await NormalizeInputAsync(track.Path, normalizedInput, cancellationToken);
+
+        var demucsRoot = Path.Combine(jobRoot, "demucs");
+        var device = await DetectDemucsDeviceAsync(cancellationToken);
+        var cpuJobs = ResolveCpuJobs();
+        var engineLabel = device == "cuda"
+            ? "GPU NVIDIA"
+            : $"CPU · {cpuJobs} procesos paralelos";
+        progress.Report(new DrumRemovalProgress(
+            0.06d,
+            $"Extrayendo stems base · {engineLabel}"));
+
+        var demucs = BuildDemucsProcess(
+            normalizedInput,
+            demucsRoot,
+            jobRoot,
+            device,
+            cpuJobs);
+        var demucsResult = await RunProcessAsync(
+            demucs,
+            line => progress.Report(ParseDemucsProgress(line, engineLabel)),
+            cancellationToken);
+        if (demucsResult.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(demucsResult.LastError)
+                    ? $"Demucs terminó con el código {demucsResult.ExitCode}."
+                    : $"Demucs falló: {demucsResult.LastError}");
+        }
+
+        foreach (var fileName in BaseStemFileNames)
+        {
+            StoreCachedStem(
+                FindStem(demucsRoot, fileName),
+                cachedPaths[fileName]);
+        }
+
+        progress.Report(new DrumRemovalProgress(
+            0.34d,
+            "Stems base guardados; no se repetirán para esta canción"));
+    }
+
+    private static async Task EnsureAdvancedStemsAsync(
+        string cacheRoot,
+        string jobRoot,
+        IProgress<DrumRemovalProgress> progress,
+        CancellationToken cancellationToken)
+    {
+        var cachedAdvanced = AdvancedStemFileNames
+            .ToDictionary(fileName => fileName, fileName => Path.Combine(cacheRoot, fileName));
+        if (cachedAdvanced.Values.All(IsUsableStem))
+        {
+            progress.Report(new DrumRemovalProgress(
+                0.96d,
+                "Reutilizando voz y guitarras avanzadas ya separadas"));
+            return;
+        }
+
+        var script = Path.Combine(AppContext.BaseDirectory, "scripts", "advanced-separate.py");
+        if (!File.Exists(script))
+        {
+            throw new FileNotFoundException(
+                "No se encontró el procesador de separación avanzada.",
+                script);
+        }
+
+        var advancedRoot = Path.Combine(jobRoot, "advanced");
+        Directory.CreateDirectory(advancedRoot);
+        var advanced = BuildAdvancedProcess(
+            script,
+            Path.Combine(cacheRoot, "vocals.wav"),
+            Path.Combine(cacheRoot, "guitar.wav"),
+            advancedRoot,
+            jobRoot);
+
+        progress.Report(new DrumRemovalProgress(
+            0.35d,
+            "Separando voz principal, coros, guitarra solista y guitarra rítmica"));
+        var advancedResult = await RunProcessAsync(
+            advanced,
+            line =>
+            {
+                var parsed = ParseAdvancedProgress(line);
+                if (parsed is not null)
+                {
+                    progress.Report(parsed);
+                }
+            },
+            cancellationToken);
+        if (advancedResult.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(advancedResult.LastError)
+                    ? $"El motor avanzado terminó con el código {advancedResult.ExitCode}."
+                    : $"El motor avanzado falló: {advancedResult.LastError}");
+        }
+
+        foreach (var fileName in AdvancedStemFileNames)
+        {
+            StoreCachedStem(
+                FindStem(advancedRoot, fileName),
+                cachedAdvanced[fileName]);
+        }
+
+        progress.Report(new DrumRemovalProgress(
+            0.96d,
+            "Stems avanzados guardados en caché privada"));
+    }
+
+    private static IReadOnlyList<string> ResolveMixPaths(
+        string cacheRoot,
+        AdvancedStemSelection selection)
+    {
+        var paths = new List<string>();
+        AddIfSelected(paths, cacheRoot, selection, AdvancedStemSelection.Drums, "drums.wav");
+        AddIfSelected(paths, cacheRoot, selection, AdvancedStemSelection.Bass, "bass.wav");
+        AddIfSelected(paths, cacheRoot, selection, AdvancedStemSelection.Piano, "piano.wav");
+        AddIfSelected(paths, cacheRoot, selection, AdvancedStemSelection.Other, "other.wav");
+
+        var keepLeadVocal = selection.HasFlag(AdvancedStemSelection.LeadVocal);
+        var keepBackVocal = selection.HasFlag(AdvancedStemSelection.BackVocal);
+        if (keepLeadVocal && keepBackVocal)
+        {
+            paths.Add(Path.Combine(cacheRoot, "vocals.wav"));
+        }
+        else if (keepLeadVocal)
+        {
+            paths.Add(Path.Combine(cacheRoot, "lead-vocal.wav"));
+        }
+        else if (keepBackVocal)
+        {
+            paths.Add(Path.Combine(cacheRoot, "back-vocal.wav"));
+        }
+
+        var keepLeadGuitar = selection.HasFlag(AdvancedStemSelection.LeadGuitar);
+        var keepRhythmGuitar = selection.HasFlag(AdvancedStemSelection.RhythmGuitar);
+        if (keepLeadGuitar && keepRhythmGuitar)
+        {
+            paths.Add(Path.Combine(cacheRoot, "guitar.wav"));
+        }
+        else if (keepLeadGuitar)
+        {
+            paths.Add(Path.Combine(cacheRoot, "lead-guitar.wav"));
+        }
+        else if (keepRhythmGuitar)
+        {
+            paths.Add(Path.Combine(cacheRoot, "rhythm-guitar.wav"));
+        }
+
+        foreach (var path in paths)
+        {
+            StemAudioMixer.ValidateWave(path);
+        }
+        return paths;
+    }
+
+    private static void AddIfSelected(
+        ICollection<string> paths,
+        string cacheRoot,
+        AdvancedStemSelection selection,
+        AdvancedStemSelection stem,
+        string fileName)
+    {
+        if (selection.HasFlag(stem))
+        {
+            paths.Add(Path.Combine(cacheRoot, fileName));
         }
     }
 
@@ -441,13 +567,13 @@ public sealed class AdvancedStemSeparationService
             {
                 return new DrumRemovalProgress(
                     0.06d + (Math.Clamp(percent, 0d, 100d) / 100d * 0.28d),
-                    $"Extrayendo voz y guitarra · {engineLabel} · {percent:0}%");
+                    $"Extrayendo stems base · {engineLabel} · {percent:0}%");
             }
         }
         return new DrumRemovalProgress(
             null,
             string.IsNullOrWhiteSpace(cleaned)
-                ? $"Extrayendo voz y guitarra · {engineLabel}"
+                ? $"Extrayendo stems base · {engineLabel}"
                 : cleaned);
     }
 
@@ -471,7 +597,7 @@ public sealed class AdvancedStemSeparationService
             if (root.TryGetProperty("percent", out var percentElement) &&
                 percentElement.TryGetDouble(out var value))
             {
-                percent = 0.34d + (Math.Clamp(value, 0d, 1d) * 0.64d);
+                percent = 0.34d + (Math.Clamp(value, 0d, 1d) * 0.62d);
             }
             return new DrumRemovalProgress(percent, message);
         }
@@ -484,14 +610,6 @@ public sealed class AdvancedStemSeparationService
     private static string FindStem(string root, string fileName) =>
         Directory.EnumerateFiles(root, fileName, SearchOption.AllDirectories).FirstOrDefault()
         ?? throw new InvalidDataException($"No se produjo el stem {fileName} esperado.");
-
-    private static string CopyResult(string source, string destination)
-    {
-        StemAudioMixer.ValidateWave(source);
-        File.Copy(source, destination, overwrite: false);
-        StemAudioMixer.ValidateWave(destination);
-        return destination;
-    }
 
     private static string CreateUniqueDestination(string directory, string title, string suffix)
     {
