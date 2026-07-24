@@ -12,33 +12,53 @@ public sealed partial class MainViewModel
     private RelayCommand? _createAdvancedStemsCommand;
 
     public RelayCommand CreateAdvancedStemsCommand =>
-        _createAdvancedStemsCommand ??= new RelayCommand(() => _ = CreateAdvancedStemsAsync());
+        _createAdvancedStemsCommand ??= new RelayCommand(ExecuteCreateAdvancedStems);
 
     public string AdvancedSeparationLabel =>
         "Mezcla avanzada con voz principal/coros y guitarra solista/rítmica";
 
+    private async void ExecuteCreateAdvancedStems()
+    {
+        try
+        {
+            await CreateAdvancedStemsAsync();
+        }
+        catch (Exception exception)
+        {
+            RemovalStatus = $"Error al abrir la separación avanzada: {exception.Message}";
+            StatusMessage = "No se pudo abrir la separación avanzada";
+            MessageBox.Show(
+                exception.ToString(),
+                "Separación avanzada · error al abrir",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
     private async Task CreateAdvancedStemsAsync()
     {
-        if (CurrentTrack is null)
-        {
-            StatusMessage = "Primero importa una pista local";
-            return;
-        }
-        if (CurrentTrack.Variant != TrackVariant.Original)
-        {
-            StatusMessage = "La separación avanzada necesita la pista original";
-            return;
-        }
-        if (CurrentTrack.IsMissing || !File.Exists(CurrentTrack.Path))
-        {
-            CurrentTrack.IsMissing = true;
-            RefreshLibraryPresentation();
-            SaveTrackWorkspace();
-            StatusMessage = "El archivo original ha desaparecido; no se puede separar";
-            return;
-        }
         if (IsRemovingDrums)
         {
+            ShowAdvancedMessage(
+                "Ya hay una separación de audio en curso. Espera a que termine o cancélala antes de iniciar otra.");
+            return;
+        }
+
+        var sourceTrack = ResolveAdvancedSourceTrack();
+        if (sourceTrack is null)
+        {
+            ShowAdvancedMessage(
+                "Carga o selecciona en la biblioteca una pista original. " +
+                "Las pistas generadas, los coros o las mezclas anteriores no sirven como origen de una nueva separación avanzada.");
+            return;
+        }
+
+        if (sourceTrack.IsMissing || !File.Exists(sourceTrack.Path))
+        {
+            sourceTrack.IsMissing = true;
+            RefreshLibraryPresentation();
+            SaveTrackWorkspace();
+            ShowAdvancedMessage("El archivo original ya no existe en el disco.");
             return;
         }
 
@@ -54,7 +74,6 @@ public sealed partial class MainViewModel
 
         var advancedSelection = selectionDialog.Selection;
         var requiresAdvancedEngine = AdvancedStemMixPlan.RequiresAdvancedSplit(advancedSelection);
-        var sourceTrack = CurrentTrack;
         _drumRemovalCancellation = new CancellationTokenSource();
         var cancellationToken = _drumRemovalCancellation.Token;
         var progress = new Progress<DrumRemovalProgress>(UpdateRemovalProgress);
@@ -148,7 +167,7 @@ public sealed partial class MainViewModel
             RemovalStatus = $"Error: {exception.Message}";
             StatusMessage = "No se pudo completar la separación avanzada";
             MessageBox.Show(
-                exception.Message,
+                exception.ToString(),
                 "Separación avanzada",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -160,5 +179,27 @@ public sealed partial class MainViewModel
             _drumRemovalCancellation?.Dispose();
             _drumRemovalCancellation = null;
         }
+    }
+
+    private LocalTrack? ResolveAdvancedSourceTrack()
+    {
+        if (CurrentTrack is { Variant: TrackVariant.Original } current)
+        {
+            return current;
+        }
+
+        return SelectedLibraryTrack is { Variant: TrackVariant.Original } selected
+            ? selected
+            : null;
+    }
+
+    private void ShowAdvancedMessage(string message)
+    {
+        StatusMessage = message;
+        MessageBox.Show(
+            message,
+            "Separación avanzada",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
     }
 }
