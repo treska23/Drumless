@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import math
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 import librosa
@@ -19,6 +23,78 @@ def report(message: str, percent: float | None = None) -> None:
     if percent is not None:
         payload["percent"] = max(0.0, min(1.0, float(percent)))
     print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def ensure_private_ffmpeg() -> Path:
+    """Makes a private ffmpeg.exe available without changing the user's Windows PATH."""
+    install_root = Path(sys.executable).resolve().parents[2]
+    uv_exe = install_root / "uv" / "uv.exe"
+    ffmpeg_dir = install_root / "ffmpeg"
+    ffmpeg_target = ffmpeg_dir / "ffmpeg.exe"
+
+    try:
+        import imageio_ffmpeg
+    except ModuleNotFoundError:
+        report("Preparando FFmpeg local para el motor avanzado", 0.01)
+        if not uv_exe.is_file():
+            raise FileNotFoundError(
+                f"No se encontró uv.exe para instalar FFmpeg en {uv_exe}"
+            )
+        result = subprocess.run(
+            [
+                str(uv_exe),
+                "pip",
+                "install",
+                "--python",
+                sys.executable,
+                "imageio-ffmpeg==0.6.0",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "error desconocido").strip()
+            raise RuntimeError(f"No se pudo instalar FFmpeg local: {detail}")
+        importlib.invalidate_caches()
+        import imageio_ffmpeg
+
+    ffmpeg_source = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
+    if not ffmpeg_source.is_file():
+        raise FileNotFoundError(
+            f"imageio-ffmpeg no encontró su ejecutable: {ffmpeg_source}"
+        )
+
+    ffmpeg_dir.mkdir(parents=True, exist_ok=True)
+    if (
+        not ffmpeg_target.is_file()
+        or ffmpeg_target.stat().st_size != ffmpeg_source.stat().st_size
+    ):
+        shutil.copy2(ffmpeg_source, ffmpeg_target)
+
+    current_path = os.environ.get("PATH", "")
+    ffmpeg_dir_text = str(ffmpeg_dir)
+    if ffmpeg_dir_text.lower() not in current_path.lower().split(os.pathsep):
+        os.environ["PATH"] = ffmpeg_dir_text + os.pathsep + current_path
+    os.environ["IMAGEIO_FFMPEG_EXE"] = str(ffmpeg_target)
+    os.environ["FFMPEG_BINARY"] = str(ffmpeg_target)
+
+    check = subprocess.run(
+        [str(ffmpeg_target), "-version"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if check.returncode != 0:
+        detail = (check.stderr or check.stdout or "error desconocido").strip()
+        raise RuntimeError(f"El FFmpeg privado no puede ejecutarse: {detail}")
+
+    report("FFmpeg local preparado", 0.03)
+    return ffmpeg_target
 
 
 def ensure_stereo(audio: np.ndarray) -> np.ndarray:
@@ -262,6 +338,7 @@ def main() -> int:
     if not args.guitar.is_file():
         raise FileNotFoundError(args.guitar)
 
+    ensure_private_ffmpeg()
     lead_vocal, back_vocal = split_vocals(args.vocals, args.output, args.models)
     report("Voz principal y coros preparados", 0.50)
     lead_guitar, rhythm_guitar = split_guitar(args.guitar, args.output)
@@ -289,5 +366,10 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:
-        print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr, flush=True)
-        raise
+        traceback.print_exc()
+        print(
+            f"ERROR: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise SystemExit(1)
