@@ -2,6 +2,7 @@ using System.Windows;
 using DrumPracticeStudio.Infrastructure;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
+using DrumPracticeStudio.Views;
 
 namespace DrumPracticeStudio.ViewModels;
 
@@ -14,7 +15,7 @@ public sealed partial class MainViewModel
         _createAdvancedStemsCommand ??= new RelayCommand(() => _ = CreateAdvancedStemsAsync());
 
     public string AdvancedSeparationLabel =>
-        "Voz principal + coros + guitarra solista/rítmica";
+        "Mezcla avanzada con voz principal/coros y guitarra solista/rítmica";
 
     private async Task CreateAdvancedStemsAsync()
     {
@@ -41,6 +42,17 @@ public sealed partial class MainViewModel
             return;
         }
 
+        var initialSelection = AdvancedStemMixPlan.FromStandardSelection(SelectedStemSelection);
+        var selectionDialog = new AdvancedStemSelectionDialog(initialSelection)
+        {
+            Owner = Application.Current?.MainWindow
+        };
+        if (selectionDialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var advancedSelection = selectionDialog.Selection;
         var sourceTrack = CurrentTrack;
         _drumRemovalCancellation = new CancellationTokenSource();
         var cancellationToken = _drumRemovalCancellation.Token;
@@ -56,7 +68,7 @@ public sealed partial class MainViewModel
             if (!_drumRemoval.IsInstalled)
             {
                 var answer = MessageBox.Show(
-                    "La separación avanzada necesita primero Demucs para aislar la voz y la guitarra completas. " +
+                    "La separación avanzada necesita primero Demucs para aislar los grupos principales. " +
                     "Se instalará en la carpeta privada de Drumless y no modificará el Python del sistema.\n\n¿Instalar Demucs ahora?",
                     "Instalar separación base",
                     MessageBoxButton.YesNo,
@@ -75,10 +87,8 @@ public sealed partial class MainViewModel
             if (!_advancedStemSeparation.IsInstalled)
             {
                 var answer = MessageBox.Show(
-                    "Para separar voz principal/coros se instalará Audio Separator 0.44.5 con el ensemble UVR Karaoke. " +
-                    "También se instalará el analizador local de guitarra solista/rítmica.\n\n" +
-                    "La primera instalación y la primera descarga de modelos pueden ocupar varios GB y tardar bastante en CPU. " +
-                    "Todo queda aislado dentro de Drumless.\n\n¿Instalar ahora?",
+                    "Para dividir voz principal/coros y guitarra solista/rítmica se instalará el motor avanzado. " +
+                    "La instalación y la primera descarga de modelos se realizan una sola vez y quedan dentro de Drumless.\n\n¿Instalar ahora?",
                     "Instalar separación avanzada",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Information);
@@ -96,33 +106,35 @@ public sealed partial class MainViewModel
             _desiredTrackPlaying = false;
             _activeRunGeneration = 0;
             _audio.StopTrack();
-            StatusMessage = $"Separación avanzada de {sourceTrack.Title}…";
-            RemovalStatus = "Preparando voz principal, coros y guitarras";
+            var description = AdvancedStemMixPlan.Describe(advancedSelection);
+            StatusMessage = $"Creando mezcla avanzada de {sourceTrack.Title}…";
+            RemovalStatus = $"Archivo final: {description}";
 
             var result = await _advancedStemSeparation.CreateAsync(
                 sourceTrack,
                 OutputFolderPath,
+                advancedSelection,
                 progress,
                 cancellationToken);
 
-            _trackLibrary.RegisterGenerated(
-                result.LeadVocalPath,
-                $"{sourceTrack.Title} · voz principal");
-            _trackLibrary.RegisterGenerated(
-                result.BackVocalPath,
-                $"{sourceTrack.Title} · coros");
-            _trackLibrary.RegisterGenerated(
-                result.LeadGuitarPath,
-                $"{sourceTrack.Title} · guitarra solista · experimental");
-            _trackLibrary.RegisterGenerated(
-                result.RhythmGuitarPath,
-                $"{sourceTrack.Title} · guitarra rítmica · experimental");
-
+            var generatedTrack = _trackLibrary.RegisterGenerated(
+                result.MixedPath,
+                $"{sourceTrack.Title} · {description}");
             SaveTrackWorkspace();
             RefreshLibraryPresentation();
+
+            if (CurrentTrack?.Id == sourceTrack.Id)
+            {
+                await LoadAndSelectTrackAsync(
+                    generatedTrack,
+                    autoPlay: false,
+                    resetNavigation: true,
+                    cancellationToken);
+            }
+
             RemovalProgress = 1d;
-            RemovalStatus = "4 stems avanzados creados y añadidos a la biblioteca";
-            StatusMessage = "Listas: voz principal, coros, guitarra solista y guitarra rítmica";
+            RemovalStatus = $"Mezcla avanzada creada · {description}";
+            StatusMessage = $"Lista: {generatedTrack.Title}";
         }
         catch (OperationCanceledException)
         {
