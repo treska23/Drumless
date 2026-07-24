@@ -22,8 +22,27 @@ public static class StemAudioMixer
                 .FirstOrDefault() ?? throw new InvalidDataException(
                     $"Demucs no produjo el stem {fileName} esperado."))
             .ToArray();
+
+        await MixFilesAsync(stemPaths, destination, cancellationToken);
+    }
+
+    public static async Task MixFilesAsync(
+        IReadOnlyCollection<string> stemPaths,
+        string destination,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stemPaths);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        if (stemPaths.Count == 0)
+        {
+            throw new ArgumentException(
+                "Selecciona al menos un stem para crear el archivo final.",
+                nameof(stemPaths));
+        }
+
         foreach (var stemPath in stemPaths)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(stemPath);
             ValidateWave(stemPath);
         }
 
@@ -37,7 +56,7 @@ public static class StemAudioMixer
                 if (readers.Any(reader => !reader.WaveFormat.Equals(format)))
                 {
                     throw new InvalidDataException(
-                        "Los stems de Demucs no comparten el mismo formato de audio.");
+                        "Los stems seleccionados no comparten el mismo formato de audio.");
                 }
 
                 var mixer = new MixingSampleProvider(readers) { ReadFully = false };
