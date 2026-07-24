@@ -15,6 +15,7 @@ public sealed partial class MainViewModel
                 RemoveLibrarySelectionWithDeletePrompt([track]);
             }
         });
+        OnPropertyChanged(nameof(RemoveLibraryTrackCommand));
     }
 
     public void RemoveLibrarySelectionWithDeletePrompt(IReadOnlyList<LocalTrack> tracks)
