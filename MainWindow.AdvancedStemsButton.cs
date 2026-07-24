@@ -45,14 +45,17 @@ public partial class MainWindow
 
         var advancedButton = new Button
         {
-            Content = "Separación avanzada",
+            Content = "Crear mezcla avanzada",
             Padding = new Thickness(12, 8, 12, 8),
-            ToolTip = "Crea voz principal, coros, guitarra solista y guitarra rítmica. La guitarra es experimental."
+            ToolTip = "Elige qué conservar: voz principal, coros, guitarra solista, guitarra rítmica y los stems base. Solo se añade la mezcla final."
         };
         advancedButton.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryButton");
         advancedButton.SetBinding(
             Button.CommandProperty,
             new Binding("CreateAdvancedStemsCommand"));
+        advancedButton.SetBinding(
+            IsEnabledProperty,
+            new Binding("CanCreateDrumless"));
         AutomationProperties.SetAutomationId(advancedButton, "CreateAdvancedStemsButton");
         buttons.Children.Add(advancedButton);
         parent.Children.Add(buttons);
