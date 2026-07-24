@@ -53,6 +53,7 @@ public sealed partial class MainViewModel
         }
 
         var advancedSelection = selectionDialog.Selection;
+        var requiresAdvancedEngine = AdvancedStemMixPlan.RequiresAdvancedSplit(advancedSelection);
         var sourceTrack = CurrentTrack;
         _drumRemovalCancellation = new CancellationTokenSource();
         var cancellationToken = _drumRemovalCancellation.Token;
@@ -84,10 +85,11 @@ public sealed partial class MainViewModel
                 RemovalEngineStatus = "Demucs local preparado";
             }
 
-            if (!_advancedStemSeparation.IsInstalled)
+            if (requiresAdvancedEngine && !_advancedStemSeparation.IsInstalled)
             {
                 var answer = MessageBox.Show(
-                    "Para dividir voz principal/coros y guitarra solista/rítmica se instalará el motor avanzado. " +
+                    "Has elegido conservar solo una parte de las voces o de las guitarras. " +
+                    "Para distinguir voz principal/coros o guitarra solista/rítmica se instalará el motor avanzado. " +
                     "La instalación y la primera descarga de modelos se realizan una sola vez y quedan dentro de Drumless.\n\n¿Instalar ahora?",
                     "Instalar separación avanzada",
                     MessageBoxButton.YesNo,
