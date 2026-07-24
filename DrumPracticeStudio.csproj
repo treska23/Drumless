@@ -27,6 +27,8 @@
 
   <ItemGroup>
     <Content Include="scripts\setup-demucs.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="scripts\setup-advanced-separation.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="scripts\advanced-separate.py" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
