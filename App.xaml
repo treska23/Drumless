@@ -196,5 +196,75 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style x:Key="MixerKnob" TargetType="Slider">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="IsMoveToPointEnabled" Value="True" />
+            <Setter Property="Width" Value="68" />
+            <Setter Property="Height" Value="68" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Width="68" Height="68">
+                            <Ellipse Margin="4"
+                                     Fill="#171C25"
+                                     Stroke="#596170"
+                                     StrokeThickness="2" />
+                            <Ellipse Margin="11"
+                                     Fill="#222936"
+                                     Stroke="#303746"
+                                     StrokeThickness="1" />
+                            <Border Width="3"
+                                    Height="23"
+                                    Margin="0,8,0,0"
+                                    Background="{StaticResource Accent}"
+                                    CornerRadius="1.5"
+                                    VerticalAlignment="Top"
+                                    RenderTransformOrigin="0.5,1">
+                                <Border.RenderTransform>
+                                    <RotateTransform>
+                                        <RotateTransform.Angle>
+                                            <MultiBinding Converter="{StaticResource SliderValueToAngle}">
+                                                <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="Value" />
+                                                <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="Minimum" />
+                                                <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="Maximum" />
+                                            </MultiBinding>
+                                        </RotateTransform.Angle>
+                                    </RotateTransform>
+                                </Border.RenderTransform>
+                            </Border>
+                            <Ellipse Width="9" Height="9"
+                                     Fill="{StaticResource Accent}"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center" />
+                            <Track x:Name="PART_Track"
+                                   Margin="5,0"
+                                   Orientation="Horizontal"
+                                   Opacity="0">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  Background="Transparent"
+                                                  BorderThickness="0" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="12" Height="68" />
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  Background="Transparent"
+                                                  BorderThickness="0" />
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Application.Resources>
 </Application>
