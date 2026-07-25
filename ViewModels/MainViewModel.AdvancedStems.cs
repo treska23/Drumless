@@ -28,7 +28,7 @@ public sealed partial class MainViewModel
             RemovalStatus = $"Error al abrir la separación avanzada: {exception.Message}";
             StatusMessage = "No se pudo abrir la separación avanzada";
             MessageBox.Show(
-                exception.ToString(),
+                exception.Message,
                 "Separación avanzada · error al abrir",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
@@ -167,7 +167,7 @@ public sealed partial class MainViewModel
             RemovalStatus = $"Error: {exception.Message}";
             StatusMessage = "No se pudo completar la separación avanzada";
             MessageBox.Show(
-                exception.ToString(),
+                exception.Message,
                 "Separación avanzada",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
