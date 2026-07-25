@@ -71,7 +71,7 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
-        EnsurePythonCompatibilityPath();
+        EnsureDemucsCliCompatibility();
         EnsureSafeMixerKnobStyle();
         FreezeThemeBrushes();
         ShutdownMode = ShutdownMode.OnMainWindowClose;
@@ -80,36 +80,56 @@ public partial class App : Application
         mainWindow.Show();
     }
 
-    private static void EnsurePythonCompatibilityPath()
+    private static void EnsureDemucsCliCompatibility()
     {
-        // Los procesos Python heredan PYTHONPATH. sitecustomize.py normaliza únicamente
-        // argumentos incompatibles entre versiones de Demucs, por ejemplo --segment 7.8
-        // cuando la versión instalada exige un entero.
-        var scriptsDirectory = Path.Combine(AppContext.BaseDirectory, "scripts");
-        var compatibilityScript = Path.Combine(scriptsDirectory, "sitecustomize.py");
-        if (!File.Exists(compatibilityScript))
+        // Demucs 4.0.1 declara --segment como entero. Algunas configuraciones del modelo usan
+        // 7.8 segundos, por lo que adaptamos el parser local para convertir ese decimal a 7.
+        // Solo se modifica la instalación privada de Drumless y el cambio es idempotente.
+        try
         {
-            return;
-        }
+            var pythonDirectory = Path.GetDirectoryName(AppPaths.SeparationPython);
+            var virtualEnvironment = string.IsNullOrWhiteSpace(pythonDirectory)
+                ? null
+                : Directory.GetParent(pythonDirectory)?.FullName;
+            if (string.IsNullOrWhiteSpace(virtualEnvironment))
+            {
+                return;
+            }
 
-        var current = Environment.GetEnvironmentVariable("PYTHONPATH");
-        var paths = string.IsNullOrWhiteSpace(current)
-            ? Array.Empty<string>()
-            : current.Split(
-                Path.PathSeparator,
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (paths.Any(path => string.Equals(
-                Path.GetFullPath(path),
-                Path.GetFullPath(scriptsDirectory),
-                StringComparison.OrdinalIgnoreCase)))
+            var separateModule = Path.Combine(
+                virtualEnvironment,
+                "Lib",
+                "site-packages",
+                "demucs",
+                "separate.py");
+            if (!File.Exists(separateModule))
+            {
+                return;
+            }
+
+            const string original = "split_group.add_argument(\"--segment\", type=int,";
+            const string compatible =
+                "split_group.add_argument(\"--segment\", type=lambda value: int(float(value)),";
+            var source = File.ReadAllText(separateModule);
+            if (source.Contains(compatible, StringComparison.Ordinal) ||
+                !source.Contains(original, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            File.WriteAllText(
+                separateModule,
+                source.Replace(original, compatible, StringComparison.Ordinal));
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            NotSupportedException)
         {
-            return;
+            // La aplicación puede seguir arrancando. Si la instalación no permite el parche,
+            // la separación avanzada mostrará el error concreto de Demucs al ejecutarse.
         }
-
-        var updated = string.IsNullOrWhiteSpace(current)
-            ? scriptsDirectory
-            : scriptsDirectory + Path.PathSeparator + current;
-        Environment.SetEnvironmentVariable("PYTHONPATH", updated);
     }
 
     private void EnsureSafeMixerKnobStyle()
