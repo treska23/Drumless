@@ -71,12 +71,43 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
+        EnsurePythonCompatibilityPath();
         EnsureSafeMixerKnobStyle();
         FreezeThemeBrushes();
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         var mainWindow = new MainWindow();
         MainWindow = mainWindow;
         mainWindow.Show();
+    }
+
+    private static void EnsurePythonCompatibilityPath()
+    {
+        // Los procesos Python heredan PYTHONPATH. sitecustomize.py normaliza únicamente
+        // argumentos incompatibles entre versiones de Demucs, por ejemplo --segment 7.8
+        // cuando la versión instalada exige un entero.
+        var scriptsDirectory = Path.Combine(AppContext.BaseDirectory, "scripts");
+        var compatibilityScript = Path.Combine(scriptsDirectory, "sitecustomize.py");
+        if (!File.Exists(compatibilityScript))
+        {
+            return;
+        }
+
+        var current = Environment.GetEnvironmentVariable("PYTHONPATH");
+        var paths = string.IsNullOrWhiteSpace(current)
+            ? []
+            : current.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (paths.Any(path => string.Equals(
+                Path.GetFullPath(path),
+                Path.GetFullPath(scriptsDirectory),
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var updated = string.IsNullOrWhiteSpace(current)
+            ? scriptsDirectory
+            : scriptsDirectory + Path.PathSeparator + current;
+        Environment.SetEnvironmentVariable("PYTHONPATH", updated);
     }
 
     private void EnsureSafeMixerKnobStyle()
