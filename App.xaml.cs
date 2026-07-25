@@ -94,8 +94,10 @@ public partial class App : Application
 
         var current = Environment.GetEnvironmentVariable("PYTHONPATH");
         var paths = string.IsNullOrWhiteSpace(current)
-            ? []
-            : current.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            ? Array.Empty<string>()
+            : current.Split(
+                Path.PathSeparator,
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (paths.Any(path => string.Equals(
                 Path.GetFullPath(path),
                 Path.GetFullPath(scriptsDirectory),
