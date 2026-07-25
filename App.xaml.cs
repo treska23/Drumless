@@ -1,6 +1,8 @@
 ﻿using System.Reflection;
 using System.Runtime.Loader;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using DrumPracticeStudio.Services;
 
@@ -69,11 +71,27 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
+        EnsureSafeMixerKnobStyle();
         FreezeThemeBrushes();
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         var mainWindow = new MainWindow();
         MainWindow = mainWindow;
         mainWindow.Show();
+    }
+
+    private void EnsureSafeMixerKnobStyle()
+    {
+        // La plantilla XAML original del mando usa recursos anidados y puede fallar al resolverse
+        // durante InitializeComponent. Sustituimos el recurso antes de construir MainWindow por un
+        // estilo funcional que nunca depende de StaticResource internos. Así un fallo cosmético no
+        // puede impedir que arranque toda la aplicación.
+        var style = new Style(typeof(Slider));
+        style.Setters.Add(new Setter(Slider.OrientationProperty, Orientation.Horizontal));
+        style.Setters.Add(new Setter(Slider.IsMoveToPointEnabledProperty, true));
+        style.Setters.Add(new Setter(FrameworkElement.WidthProperty, 96d));
+        style.Setters.Add(new Setter(FrameworkElement.HeightProperty, 28d));
+        style.Setters.Add(new Setter(FrameworkElement.CursorProperty, Cursors.Hand));
+        Resources["MixerKnob"] = style;
     }
 
     private static void EnsureWindowsAudioAssembliesLoaded()
