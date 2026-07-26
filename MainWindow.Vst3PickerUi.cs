@@ -147,10 +147,10 @@ public partial class MainWindow
             ApplyVst3PickerFilter(comboBox, null);
         };
 
-        comboBox.Unloaded += (_, _) =>
-        {
-            Vst3PickerSearchStates.Remove(comboBox);
-        };
+        // No eliminamos el estado en Unloaded. ObservableCollection.Move puede descargar y volver a
+        // cargar el mismo ComboBox sin retirar del panel el buscador que ya se inyectó. Si borramos
+        // aquí la marca, el siguiente Loaded añade un segundo buscador. ConditionalWeakTable no
+        // mantiene vivo el ComboBox: cuando WPF destruya realmente el control, la entrada desaparecerá.
 
         RestoreExplicitVst3Selection(comboBox, slot, explicitReference);
     }
