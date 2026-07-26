@@ -143,8 +143,13 @@
                         Command="{Binding CancelSongEffectAnalysisCommand}" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Style="{StaticResource SecondaryButton}"
+                        Content="Guardar configuración actual"
+                        Command="{Binding SaveCurrentSongEffectConfigurationCommand}"
+                        AutomationProperties.AutomationId="SaveCurrentSongEffectConfigurationDialogButton" />
                 <Button Style="{StaticResource PrimaryButton}"
                         Content="Aplicar y guardar"
+                        Margin="8,0,0,0"
                         IsEnabled="{Binding HasProposedSongEffectProfile}"
                         Command="{Binding ApplySongEffectProfileCommand}"
                         AutomationProperties.AutomationId="ApplySongEffectsButton" />
