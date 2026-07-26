@@ -8,12 +8,14 @@ namespace DrumPracticeStudio;
 public partial class MainWindow
 {
     private bool _advancedStemButtonInjected;
+    private bool _songEffectSaveButtonInjected;
     private bool _libraryRemovalRewired;
 
     protected override void OnContentRendered(EventArgs e)
     {
         base.OnContentRendered(e);
 
+        InjectSongEffectSaveButton();
         RewireLibraryRemoval();
         if (_advancedStemButtonInjected)
         {
@@ -57,6 +59,38 @@ public partial class MainWindow
         buttons.Children.Add(advancedButton);
         parent.Children.Add(buttons);
         _advancedStemButtonInjected = true;
+    }
+
+    private void InjectSongEffectSaveButton()
+    {
+        if (_songEffectSaveButtonInjected)
+        {
+            return;
+        }
+
+        var scanButton = FindByAutomationId<Button>(this, "ScanVstEffectsButton");
+        if (scanButton?.Parent is not Panel parent)
+        {
+            return;
+        }
+
+        var saveButton = new Button
+        {
+            Content = "Guardar sonido de esta pista",
+            Margin = new Thickness(7, 0, 0, 0),
+            ToolTip = "Guarda para la pista cargada la cadena actual de plugins de instrumento y voz."
+        };
+        saveButton.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
+        saveButton.Click += OnSaveSongEffectConfigurationClick;
+        AutomationProperties.SetAutomationId(saveButton, "SaveCurrentSongEffectConfigurationButton");
+        parent.Children.Add(saveButton);
+        _songEffectSaveButtonInjected = true;
+    }
+
+    private void OnSaveSongEffectConfigurationClick(object sender, RoutedEventArgs eventArgs)
+    {
+        _viewModel.SaveCurrentSongEffectConfigurationCommand.Execute(null);
+        eventArgs.Handled = true;
     }
 
     private void OnCreateAdvancedStemMixClick(object sender, RoutedEventArgs eventArgs)
