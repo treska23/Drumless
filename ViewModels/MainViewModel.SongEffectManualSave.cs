@@ -115,7 +115,7 @@ public sealed partial class MainViewModel
                 []);
         }
 
-        var slots = monitor.EffectsBypassed
+        SongEffectSlotRecommendation[] slots = monitor.EffectsBypassed
             ? []
             : monitor.EffectSlots
                 .Where(slot => slot.IsEnabled && slot.ExternalVst3 is not null)
