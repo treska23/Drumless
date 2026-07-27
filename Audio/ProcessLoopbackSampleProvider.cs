@@ -13,7 +13,7 @@ internal sealed class ProcessLoopbackSampleProvider : ISampleProvider, IDisposab
     private readonly CancellationTokenSource _pumpCancellation = new();
     private readonly Task _pumpTask;
     private int _peakBits;
-    private bool _disposed;
+    private int _disposeStarted;
 
     private ProcessLoopbackSampleProvider(Process process, WaveFormat format)
     {
@@ -73,7 +73,8 @@ internal sealed class ProcessLoopbackSampleProvider : ISampleProvider, IDisposab
 
             var response = await process.StandardError
                 .ReadLineAsync()
-                .WaitAsync(TimeSpan.FromSeconds(10));
+                .WaitAsync(TimeSpan.FromSeconds(10))
+                .ConfigureAwait(false);
             if (!string.Equals(
                     response,
                     ProcessLoopbackCaptureProtocol.ReadyResponse,
@@ -109,7 +110,7 @@ internal sealed class ProcessLoopbackSampleProvider : ISampleProvider, IDisposab
             {
                 var read = await _process.StandardOutput.BaseStream.ReadAsync(
                     bytes,
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
                 if (read == 0)
                 {
                     break;
@@ -126,6 +127,14 @@ internal sealed class ProcessLoopbackSampleProvider : ISampleProvider, IDisposab
         catch (IOException)
         {
             // El proceso auxiliar ya no está disponible; el mezclador recibe silencio.
+        }
+        catch (ObjectDisposedException)
+        {
+            // El cierre asíncrono puede liberar la tubería mientras termina una lectura.
+        }
+        catch (InvalidOperationException)
+        {
+            // El proceso o una de sus tuberías ya se cerraron.
         }
     }
 
@@ -158,13 +167,21 @@ internal sealed class ProcessLoopbackSampleProvider : ISampleProvider, IDisposab
 
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
         {
             return;
         }
 
-        _disposed = true;
         _pumpCancellation.Cancel();
+
+        // Cerrar una captura por proceso puede tardar si Windows mantiene una lectura de la tubería
+        // pendiente. Nunca esperamos esa operación desde el hilo WPF: el audio se retira primero del
+        // mezclador y los recursos del proceso se limpian en segundo plano.
+        _ = Task.Run(CleanupAsync);
+    }
+
+    private async Task CleanupAsync()
+    {
         try
         {
             _process.StandardInput.Close();
@@ -172,17 +189,35 @@ internal sealed class ProcessLoopbackSampleProvider : ISampleProvider, IDisposab
         catch
         {
         }
+
         TryStopProcess(_process);
+
         try
         {
-            _pumpTask.GetAwaiter().GetResult();
+            await _pumpTask.ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
         }
-        _process.Dispose();
-        _pumpCancellation.Dispose();
-        _buffer.ClearBuffer();
+        catch (IOException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            try
+            {
+                _process.Dispose();
+            }
+            catch
+            {
+            }
+
+            _pumpCancellation.Dispose();
+            _buffer.ClearBuffer();
+        }
     }
 
     private static void TryStopProcess(Process process)
