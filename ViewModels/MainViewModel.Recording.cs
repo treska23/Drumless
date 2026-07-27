@@ -77,7 +77,9 @@ public sealed partial class MainViewModel
     public bool IsYouTubeAudioRouted => _isYouTubeAudioRouted;
 
     public Task StartYouTubeAudioRoutingAsync(uint browserProcessId) =>
-        _audio.StartYouTubeAudioCaptureAsync(browserProcessId);
+        // La creación de la captura termina añadiendo una fuente al mezclador. Si se ejecuta desde
+        // una continuación del Dispatcher, un driver de audio lento puede bloquear toda la ventana.
+        Task.Run(() => _audio.StartYouTubeAudioCaptureAsync(browserProcessId));
 
     public float TakeYouTubeAudioPeak() =>
         _audio.TakeYouTubeAudioPeak();
@@ -99,7 +101,9 @@ public sealed partial class MainViewModel
 
     public void StopYouTubeAudioRouting(string? reason = null)
     {
-        _audio.StopYouTubeAudioCapture();
+        // Retirar la fuente puede esperar al callback del driver o al proceso de captura. Esa espera
+        // nunca debe inmovilizar el Dispatcher de WPF.
+        _ = Task.Run(_audio.StopYouTubeAudioCapture);
         if (_isYouTubeAudioRouted)
         {
             _isYouTubeAudioRouted = false;
