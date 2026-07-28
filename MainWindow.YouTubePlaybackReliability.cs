@@ -57,9 +57,15 @@ public partial class MainWindow
         _viewModel.PropertyChanged -= OnYouTubeReliabilityViewModelPropertyChanged;
         YouTubeWebView.NavigationCompleted -= OnManagedYouTubeNavigationCompleted;
         YouTubeWebView.CoreWebView2InitializationCompleted -= OnYouTubeReliabilityInitializationCompleted;
-        if (_youtubeReliabilityWebMessagesAttached && YouTubeWebView.CoreWebView2 is { } core)
+        if (_youtubeReliabilityWebMessagesAttached)
         {
-            core.WebMessageReceived -= OnYouTubeReliabilityWebMessageReceived;
+            try
+            {
+                YouTubeWebView.CoreWebView2?.WebMessageReceived -= OnYouTubeReliabilityWebMessageReceived;
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
         Closed -= OnYouTubeReliabilityClosed;
     }
@@ -236,7 +242,7 @@ public partial class MainWindow
             return;
         }
 
-        _ = Dispatcher.InvokeAsync(RestartManagedYouTubeAudioAfterOutputChangeAsync);
+        _ = Dispatcher.InvokeAsync(() => _ = RestartManagedYouTubeAudioAfterOutputChangeAsync());
     }
 
     private async Task RestartManagedYouTubeAudioAfterOutputChangeAsync()
