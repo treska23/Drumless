@@ -1,1 +1,0 @@
-Verificación temporal de compilación.
