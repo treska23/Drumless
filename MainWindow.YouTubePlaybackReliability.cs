@@ -94,9 +94,9 @@ public partial class MainWindow
             }
         }
 
-        // Una captura confirmada para el vídeo anterior puede quedarse muda al cambiar el renderer
-        // de WebView2. Se retira antes de navegar para validar de nuevo el audio del vídeo siguiente.
-        _viewModel.StopYouTubeAudioRouting();
+        // Esperamos a que la captura anterior haya salido del mezclador. De ese modo un cierre
+        // retrasado no puede alcanzar y eliminar la captura recién creada para el vídeo siguiente.
+        await _viewModel.ResetYouTubeAudioRoutingAsync();
     }
 
     private async void OnManagedYouTubeNavigationCompleted(
@@ -168,10 +168,10 @@ public partial class MainWindow
                     const duration = Number(video.duration);
                     const remaining = duration - Number(video.currentTime || 0);
                     if (video.ended ||
-                        (!video.paused && Number.isFinite(duration) && duration > 0 && remaining <= 0.45)) {
+                        (!video.paused && Number.isFinite(duration) && duration > 0 && remaining <= 0.12)) {
                       notifyManagedEnd(video);
                     }
-                  }, 100);
+                  }, 50);
                 })();
                 """);
         }
@@ -216,19 +216,31 @@ public partial class MainWindow
 
         var generation = Volatile.Read(ref _managedYouTubeGeneration);
         var recoveryVersion = Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
-        await Task.Delay(350);
-        if (generation != Volatile.Read(ref _managedYouTubeGeneration) ||
-            recoveryVersion != Volatile.Read(ref _managedYouTubeAudioRecoveryVersion) ||
-            !string.Equals(videoId, _managedYouTubeVideoId, StringComparison.Ordinal))
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            return;
+            await Task.Delay(attempt == 0 ? 350 : 450);
+            if (generation != Volatile.Read(ref _managedYouTubeGeneration) ||
+                recoveryVersion != Volatile.Read(ref _managedYouTubeAudioRecoveryVersion) ||
+                !string.Equals(videoId, _managedYouTubeVideoId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (_viewModel.IsYouTubeAudioRouted)
+            {
+                return;
+            }
+
+            // El manejador normal también lo intenta. Las pasadas adicionales cubren el momento en
+            // que el intento anterior todavía estaba cerrando la captura del vídeo precedente.
+            await EnsureYouTubeAudioRoutingAsync();
         }
 
-        // El manejador normal también lo intenta. Esta segunda pasada cubre el caso en que el intento
-        // anterior todavía estaba cerrando la captura del vídeo precedente.
-        if (!_viewModel.IsYouTubeAudioRouted)
+        // Si Windows no admite la captura por proceso, el navegador queda expresamente sin silenciar
+        // para que el vídeo siga oyéndose por la salida normal en lugar de quedarse mudo.
+        if (!_viewModel.IsYouTubeAudioRouted && YouTubeWebView.CoreWebView2 is { } core)
         {
-            await EnsureYouTubeAudioRoutingAsync();
+            core.IsMuted = false;
         }
     }
 
@@ -256,9 +268,8 @@ public partial class MainWindow
         {
             core.IsMuted = false;
         }
-        _viewModel.StopYouTubeAudioRouting();
 
-        await Task.Delay(450);
+        await _viewModel.ResetYouTubeAudioRoutingAsync();
         if (generation != Volatile.Read(ref _managedYouTubeGeneration) ||
             recoveryVersion != Volatile.Read(ref _managedYouTubeAudioRecoveryVersion) ||
             _managedYouTubeVideoId is null)
@@ -267,5 +278,9 @@ public partial class MainWindow
         }
 
         await EnsureYouTubeAudioRoutingAsync();
+        if (!_viewModel.IsYouTubeAudioRouted && YouTubeWebView.CoreWebView2 is { } activeCore)
+        {
+            activeCore.IsMuted = false;
+        }
     }
 }
