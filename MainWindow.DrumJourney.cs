@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -7,45 +8,61 @@ using DrumPracticeStudio.ViewModels;
 
 namespace DrumPracticeStudio;
 
-public partial class MainWindow
+internal static class DrumJourneyBootstrapper
 {
-    private bool _drumJourneyUiAttached;
-    private DrumJourneyVisualizer? _drumJourneyVisualizer;
-    private MainViewModel? _drumJourneyViewModel;
-
-    static MainWindow()
+    [ModuleInitializer]
+    internal static void Initialize()
     {
         EventManager.RegisterClassHandler(
             typeof(MainWindow),
             FrameworkElement.LoadedEvent,
-            new RoutedEventHandler(OnDrumJourneyWindowLoaded));
+            new RoutedEventHandler(OnMainWindowLoaded),
+            handledEventsToo: true);
     }
 
-    private static void OnDrumJourneyWindowLoaded(object sender, RoutedEventArgs eventArgs)
+    private static void OnMainWindowLoaded(object sender, RoutedEventArgs eventArgs)
     {
-        if (sender is not MainWindow window || window._drumJourneyUiAttached)
+        if (sender is MainWindow window)
+        {
+            window.QueueDrumJourneyUiAttachment();
+        }
+    }
+}
+
+public partial class MainWindow
+{
+    private bool _drumJourneyUiAttached;
+    private bool _drumJourneyUiQueued;
+    private DrumJourneyVisualizer? _drumJourneyVisualizer;
+    private MainViewModel? _drumJourneyViewModel;
+
+    internal void QueueDrumJourneyUiAttachment()
+    {
+        if (_drumJourneyUiAttached || _drumJourneyUiQueued)
         {
             return;
         }
 
-        _ = window.Dispatcher.BeginInvoke(
+        _drumJourneyUiQueued = true;
+        _ = Dispatcher.BeginInvoke(
             DispatcherPriority.Loaded,
-            new Action(window.AttachDrumJourneyUi));
+            new Action(AttachDrumJourneyUi));
     }
 
     private void AttachDrumJourneyUi()
     {
+        _drumJourneyUiQueued = false;
         if (_drumJourneyUiAttached || PracticeMainColumn is null)
         {
             return;
         }
 
-        _drumJourneyUiAttached = true;
         const int insertionRow = 3;
         if (PracticeMainColumn.RowDefinitions.Count < insertionRow)
         {
             return;
         }
+        _drumJourneyUiAttached = true;
 
         var existingChildren = PracticeMainColumn.Children
             .OfType<UIElement>()
