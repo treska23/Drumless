@@ -48,10 +48,8 @@ public partial class MainWindow
 
         _youtubeAudioRoutingGuardAttached = true;
 
-        // El comprobador antiguo añadía la captura al mezclador con WebView2 todavía audible.
-        // Además, sus rutas de recuperación desmutearían el navegador y lo enviarían al dispositivo
-        // predeterminado de Windows. Drumless no permite esa salida alternativa: YouTube debe pasar
-        // siempre por el dispositivo elegido dentro de la aplicación.
+        // Se bloquea el comprobador anterior porque podía desmutear WebView2 y enviar el sonido
+        // al dispositivo predeterminado de Windows. YouTube sólo puede salir por Drumless.
         Volatile.Write(ref _youtubeAudioRoutingInProgress, 1);
         Interlocked.Increment(ref _youtubeAudioProbeVersion);
         Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
@@ -103,7 +101,7 @@ public partial class MainWindow
             core.ProcessFailed -= OnYouTubeAudioRoutingGuardProcessFailed;
             core.IsMutedChanged -= OnYouTubeAudioRoutingGuardMutedChanged;
         }
-        catch (ObjectDisposedException)
+        catch (InvalidOperationException)
         {
         }
 
@@ -126,9 +124,6 @@ public partial class MainWindow
             {
                 core.IsMuted = true;
             }
-        }
-        catch (ObjectDisposedException)
-        {
         }
         catch (InvalidOperationException)
         {
@@ -158,7 +153,7 @@ public partial class MainWindow
         }
 
         _ = ResetSelectedYouTubeOutputAsync(
-            "Cambiando de vídeo; se está reconstruyendo la ruta de audio.");
+            "Cambiando de vídeo; reconstruyendo la ruta de audio de Drumless…");
     }
 
     private void OnYouTubeAudioRoutingGuardProcessFailed(
@@ -168,7 +163,7 @@ public partial class MainWindow
         Interlocked.Increment(ref _youtubeSafeRoutingVersion);
         Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
         _ = FailSelectedYouTubeOutputAsync(
-            "El proceso de audio de YouTube se detuvo. El vídeo se ha pausado para no enviarlo a la salida general de Windows.");
+            "El proceso de audio de YouTube se detuvo.");
     }
 
     private void OnYouTubeAudioRoutingGuardViewModelPropertyChanged(
@@ -203,17 +198,13 @@ public partial class MainWindow
             using var document = JsonDocument.Parse(eventArgs.WebMessageAsJson);
             var root = document.RootElement;
             if (!root.TryGetProperty("type", out var typeElement) ||
-                !string.Equals(
-                    typeElement.GetString(),
-                    "video-state",
-                    StringComparison.Ordinal) ||
+                !string.Equals(typeElement.GetString(), "video-state", StringComparison.Ordinal) ||
                 !root.TryGetProperty("playing", out var playingElement) ||
                 playingElement.ValueKind is not JsonValueKind.True)
             {
                 return;
             }
 
-            // Invalida los reintentos antiguos que todavía podrían despertar después de su delay.
             Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
             _ = EnsureYouTubeAudioRoutingWithoutDuplicationAsync();
         }
@@ -236,23 +227,20 @@ public partial class MainWindow
         Interlocked.Increment(ref _youtubeAudioProbeVersion);
         Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
         var stage = "preparar la captura";
+
         try
         {
             EnforceSelectedOutputOnly(core);
 
-            for (var routingAttempt = 1;
-                 routingAttempt <= YouTubeAudioRoutingAttempts;
-                 routingAttempt++)
+            for (var attempt = 1; attempt <= YouTubeAudioRoutingAttempts; attempt++)
             {
                 await _viewModel.ResetYouTubeAudioRoutingAsync(
-                    $"Conectando YouTube con la salida elegida en Drumless · intento {routingAttempt}/{YouTubeAudioRoutingAttempts}…");
+                    $"Conectando YouTube con la salida elegida · intento {attempt}/{YouTubeAudioRoutingAttempts}…");
                 if (!IsSafeYouTubeRouteCurrent(routeVersion, core))
                 {
                     return;
                 }
 
-                // WebView2 permanece silenciado a nivel global antes, durante y después de crear la
-                // captura. Así ningún sonido puede escaparse a la tele o al dispositivo general del PC.
                 EnforceSelectedOutputOnly(core);
                 stage = "crear la captura para la salida elegida";
                 await _viewModel.StartYouTubeAudioRoutingAsync(core.BrowserProcessId);
@@ -266,6 +254,7 @@ public partial class MainWindow
                 var activeSamples = 0;
                 var consecutiveActiveSamples = 0;
                 stage = "comprobar una señal estable";
+
                 for (var sample = 0; sample < YouTubeAudioValidationSamples; sample++)
                 {
                     await Task.Delay(150);
@@ -276,8 +265,7 @@ public partial class MainWindow
                     }
 
                     EnforceSelectedOutputOnly(core);
-                    var peak = _viewModel.TakeYouTubeAudioPeak();
-                    if (peak >= YouTubeAudioSignalThreshold)
+                    if (_viewModel.TakeYouTubeAudioPeak() >= YouTubeAudioSignalThreshold)
                     {
                         activeSamples++;
                         consecutiveActiveSamples++;
@@ -298,14 +286,14 @@ public partial class MainWindow
 
                 await _viewModel.ResetYouTubeAudioRoutingAsync(
                     "La captura no mantuvo señal; reintentando sin usar la salida general de Windows…");
-                if (routingAttempt < YouTubeAudioRoutingAttempts)
+                if (attempt < YouTubeAudioRoutingAttempts)
                 {
                     await Task.Delay(220);
                 }
             }
 
             await FailSelectedYouTubeOutputAsync(
-                "No se pudo conectar el audio de este vídeo con la salida elegida en Drumless.");
+                "No se pudo conectar este vídeo con la salida elegida en Drumless.");
         }
         catch (Exception exception) when (exception is
             InvalidOperationException or
@@ -332,7 +320,7 @@ public partial class MainWindow
         {
             await _viewModel.ResetYouTubeAudioRoutingAsync(reason);
         }
-        catch (ObjectDisposedException)
+        catch (InvalidOperationException)
         {
         }
 
@@ -345,8 +333,7 @@ public partial class MainWindow
     private async Task FailSelectedYouTubeOutputAsync(string reason)
     {
         await ResetSelectedYouTubeOutputAsync(reason);
-        var core = YouTubeWebView.CoreWebView2;
-        if (core is not null)
+        if (YouTubeWebView.CoreWebView2 is { } core)
         {
             EnforceSelectedOutputOnly(core);
             try
@@ -355,9 +342,6 @@ public partial class MainWindow
                     "(() => { const video=document.querySelector('video'); if(video) video.pause(); })();");
             }
             catch (InvalidOperationException)
-            {
-            }
-            catch (ObjectDisposedException)
             {
             }
         }
