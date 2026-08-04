@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
+using DrumPracticeStudio.Services;
 using DrumPracticeStudio.ViewModels;
 using Microsoft.Web.WebView2.Core;
 
@@ -32,10 +33,13 @@ public partial class MainWindow
 {
     private const float YouTubeAudioSignalThreshold = 0.0005f;
     private const int YouTubeAudioRoutingAttempts = 2;
-    private const int YouTubeAudioValidationSamples = 10;
+    private const int YouTubeAudioValidationSamples = 12;
 
+    private readonly SemaphoreSlim _youtubeSessionMuteGuardGate = new(1, 1);
     private bool _youtubeAudioRoutingGuardAttached;
+    private bool _youtubeCoreRenderEnabled;
     private CoreWebView2? _youtubeAudioRoutingGuardCore;
+    private ProcessAudioSessionMuteGuard? _youtubeSessionMuteGuard;
     private long _youtubeSafeRoutingVersion;
     private int _youtubeSafeRoutingInProgress;
 
@@ -48,8 +52,10 @@ public partial class MainWindow
 
         _youtubeAudioRoutingGuardAttached = true;
 
-        // Se bloquea el comprobador anterior porque podía desmutear WebView2 y enviar el sonido
-        // al dispositivo predeterminado de Windows. YouTube sólo puede salir por Drumless.
+        // El comprobador antiguo silenciaba WebView2 antes de capturarlo. Eso termina cortando el
+        // propio flujo de render y sólo deja en el búfer unos instantes de audio. Esta versión
+        // mantiene bloqueado aquel comprobador y realiza el mute en la sesión de Windows, después
+        // del punto del que se alimenta la captura por proceso.
         Volatile.Write(ref _youtubeAudioRoutingInProgress, 1);
         Interlocked.Increment(ref _youtubeAudioProbeVersion);
         Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
@@ -85,7 +91,7 @@ public partial class MainWindow
         core.WebMessageReceived += OnYouTubeAudioRoutingGuardWebMessageReceived;
         core.ProcessFailed += OnYouTubeAudioRoutingGuardProcessFailed;
         core.IsMutedChanged += OnYouTubeAudioRoutingGuardMutedChanged;
-        EnforceSelectedOutputOnly(core);
+        SetCoreRenderEnabled(core, enabled: false);
     }
 
     private void DetachYouTubeAudioRoutingGuardCore()
@@ -112,17 +118,24 @@ public partial class MainWindow
     {
         if (sender is CoreWebView2 core)
         {
-            EnforceSelectedOutputOnly(core);
+            ApplyCoreRenderState(core);
         }
     }
 
-    private static void EnforceSelectedOutputOnly(CoreWebView2 core)
+    private void SetCoreRenderEnabled(CoreWebView2 core, bool enabled)
+    {
+        _youtubeCoreRenderEnabled = enabled;
+        ApplyCoreRenderState(core);
+    }
+
+    private void ApplyCoreRenderState(CoreWebView2 core)
     {
         try
         {
-            if (!core.IsMuted)
+            var shouldBeMuted = !_youtubeCoreRenderEnabled;
+            if (core.IsMuted != shouldBeMuted)
             {
-                core.IsMuted = true;
+                core.IsMuted = shouldBeMuted;
             }
         }
         catch (InvalidOperationException)
@@ -130,15 +143,31 @@ public partial class MainWindow
         }
     }
 
-    private void OnYouTubeAudioRoutingGuardClosed(object? sender, EventArgs eventArgs)
+    private async void OnYouTubeAudioRoutingGuardClosed(object? sender, EventArgs eventArgs)
     {
         Interlocked.Increment(ref _youtubeSafeRoutingVersion);
+        if (YouTubeWebView.CoreWebView2 is { } core)
+        {
+            SetCoreRenderEnabled(core, enabled: false);
+        }
+
         DetachYouTubeAudioRoutingGuardCore();
         YouTubeWebView.CoreWebView2InitializationCompleted -=
             OnYouTubeAudioRoutingGuardInitializationCompleted;
         YouTubeWebView.NavigationStarting -= OnYouTubeAudioRoutingGuardNavigationStarting;
         _viewModel.PropertyChanged -= OnYouTubeAudioRoutingGuardViewModelPropertyChanged;
         Closed -= OnYouTubeAudioRoutingGuardClosed;
+
+        try
+        {
+            await _viewModel.ResetYouTubeAudioRoutingAsync();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        await DisposeYouTubeSessionMuteGuardAsync();
+        _youtubeSessionMuteGuardGate.Dispose();
     }
 
     private void OnYouTubeAudioRoutingGuardNavigationStarting(
@@ -149,7 +178,7 @@ public partial class MainWindow
         Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
         if (YouTubeWebView.CoreWebView2 is { } core)
         {
-            EnforceSelectedOutputOnly(core);
+            SetCoreRenderEnabled(core, enabled: false);
         }
 
         _ = ResetSelectedYouTubeOutputAsync(
@@ -226,14 +255,24 @@ public partial class MainWindow
         var routeVersion = Interlocked.Increment(ref _youtubeSafeRoutingVersion);
         Interlocked.Increment(ref _youtubeAudioProbeVersion);
         Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
-        var stage = "preparar la captura";
+        var stage = "preparar la sesión de audio";
 
         try
         {
-            EnforceSelectedOutputOnly(core);
+            SetCoreRenderEnabled(core, enabled: false);
+            var sessionGuard = await EnsureYouTubeSessionMuteGuardAsync(core.BrowserProcessId);
+            var sessionProtected = await sessionGuard.WaitUntilProtectedAsync(
+                TimeSpan.FromSeconds(3));
+            if (!sessionProtected || !IsSafeYouTubeRouteCurrent(routeVersion, core))
+            {
+                await FailSelectedYouTubeOutputAsync(
+                    "Windows no creó una sesión de audio protegible para WebView2.");
+                return;
+            }
 
             for (var attempt = 1; attempt <= YouTubeAudioRoutingAttempts; attempt++)
             {
+                SetCoreRenderEnabled(core, enabled: false);
                 await _viewModel.ResetYouTubeAudioRoutingAsync(
                     $"Conectando YouTube con la salida elegida · intento {attempt}/{YouTubeAudioRoutingAttempts}…");
                 if (!IsSafeYouTubeRouteCurrent(routeVersion, core))
@@ -241,8 +280,10 @@ public partial class MainWindow
                     return;
                 }
 
-                EnforceSelectedOutputOnly(core);
-                stage = "crear la captura para la salida elegida";
+                // Con WebView2 todavía bloqueado a nivel global se crea primero la captura. Después
+                // se reactiva el render del navegador: su sesión de Windows ya está silenciada, de
+                // modo que el único sonido audible es el que pasa por el mezclador de Drumless.
+                stage = "crear la captura por proceso";
                 await _viewModel.StartYouTubeAudioRoutingAsync(core.BrowserProcessId);
                 if (!IsSafeYouTubeRouteCurrent(routeVersion, core))
                 {
@@ -251,20 +292,21 @@ public partial class MainWindow
                 }
 
                 _viewModel.TakeYouTubeAudioPeak();
+                SetCoreRenderEnabled(core, enabled: true);
                 var activeSamples = 0;
                 var consecutiveActiveSamples = 0;
-                stage = "comprobar una señal estable";
+                stage = "comprobar el flujo después del mute de sesión";
 
                 for (var sample = 0; sample < YouTubeAudioValidationSamples; sample++)
                 {
-                    await Task.Delay(150);
+                    await Task.Delay(120);
                     if (!IsSafeYouTubeRouteCurrent(routeVersion, core))
                     {
                         await ResetSelectedYouTubeOutputAsync();
                         return;
                     }
 
-                    EnforceSelectedOutputOnly(core);
+                    ApplyCoreRenderState(core);
                     if (_viewModel.TakeYouTubeAudioPeak() >= YouTubeAudioSignalThreshold)
                     {
                         activeSamples++;
@@ -275,17 +317,18 @@ public partial class MainWindow
                         consecutiveActiveSamples = 0;
                     }
 
-                    if (activeSamples >= 3 && consecutiveActiveSamples >= 2)
+                    if (activeSamples >= 4 && consecutiveActiveSamples >= 3)
                     {
                         _viewModel.ConfirmYouTubeAudioRouting();
                         YouTubeStatusText.Text =
-                            "Reproduciendo · YouTube sale únicamente por el dispositivo elegido en Drumless";
+                            "Reproduciendo · WebView2 capturado antes del mute y enviado a la salida de Drumless";
                         return;
                     }
                 }
 
+                SetCoreRenderEnabled(core, enabled: false);
                 await _viewModel.ResetYouTubeAudioRoutingAsync(
-                    "La captura no mantuvo señal; reintentando sin usar la salida general de Windows…");
+                    "La captura perdió el flujo; reintentando la conexión con Drumless…");
                 if (attempt < YouTubeAudioRoutingAttempts)
                 {
                     await Task.Delay(220);
@@ -293,7 +336,7 @@ public partial class MainWindow
             }
 
             await FailSelectedYouTubeOutputAsync(
-                "No se pudo conectar este vídeo con la salida elegida en Drumless.");
+                "La captura por proceso no conservó audio después de proteger la salida directa.");
         }
         catch (Exception exception) when (exception is
             InvalidOperationException or
@@ -310,23 +353,70 @@ public partial class MainWindow
         }
     }
 
+    private async Task<ProcessAudioSessionMuteGuard> EnsureYouTubeSessionMuteGuardAsync(
+        uint browserProcessId)
+    {
+        await _youtubeSessionMuteGuardGate.WaitAsync();
+        try
+        {
+            if (_youtubeSessionMuteGuard is { } current &&
+                current.RootProcessId == browserProcessId)
+            {
+                return current;
+            }
+
+            if (_youtubeSessionMuteGuard is { } previous)
+            {
+                _youtubeSessionMuteGuard = null;
+                await previous.DisposeAsync();
+            }
+
+            var replacement = ProcessAudioSessionMuteGuard.Start(browserProcessId);
+            _youtubeSessionMuteGuard = replacement;
+            return replacement;
+        }
+        finally
+        {
+            _youtubeSessionMuteGuardGate.Release();
+        }
+    }
+
+    private async Task DisposeYouTubeSessionMuteGuardAsync()
+    {
+        await _youtubeSessionMuteGuardGate.WaitAsync();
+        try
+        {
+            if (_youtubeSessionMuteGuard is not { } guard)
+            {
+                return;
+            }
+
+            _youtubeSessionMuteGuard = null;
+            await guard.DisposeAsync();
+        }
+        finally
+        {
+            _youtubeSessionMuteGuardGate.Release();
+        }
+    }
+
     private bool IsSafeYouTubeRouteCurrent(long version, CoreWebView2 core) =>
         version == Volatile.Read(ref _youtubeSafeRoutingVersion) &&
         ReferenceEquals(core, YouTubeWebView.CoreWebView2);
 
     private async Task ResetSelectedYouTubeOutputAsync(string? reason = null)
     {
+        if (YouTubeWebView.CoreWebView2 is { } core)
+        {
+            SetCoreRenderEnabled(core, enabled: false);
+        }
+
         try
         {
             await _viewModel.ResetYouTubeAudioRoutingAsync(reason);
         }
         catch (InvalidOperationException)
         {
-        }
-
-        if (YouTubeWebView.CoreWebView2 is { } core)
-        {
-            EnforceSelectedOutputOnly(core);
         }
     }
 
@@ -335,7 +425,7 @@ public partial class MainWindow
         await ResetSelectedYouTubeOutputAsync(reason);
         if (YouTubeWebView.CoreWebView2 is { } core)
         {
-            EnforceSelectedOutputOnly(core);
+            SetCoreRenderEnabled(core, enabled: false);
             try
             {
                 await core.ExecuteScriptAsync(
@@ -348,6 +438,6 @@ public partial class MainWindow
 
         _viewModel.SetYouTubeTransportPlaying(false);
         YouTubeStatusText.Text =
-            "YouTube pausado · no se enviará audio a la tele ni a la salida general del PC";
+            "YouTube pausado · la salida directa está protegida y no se ha desviado a Windows";
     }
 }
