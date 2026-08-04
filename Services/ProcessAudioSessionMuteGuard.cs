@@ -15,9 +15,9 @@ internal sealed class ProcessAudioSessionMuteGuard : IAsyncDisposable
     private const uint ClsctxAll = 0x17;
     private const uint CoinitMultithreaded = 0x0;
     private static readonly IntPtr InvalidHandleValue = new(-1);
-    private static readonly Guid AudioSessionManager2Id =
+    private static Guid AudioSessionManager2Id =
         new("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
-    private static readonly Guid MuteEventContext =
+    private static Guid MuteEventContext =
         new("5BA682F2-82B8-4F9D-842D-25C9F4D3145B");
 
     private readonly uint _rootProcessId;
@@ -144,7 +144,9 @@ internal sealed class ProcessAudioSessionMuteGuard : IAsyncDisposable
                         ClsctxAll,
                         IntPtr.Zero,
                         out managerObject));
-                    var manager = (IAudioSessionManager2)managerObject;
+                    var manager = managerObject as IAudioSessionManager2 ??
+                                  throw new InvalidCastException(
+                                      "Windows no devolvió IAudioSessionManager2.");
                     ThrowIfFailed(manager.GetSessionEnumerator(out sessions));
                     ThrowIfFailed(sessions.GetCount(out var sessionCount));
 
