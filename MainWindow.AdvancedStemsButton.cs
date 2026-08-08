@@ -11,10 +11,8 @@ public partial class MainWindow
     private bool _songEffectSaveButtonInjected;
     private bool _libraryRemovalRewired;
 
-    protected override void OnContentRendered(EventArgs e)
+    private void AttachAdvancedStemUiFixes()
     {
-        base.OnContentRendered(e);
-
         InjectSongEffectSaveButton();
         RewireLibraryRemoval();
         if (_advancedStemButtonInjected)

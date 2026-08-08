@@ -19,6 +19,7 @@ public partial class MainWindow
         base.OnContentRendered(e);
         AttachYouTubeDirectOutputRouting();
         AttachYouTubePlaybackReliabilityFixes();
+        AttachAdvancedStemUiFixes();
         if (_playlistInteractionFixesAttached)
         {
             return;
