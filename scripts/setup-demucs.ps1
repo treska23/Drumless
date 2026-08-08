@@ -52,6 +52,28 @@ Write-Output "Instalando Demucs 4.0.1"
 & $uvExe pip install --python $pythonExe "numpy<2" "soundfile==0.13.1" "demucs==4.0.1"
 if ($LASTEXITCODE -ne 0) { throw "No se pudo instalar Demucs." }
 
+Write-Output "Aplicando compatibilidad del argumento --segment"
+$demucsSeparatePath = (& $pythonExe -c "import inspect, demucs.separate; print(inspect.getsourcefile(demucs.separate))").Trim()
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $demucsSeparatePath)) {
+    throw "No se encontró el módulo demucs.separate para aplicar la compatibilidad."
+}
+
+$segmentOriginal = 'split_group.add_argument("--segment", type=int,'
+$segmentCompatible = 'split_group.add_argument("--segment", type=lambda value: int(float(value)),'
+$demucsSource = Get-Content -LiteralPath $demucsSeparatePath -Raw
+if ($demucsSource.Contains($segmentOriginal)) {
+    $demucsSource = $demucsSource.Replace($segmentOriginal, $segmentCompatible)
+    Set-Content -LiteralPath $demucsSeparatePath -Value $demucsSource -Encoding UTF8
+}
+elseif (-not $demucsSource.Contains($segmentCompatible)) {
+    throw "La versión instalada de Demucs usa una declaración desconocida para --segment."
+}
+
+$parsedSegment = (& $pythonExe -c "from demucs.separate import get_parser; print(get_parser().parse_args(['--segment','7.8','dummy.wav']).segment)").Trim()
+if ($LASTEXITCODE -ne 0 -or $parsedSegment -ne "7") {
+    throw "Demucs no aceptó correctamente --segment 7.8."
+}
+
 Write-Output "Verificando el motor"
 & $pythonExe -c "import demucs, torch, torchaudio; backends=torchaudio.list_audio_backends(); assert backends, 'Torchaudio no tiene backend'; print('Demucs listo; torch=' + torch.__version__ + '; backends=' + ','.join(backends))"
 if ($LASTEXITCODE -ne 0) { throw "La verificación de Demucs falló." }

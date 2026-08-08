@@ -1,6 +1,8 @@
 ﻿using System.Reflection;
 using System.Runtime.Loader;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using DrumPracticeStudio.Services;
 
@@ -69,11 +71,80 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
+        EnsureDemucsCliCompatibility();
+        EnsureSafeMixerKnobStyle();
         FreezeThemeBrushes();
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         var mainWindow = new MainWindow();
         MainWindow = mainWindow;
         mainWindow.Show();
+    }
+
+    private static void EnsureDemucsCliCompatibility()
+    {
+        // Demucs 4.0.1 declara --segment como entero. Algunas configuraciones del modelo usan
+        // 7.8 segundos, por lo que adaptamos el parser local para convertir ese decimal a 7.
+        // Solo se modifica la instalación privada de Drumless y el cambio es idempotente.
+        try
+        {
+            var pythonDirectory = Path.GetDirectoryName(AppPaths.SeparationPython);
+            var virtualEnvironment = string.IsNullOrWhiteSpace(pythonDirectory)
+                ? null
+                : Directory.GetParent(pythonDirectory)?.FullName;
+            if (string.IsNullOrWhiteSpace(virtualEnvironment))
+            {
+                return;
+            }
+
+            var separateModule = Path.Combine(
+                virtualEnvironment,
+                "Lib",
+                "site-packages",
+                "demucs",
+                "separate.py");
+            if (!File.Exists(separateModule))
+            {
+                return;
+            }
+
+            const string original = "split_group.add_argument(\"--segment\", type=int,";
+            const string compatible =
+                "split_group.add_argument(\"--segment\", type=lambda value: int(float(value)),";
+            var source = File.ReadAllText(separateModule);
+            if (source.Contains(compatible, StringComparison.Ordinal) ||
+                !source.Contains(original, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            File.WriteAllText(
+                separateModule,
+                source.Replace(original, compatible, StringComparison.Ordinal));
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            // La aplicación puede seguir arrancando. Si la instalación no permite el parche,
+            // la separación avanzada mostrará el error concreto de Demucs al ejecutarse.
+        }
+    }
+
+    private void EnsureSafeMixerKnobStyle()
+    {
+        // La plantilla XAML original del mando usa recursos anidados y puede fallar al resolverse
+        // durante InitializeComponent. Sustituimos el recurso antes de construir MainWindow por un
+        // estilo funcional que nunca depende de StaticResource internos. Así un fallo cosmético no
+        // puede impedir que arranque toda la aplicación.
+        var style = new Style(typeof(Slider));
+        style.Setters.Add(new Setter(Slider.OrientationProperty, Orientation.Horizontal));
+        style.Setters.Add(new Setter(Slider.IsMoveToPointEnabledProperty, true));
+        style.Setters.Add(new Setter(FrameworkElement.WidthProperty, 96d));
+        style.Setters.Add(new Setter(FrameworkElement.HeightProperty, 28d));
+        style.Setters.Add(new Setter(FrameworkElement.CursorProperty, Cursors.Hand));
+        Resources["MixerKnob"] = style;
     }
 
     private static void EnsureWindowsAudioAssembliesLoaded()
