@@ -1,39 +1,23 @@
 using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
-using System.Windows;
-using DrumPracticeStudio.Models;
+using DrumPracticeStudio.Services;
 using DrumPracticeStudio.ViewModels;
 using Microsoft.Web.WebView2.Core;
 
 namespace DrumPracticeStudio;
-
-internal static class YouTubeDirectOutputBootstrapper
-{
-    [ModuleInitializer]
-    internal static void Initialize() =>
-        EventManager.RegisterClassHandler(
-            typeof(MainWindow),
-            FrameworkElement.LoadedEvent,
-            new RoutedEventHandler((sender, _) =>
-            {
-                if (sender is MainWindow window)
-                {
-                    window.AttachYouTubeDirectOutputRouting();
-                }
-            }),
-            handledEventsToo: true);
-}
 
 public partial class MainWindow
 {
     private const string YouTubeOrigin = "https://www.youtube.com";
     private bool _youtubeDirectOutputAttached;
     private bool _youtubeDirectOutputActive;
+    private bool _youtubeDirectOutputFallbackActive;
     private bool _youtubeDirectOutputClosing;
     private CoreWebView2? _youtubeDirectOutputCore;
-    private int _youtubeDirectOutputInProgress;
     private long _youtubeDirectOutputGeneration;
+    private long _youtubeDirectOutputRequestVersion;
+    private long _youtubeDirectOutputCompletedVersion;
+    private int _youtubeDirectOutputWorkerRunning;
 
     internal void AttachYouTubeDirectOutputRouting()
     {
@@ -77,6 +61,7 @@ public partial class MainWindow
         core.WebMessageReceived += OnDirectOutputWebMessageReceived;
         core.IsMutedChanged += OnDirectOutputMutedChanged;
         _youtubeDirectOutputActive = false;
+        _youtubeDirectOutputFallbackActive = false;
         EnforceDirectOutputMute(core);
     }
 
@@ -103,7 +88,9 @@ public partial class MainWindow
         CoreWebView2NavigationStartingEventArgs eventArgs)
     {
         Interlocked.Increment(ref _youtubeDirectOutputGeneration);
+        Interlocked.Increment(ref _youtubeDirectOutputRequestVersion);
         _youtubeDirectOutputActive = false;
+        _youtubeDirectOutputFallbackActive = false;
         if (YouTubeWebView.CoreWebView2 is { } core)
         {
             EnforceDirectOutputMute(core);
@@ -167,7 +154,8 @@ public partial class MainWindow
 
         try
         {
-            var shouldBeMuted = !_youtubeDirectOutputActive;
+            var shouldBeMuted = !_youtubeDirectOutputActive &&
+                                !_youtubeDirectOutputFallbackActive;
             if (core.IsMuted != shouldBeMuted)
             {
                 core.IsMuted = shouldBeMuted;
@@ -188,12 +176,7 @@ public partial class MainWindow
         }
 
         Interlocked.Increment(ref _youtubeDirectOutputGeneration);
-        _youtubeDirectOutputActive = false;
-        if (YouTubeWebView.CoreWebView2 is { } core)
-        {
-            EnforceDirectOutputMute(core);
-            _ = RouteYouTubeToSelectedOutputAsync();
-        }
+        RequestYouTubeDirectOutputRouting();
     }
 
     private void OnDirectOutputWebMessageReceived(
@@ -209,7 +192,7 @@ public partial class MainWindow
                 : null;
             if (type == "drumless-direct-output-request")
             {
-                _ = RouteYouTubeToSelectedOutputAsync();
+                RequestYouTubeDirectOutputRouting();
                 return;
             }
             if (type != "drumless-direct-output-result")
@@ -217,6 +200,20 @@ public partial class MainWindow
                 return;
             }
 
+            var requestVersion = root.TryGetProperty("requestVersion", out var requestElement) &&
+                                 requestElement.TryGetInt64(out var parsedRequestVersion)
+                ? parsedRequestVersion
+                : -1;
+            if (requestVersion != Volatile.Read(ref _youtubeDirectOutputRequestVersion))
+            {
+                return;
+            }
+
+            Volatile.Write(ref _youtubeDirectOutputCompletedVersion, requestVersion);
+            if (YouTubeWebView.CoreWebView2 is { } permissionCore)
+            {
+                _ = ResetYouTubeMicrophonePermissionAsync(permissionCore);
+            }
             var ok = root.TryGetProperty("ok", out var okElement) &&
                      okElement.ValueKind is JsonValueKind.True;
             if (ok && YouTubeWebView.CoreWebView2 is { } core)
@@ -225,6 +222,7 @@ public partial class MainWindow
                     ? labelElement.GetString()
                     : null;
                 _youtubeDirectOutputActive = true;
+                _youtubeDirectOutputFallbackActive = false;
                 EnforceDirectOutputMute(core);
                 YouTubeStatusText.Text =
                     $"Reproduciendo · YouTube conectado directamente a {label ?? "la salida elegida"}";
@@ -232,9 +230,20 @@ public partial class MainWindow
             }
 
             _youtubeDirectOutputActive = false;
+            _youtubeDirectOutputFallbackActive = true;
             if (YouTubeWebView.CoreWebView2 is { } failedCore)
             {
-                EnforceDirectOutputMute(failedCore);
+                // Si el endpoint elegido no está visible para Chromium, se conserva una sola salida
+                // audible (la normal de WebView2) en lugar de parar el vídeo o dejarlo en silencio.
+                try
+                {
+                    failedCore.IsMuted = false;
+                }
+                catch (Exception exception) when (exception is
+                    InvalidOperationException or ObjectDisposedException or
+                    System.Runtime.InteropServices.COMException)
+                {
+                }
             }
             var reason = root.TryGetProperty("reason", out var reasonElement)
                 ? reasonElement.GetString()
@@ -247,7 +256,8 @@ public partial class MainWindow
                     .ToArray()
                 : [];
             YouTubeStatusText.Text =
-                $"YouTube pausado · no se pudo usar la salida elegida ({reason})." +
+                $"YouTube sigue reproduciéndose por la salida de Windows; no se pudo usar " +
+                $"la salida elegida ({reason})." +
                 (available.Length > 0
                     ? $" Salidas visibles: {string.Join(" | ", available)}."
                     : string.Empty);
@@ -257,12 +267,62 @@ public partial class MainWindow
         }
     }
 
-    private async Task RouteYouTubeToSelectedOutputAsync()
+    internal void RequestYouTubeDirectOutputRouting()
+    {
+        if (!_youtubeDirectOutputAttached || _youtubeDirectOutputClosing)
+        {
+            return;
+        }
+
+        Interlocked.Increment(ref _youtubeDirectOutputRequestVersion);
+        _youtubeDirectOutputActive = false;
+        _youtubeDirectOutputFallbackActive = false;
+        if (YouTubeWebView.CoreWebView2 is { } core)
+        {
+            EnforceDirectOutputMute(core);
+        }
+        StartYouTubeDirectOutputWorker();
+    }
+
+    private void StartYouTubeDirectOutputWorker()
+    {
+        if (Interlocked.CompareExchange(ref _youtubeDirectOutputWorkerRunning, 1, 0) == 0)
+        {
+            _ = ProcessYouTubeDirectOutputRequestsAsync();
+        }
+    }
+
+    private async Task ProcessYouTubeDirectOutputRequestsAsync()
+    {
+        var handledVersion = -1L;
+        try
+        {
+            while (!_youtubeDirectOutputClosing)
+            {
+                handledVersion = Volatile.Read(ref _youtubeDirectOutputRequestVersion);
+                await RouteYouTubeToSelectedOutputAsync(handledVersion);
+                if (handledVersion == Volatile.Read(ref _youtubeDirectOutputRequestVersion))
+                {
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _youtubeDirectOutputWorkerRunning, 0);
+            if (!_youtubeDirectOutputClosing &&
+                handledVersion != Volatile.Read(ref _youtubeDirectOutputRequestVersion))
+            {
+                StartYouTubeDirectOutputWorker();
+            }
+        }
+    }
+
+    private async Task RouteYouTubeToSelectedOutputAsync(long requestVersion)
     {
         var core = YouTubeWebView.CoreWebView2;
         var selected = _viewModel.SelectedAudioOutputDevice;
-        if (core is null || selected is null ||
-            Interlocked.CompareExchange(ref _youtubeDirectOutputInProgress, 1, 0) != 0)
+        if (core is null || selected is null)
         {
             return;
         }
@@ -272,7 +332,11 @@ public partial class MainWindow
         EnforceDirectOutputMute(core);
         try
         {
-            var aliasesJson = JsonSerializer.Serialize(BuildOutputAliases(selected));
+            var aliasesJson = JsonSerializer.Serialize(
+                YouTubeOutputDeviceMatcher.BuildAliases(
+                    selected,
+                    _viewModel.AudioOutputDevices));
+            var requestVersionJson = JsonSerializer.Serialize(requestVersion);
             await core.Profile.SetPermissionStateAsync(
                 CoreWebView2PermissionKind.Microphone,
                 YouTubeOrigin,
@@ -286,8 +350,9 @@ public partial class MainWindow
                 $$"""
                 (async () => {
                   const aliases = {{aliasesJson}};
+                  const requestVersion = {{requestVersionJson}};
                   const post = value => chrome.webview.postMessage({
-                    type: 'drumless-direct-output-result', ...value
+                    type: 'drumless-direct-output-result', requestVersion, ...value
                   });
                   const normalize = value => String(value || '').toLowerCase()
                     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -312,7 +377,6 @@ public partial class MainWindow
                     const video = document.querySelector('video');
                     if (!video) return post({ ok:false, reason:'YouTube aún no creó el vídeo' });
                     if (typeof video.setSinkId !== 'function' || !navigator.mediaDevices) {
-                      video.pause();
                       return post({ ok:false, reason:'WebView2 no ofrece setSinkId' });
                     }
                     let devices = await navigator.mediaDevices.enumerateDevices();
@@ -329,91 +393,83 @@ public partial class MainWindow
                     const best = ranked[0];
                     const available = outputs.map(device => device.label || '(sin nombre)');
                     if (!best || best.score < 45 || !best.device.deviceId) {
-                      video.pause();
                       return post({ ok:false,
                         reason:'ninguna salida coincide con la elegida en Drumless', available });
                     }
                     await video.setSinkId(best.device.deviceId);
                     post({ ok:true, label:best.device.label, available });
                   } catch (error) {
-                    try { document.querySelector('video')?.pause(); } catch (_) {}
                     post({ ok:false,
                       reason:String(error?.name || '') + ': ' + String(error?.message || error || '') });
                   }
                 })();
                 """);
+            _ = CompleteYouTubeDirectOutputTimeoutAsync(core, requestVersion);
+        }
+        catch (Exception exception)
+        {
+            Volatile.Write(ref _youtubeDirectOutputCompletedVersion, requestVersion);
+            _youtubeDirectOutputActive = false;
+            _youtubeDirectOutputFallbackActive = true;
+            try
+            {
+                core.IsMuted = false;
+            }
+            catch (Exception muteException) when (muteException is
+                InvalidOperationException or ObjectDisposedException or
+                System.Runtime.InteropServices.COMException)
+            {
+            }
+            YouTubeStatusText.Text =
+                $"YouTube sigue por la salida de Windows; no se pudo preparar la salida directa: " +
+                exception.Message;
+            await ResetYouTubeMicrophonePermissionAsync(core);
+        }
+    }
+
+    private async Task CompleteYouTubeDirectOutputTimeoutAsync(
+        CoreWebView2 core,
+        long requestVersion)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(5));
+        if (_youtubeDirectOutputClosing ||
+            requestVersion != Volatile.Read(ref _youtubeDirectOutputRequestVersion) ||
+            requestVersion == Volatile.Read(ref _youtubeDirectOutputCompletedVersion))
+        {
+            return;
+        }
+
+        Volatile.Write(ref _youtubeDirectOutputCompletedVersion, requestVersion);
+        _youtubeDirectOutputFallbackActive = true;
+        try
+        {
+            core.IsMuted = false;
+            YouTubeStatusText.Text =
+                "YouTube sigue por la salida de Windows; la selección directa no respondió a tiempo.";
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or ObjectDisposedException or
+            System.Runtime.InteropServices.COMException)
+        {
+        }
+        await ResetYouTubeMicrophonePermissionAsync(core);
+    }
+
+    private static async Task ResetYouTubeMicrophonePermissionAsync(CoreWebView2 core)
+    {
+        try
+        {
+            await core.Profile.SetPermissionStateAsync(
+                CoreWebView2PermissionKind.Microphone,
+                YouTubeOrigin,
+                CoreWebView2PermissionState.Default);
         }
         catch (Exception exception) when (exception is
             InvalidOperationException or
-            NotSupportedException or
+            ObjectDisposedException or
             System.Runtime.InteropServices.COMException)
         {
-            _youtubeDirectOutputActive = false;
-            EnforceDirectOutputMute(core);
-            YouTubeStatusText.Text =
-                $"YouTube pausado · no se pudo preparar la salida directa: {exception.Message}";
-            try
-            {
-                await core.ExecuteScriptAsync("document.querySelector('video')?.pause();");
-            }
-            catch (InvalidOperationException)
-            {
-            }
         }
-        finally
-        {
-            try
-            {
-                await core.Profile.SetPermissionStateAsync(
-                    CoreWebView2PermissionKind.Microphone,
-                    YouTubeOrigin,
-                    CoreWebView2PermissionState.Default);
-            }
-            catch (Exception exception) when (exception is
-                InvalidOperationException or System.Runtime.InteropServices.COMException)
-            {
-            }
-            Volatile.Write(ref _youtubeDirectOutputInProgress, 0);
-        }
-    }
-
-    private string[] BuildOutputAliases(AudioOutputDeviceItem selected)
-    {
-        var aliases = new List<string> { selected.Name };
-        if (selected.IsAsio)
-        {
-            aliases.AddRange(_viewModel.AudioOutputDevices
-                .Where(device => !device.IsAsio)
-                .Select(device => (device.Name, Score: ScoreOutputName(selected.Name, device.Name)))
-                .Where(candidate => candidate.Score > 0)
-                .OrderByDescending(candidate => candidate.Score)
-                .Take(4)
-                .Select(candidate => candidate.Name));
-        }
-        return aliases.Distinct(StringComparer.CurrentCultureIgnoreCase).ToArray();
-    }
-
-    private static int ScoreOutputName(string left, string right)
-    {
-        var first = TokenizeOutputName(left);
-        var second = TokenizeOutputName(right);
-        if (first.Count == 0 || second.Count == 0)
-        {
-            return 0;
-        }
-        return first.Intersect(second).Count() * 100 / Math.Max(first.Count, second.Count);
-    }
-
-    private static HashSet<string> TokenizeOutputName(string value)
-    {
-        string[] ignored = ["audio", "asio", "directo", "direct", "driver", "output",
-            "salida", "speaker", "speakers", "altavoz", "altavoces", "headphone",
-            "headphones", "auriculares", "usb", "wasapi", "device"];
-        return value.ToLowerInvariant()
-            .Split([' ', '-', '_', '(', ')', '[', ']', '.', ',', ':'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(token => token.Length > 1 && !ignored.Contains(token, StringComparer.Ordinal))
-            .ToHashSet(StringComparer.Ordinal);
     }
 
     private async void OnDirectOutputClosed(object? sender, EventArgs eventArgs)

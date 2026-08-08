@@ -763,7 +763,14 @@ public partial class MainWindow : Window
                 {
                     _pendingYouTubePlayback = null;
                     YouTubeStatusText.Text = "Reproduciendo desde la playlist";
-                    _ = EnsureYouTubeAudioRoutingAsync();
+                    if (_youtubeDirectOutputAttached)
+                    {
+                        RequestYouTubeDirectOutputRouting();
+                    }
+                    else
+                    {
+                        _ = EnsureYouTubeAudioRoutingAsync();
+                    }
                 }
             }
             else if (root.GetProperty("type").GetString() == "playback-error" &&

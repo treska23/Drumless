@@ -14,7 +14,6 @@ namespace DrumPracticeStudio;
 public partial class MainWindow
 {
     private bool _youtubePlaybackReliabilityAttached;
-    private bool _youtubeReliabilityWebMessagesAttached;
     private string? _managedYouTubeVideoId;
     private string? _managedLoadedYouTubeVideoId;
     private string? _lastAdvancedManagedYouTubeVideoId;
@@ -70,7 +69,6 @@ public partial class MainWindow
 
         DetachYouTubeReliabilityCoreHandlers();
         _youtubeReliabilityCore = core;
-        _youtubeReliabilityWebMessagesAttached = true;
         core.WebMessageReceived += OnYouTubeReliabilityWebMessageReceived;
         core.SourceChanged += OnManagedYouTubeSourceChanged;
     }
@@ -92,7 +90,6 @@ public partial class MainWindow
         }
 
         _youtubeReliabilityCore = null;
-        _youtubeReliabilityWebMessagesAttached = false;
     }
 
     private void OnYouTubeReliabilityClosed(object? sender, EventArgs eventArgs)
@@ -460,6 +457,12 @@ public partial class MainWindow
             return;
         }
 
+        if (_youtubeDirectOutputAttached)
+        {
+            RequestYouTubeDirectOutputRouting();
+            return;
+        }
+
         var generation = Volatile.Read(ref _managedYouTubeGeneration);
         var recoveryVersion = Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
         for (var attempt = 0; attempt < 3; attempt++)
@@ -620,6 +623,12 @@ public partial class MainWindow
 
     private async Task RestartManagedYouTubeAudioAfterOutputChangeAsync()
     {
+        if (_youtubeDirectOutputAttached)
+        {
+            RequestYouTubeDirectOutputRouting();
+            return;
+        }
+
         var generation = Volatile.Read(ref _managedYouTubeGeneration);
         var recoveryVersion = Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
         Interlocked.Increment(ref _youtubeAudioProbeVersion);
