@@ -128,9 +128,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Vst3EffectGroupingOptions =
         [
             new(Vst3EffectGroupingMode.EffectType, "Tipo de efecto"),
-            new(Vst3EffectGroupingMode.Vendor, "Fabricante"),
-            new(Vst3EffectGroupingMode.VendorThenEffectType, "Fabricante → tipo"),
-            new(Vst3EffectGroupingMode.None, "Sin agrupar · A–Z")
+            new(Vst3EffectGroupingMode.Vendor, "Marca / fabricante"),
+            new(Vst3EffectGroupingMode.VendorThenEffectType, "Marca → tipo"),
+            new(Vst3EffectGroupingMode.None, "Nombre · A–Z")
         ];
         _selectedVst3EffectGroupingOption = Vst3EffectGroupingOptions[2];
         Vst3Programs = [];

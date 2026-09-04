@@ -1231,16 +1231,19 @@
                                             Margin="7,0,0,0"
                                             Command="{Binding ChooseVstEffectFolderCommand}"
                                             AutomationProperties.AutomationId="ChooseVstEffectFolderButton" />
+                                    <TextBlock Text="Organizar plugins:"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextSecondary}"
+                                               Margin="14,0,5,0" />
                                     <ComboBox ItemsSource="{Binding Vst3EffectGroupingOptions}"
                                               SelectedItem="{Binding SelectedVst3EffectGroupingOption,
                                                                      Mode=TwoWay,
                                                                      UpdateSourceTrigger=PropertyChanged}"
                                               DisplayMemberPath="Label"
-                                              Width="190"
-                                              Margin="7,0,0,0"
+                                              Width="195"
                                               SelectionChanged="OnVst3EffectGroupingModeChanged"
                                               AutomationProperties.AutomationId="Vst3EffectGroupingModePicker"
-                                              AutomationProperties.Name="Agrupar plugins de los inputs" />
+                                              AutomationProperties.Name="Organizar plugins por tipo, marca o nombre" />
                                 </WrapPanel>
                                 <TextBlock Text="{Binding Vst3EffectFoldersLabel}"
                                            Foreground="{StaticResource TextSecondary}" FontSize="11"

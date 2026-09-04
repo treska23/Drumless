@@ -38,7 +38,7 @@ public partial class MainWindow
 
         var label = new TextBlock
         {
-            Text = "Buscar plugin por nombre, fabricante o tipo",
+            Text = "Buscar plugin por nombre, marca o tipo · Intro para ver resultados",
             FontSize = 9,
             Margin = new Thickness(0, 0, 0, 2),
             Foreground = comboBox.TryFindResource("TextSecondary") as Brush
@@ -51,39 +51,26 @@ public partial class MainWindow
         };
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var searchBox = new TextBox
         {
             MinHeight = 28,
-            ToolTip = "La lista se filtra mientras escribes. Intro aplica la búsqueda y Escape la limpia."
+            ToolTip = "Escribe sin interrupciones. Pulsa Intro cuando quieras abrir los resultados."
         };
         Grid.SetColumn(searchBox, 0);
         searchRow.Children.Add(searchBox);
 
         var searchButton = new Button
         {
-            Content = "Buscar",
+            Content = "Ver resultados",
             Margin = new Thickness(6, 0, 0, 0),
             Padding = new Thickness(10, 4, 10, 4),
-            ToolTip = "Filtrar la lista de plugins",
+            ToolTip = "Abrir los plugins que coinciden con la búsqueda",
             IsEnabled = false
         };
         searchButton.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryButton");
         Grid.SetColumn(searchButton, 1);
         searchRow.Children.Add(searchButton);
-
-        var clearButton = new Button
-        {
-            Content = "Limpiar",
-            Margin = new Thickness(6, 0, 0, 0),
-            Padding = new Thickness(10, 4, 10, 4),
-            ToolTip = "Quitar el filtro y mostrar el catálogo completo",
-            IsEnabled = false
-        };
-        clearButton.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryButton");
-        Grid.SetColumn(clearButton, 2);
-        searchRow.Children.Add(clearButton);
 
         parent.Children.Insert(comboIndex, label);
         parent.Children.Insert(comboIndex + 1, searchRow);
@@ -96,7 +83,6 @@ public partial class MainWindow
             searchBox,
             label,
             searchButton,
-            clearButton,
             searchRow,
             searchDelay);
         Vst3PickerSearchStates.Add(comboBox, state);
@@ -120,11 +106,10 @@ public partial class MainWindow
             }
             comboBox.IsDropDownOpen = false;
             searchButton.IsEnabled = false;
-            clearButton.IsEnabled = false;
-            label.Text = "Buscar plugin por nombre, fabricante o tipo";
+            label.Text = "Buscar plugin por nombre, marca o tipo · Intro para ver resultados";
         }
 
-        void RunSearch()
+        int UpdateFilter()
         {
             searchDelay.Stop();
             var query = searchBox.Text.Trim();
@@ -132,7 +117,7 @@ public partial class MainWindow
             {
                 ResetSearch(clearText: false);
                 label.Text = "Escribe algo antes de buscar; no se ejecutan búsquedas vacías.";
-                return;
+                return 0;
             }
 
             var matches = ApplyVst3PickerFilter(comboBox, query);
@@ -140,32 +125,34 @@ public partial class MainWindow
             {
                 < 0 => "No se pudo abrir el catálogo de plugins.",
                 0 => $"Sin resultados para «{query}».",
-                1 => $"1 plugin encontrado para «{query}».",
-                _ => $"{matches} plugins encontrados para «{query}»."
+                1 => $"1 plugin encontrado para «{query}» · pulsa Intro para abrirlo.",
+                _ => $"{matches} plugins encontrados para «{query}» · pulsa Intro para abrirlos."
             };
+            return matches;
+        }
+
+        void ShowResults()
+        {
+            var matches = UpdateFilter();
             comboBox.IsDropDownOpen = matches > 0;
         }
 
-        searchDelay.Tick += (_, _) => RunSearch();
-        searchButton.Click += (_, _) => RunSearch();
-        clearButton.Click += (_, _) =>
-        {
-            ResetSearch(clearText: true);
-            searchBox.Focus();
-        };
+        // Mientras se escribe sólo se actualiza el filtro y el contador. El desplegable se abre
+        // de forma explícita para que nunca tape ni robe el foco al cuadro de búsqueda.
+        searchDelay.Tick += (_, _) => UpdateFilter();
+        searchButton.Click += (_, _) => ShowResults();
         searchBox.TextChanged += (_, _) =>
         {
             searchDelay.Stop();
             var hasQuery = !string.IsNullOrWhiteSpace(searchBox.Text);
             searchButton.IsEnabled = hasQuery;
-            clearButton.IsEnabled = hasQuery;
             if (!hasQuery)
             {
                 ResetSearch(clearText: false);
                 return;
             }
 
-            label.Text = "Buscando en el catálogo…";
+            label.Text = "Filtrando el catálogo…";
             searchDelay.Start();
         };
         searchBox.KeyDown += (_, eventArgs) =>
@@ -179,7 +166,7 @@ public partial class MainWindow
 
             if (eventArgs.Key == Key.Enter)
             {
-                RunSearch();
+                ShowResults();
                 eventArgs.Handled = true;
             }
         };
@@ -276,14 +263,12 @@ public partial class MainWindow
         TextBox searchBox,
         TextBlock label,
         Button searchButton,
-        Button clearButton,
         Grid searchRow,
         System.Windows.Threading.DispatcherTimer searchDelay)
     {
         public TextBox SearchBox { get; } = searchBox;
         public TextBlock Label { get; } = label;
         public Button SearchButton { get; } = searchButton;
-        public Button ClearButton { get; } = clearButton;
         public Grid SearchRow { get; } = searchRow;
         public System.Windows.Threading.DispatcherTimer SearchDelay { get; } = searchDelay;
     }
