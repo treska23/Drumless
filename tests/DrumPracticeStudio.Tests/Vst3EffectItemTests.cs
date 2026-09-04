@@ -36,6 +36,28 @@ public sealed class Vst3EffectItemTests
     }
 
     [TestMethod]
+    [DataRow("VINTAGE COMPRESSOR")]
+    [DataRow("vintagecompressor")]
+    [DataRow("v i n t a g e compressor")]
+    [DataRow("vintgae compressor")]
+    [DataRow("compresor")]
+    [DataRow("stainberg")]
+    public void MatchesSearch_IgnoresCaseSpacesAndMinorTypos(string query)
+    {
+        var item = Create("Vintage Compressor", "Steinberg", "Fx|Dynamics|Compressor");
+
+        Assert.IsTrue(item.MatchesSearch(query));
+    }
+
+    [TestMethod]
+    public void MatchesSearch_DoesNotFuzzyMatchVeryShortUnrelatedTerms()
+    {
+        var item = Create("Vintage Compressor", "Steinberg", "Fx|Dynamics|Compressor");
+
+        Assert.IsFalse(item.MatchesSearch("rvb"));
+    }
+
+    [TestMethod]
     public void MatchesSearch_RejectsUnrelatedText()
     {
         var item = Create("Vintage Compressor", "Steinberg", "Fx|Dynamics|Compressor");

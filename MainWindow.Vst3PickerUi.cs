@@ -38,7 +38,7 @@ public partial class MainWindow
 
         var label = new TextBlock
         {
-            Text = "Buscar plugin por nombre, marca o tipo · Intro para ver resultados",
+            Text = "Búsqueda flexible por nombre, marca o tipo · Intro para ver resultados",
             FontSize = 9,
             Margin = new Thickness(0, 0, 0, 2),
             Foreground = comboBox.TryFindResource("TextSecondary") as Brush
@@ -55,7 +55,7 @@ public partial class MainWindow
         var searchBox = new TextBox
         {
             MinHeight = 28,
-            ToolTip = "Escribe sin interrupciones. Pulsa Intro cuando quieras abrir los resultados."
+            ToolTip = "No distingue mayúsculas, espacios ni tildes y tolera erratas. Pulsa Intro para abrir los resultados."
         };
         Grid.SetColumn(searchBox, 0);
         searchRow.Children.Add(searchBox);
@@ -106,7 +106,7 @@ public partial class MainWindow
             }
             comboBox.IsDropDownOpen = false;
             searchButton.IsEnabled = false;
-            label.Text = "Buscar plugin por nombre, marca o tipo · Intro para ver resultados";
+            label.Text = "Búsqueda flexible por nombre, marca o tipo · Intro para ver resultados";
         }
 
         int UpdateFilter()
