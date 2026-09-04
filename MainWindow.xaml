@@ -1378,16 +1378,15 @@
                                                                         <ComboBox ItemsSource="{Binding DataContext.Vst3Effects,
                                                                                                         RelativeSource={RelativeSource AncestorType=Window}}"
                                                                                   DisplayMemberPath="DisplayLabel"
-                                                                                  IsEditable="True"
+                                                                                  IsEditable="False"
                                                                                   IsTextSearchEnabled="False"
-                                                                                  StaysOpenOnEdit="True"
+                                                                                  StaysOpenOnEdit="False"
                                                                                   MaxDropDownHeight="430"
                                                                                   Tag="{Binding}"
                                                                                   Loaded="OnVst3EffectPickerLoaded"
-                                                                                  DropDownOpened="OnVst3EffectPickerDropDownOpened"
                                                                                   SelectionChanged="OnInputVst3EffectSelectionChanged"
-                                                                                  ToolTip="Escribe para buscar por nombre, fabricante o tipo"
-                                                                                  AutomationProperties.Name="Buscar y elegir efecto VST3 externo">
+                                                                                  ToolTip="Elige un efecto del resultado de búsqueda"
+                                                                                  AutomationProperties.Name="Elegir efecto VST3 externo">
                                                                             <ComboBox.GroupStyle>
                                                                                 <GroupStyle>
                                                                                     <GroupStyle.HeaderTemplate>
@@ -1545,16 +1544,15 @@
                                                                         <ComboBox ItemsSource="{Binding DataContext.Vst3Effects,
                                                                                                         RelativeSource={RelativeSource AncestorType=Window}}"
                                                                                   DisplayMemberPath="DisplayLabel"
-                                                                                  IsEditable="True"
+                                                                                  IsEditable="False"
                                                                                   IsTextSearchEnabled="False"
-                                                                                  StaysOpenOnEdit="True"
+                                                                                  StaysOpenOnEdit="False"
                                                                                   MaxDropDownHeight="430"
                                                                                   Tag="{Binding}"
                                                                                   Loaded="OnVst3EffectPickerLoaded"
-                                                                                  DropDownOpened="OnVst3EffectPickerDropDownOpened"
                                                                                   SelectionChanged="OnInputVst3EffectSelectionChanged"
-                                                                                  ToolTip="Escribe para buscar por nombre, fabricante o tipo"
-                                                                                  AutomationProperties.Name="Buscar y elegir efecto VST3 externo">
+                                                                                  ToolTip="Elige un efecto del resultado de búsqueda"
+                                                                                  AutomationProperties.Name="Elegir efecto VST3 externo">
                                                                             <ComboBox.GroupStyle>
                                                                                 <GroupStyle>
                                                                                     <GroupStyle.HeaderTemplate>

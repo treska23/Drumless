@@ -19,11 +19,20 @@ public sealed class Vst3EffectItemTests
     [DataRow("stein")]
     [DataRow("compressor")]
     [DataRow("dynamics vintage")]
+    [DataRow("vintage-compressor")]
     public void MatchesSearch_FindsNameVendorCategoryAndMultipleTerms(string query)
     {
         var item = Create("Vintage Compressor", "Steinberg", "Fx|Dynamics|Compressor");
 
         Assert.IsTrue(item.MatchesSearch(query));
+    }
+
+    [TestMethod]
+    public void MatchesSearch_IgnoresAccentsAndPunctuation()
+    {
+        var item = Create("Ecualización clásica", "Música Pro", "Fx|EQ");
+
+        Assert.IsTrue(item.MatchesSearch("ecualizacion musica"));
     }
 
     [TestMethod]

@@ -41,7 +41,6 @@ public partial class MainWindow : Window
     private ChordSheetWindow? _chordSheetWindow;
     private SongEffectProfileWindow? _songEffectProfileWindow;
     private readonly HashSet<ComboBox> _configuredVstEffectPickers = [];
-    private readonly Dictionary<ComboBox, int> _vstEffectFilterVersions = [];
 
     private void OnMixerFaderPreviewMouseLeftButtonDown(
         object sender,
@@ -1207,6 +1206,7 @@ public partial class MainWindow : Window
     private void OnVst3EffectPickerLoaded(object sender, RoutedEventArgs e)
     {
         if (sender is not ComboBox comboBox ||
+            comboBox.Tag is not AudioEffectSlotItem slot ||
             !_configuredVstEffectPickers.Add(comboBox) ||
             comboBox.ItemsSource is not IList effects)
         {
@@ -1218,15 +1218,18 @@ public partial class MainWindow : Window
             view,
             _viewModel.SelectedVst3EffectGroupingOption.Mode);
         comboBox.ItemsSource = view;
+        comboBox.IsEditable = false;
+        comboBox.IsTextSearchEnabled = false;
+        comboBox.StaysOpenOnEdit = false;
+        comboBox.IsSynchronizedWithCurrentItem = false;
 
-        if (comboBox.Template.FindName("PART_EditableTextBox", comboBox) is TextBox searchBox)
-        {
-            searchBox.TextChanged += (_, _) =>
-            {
-                var query = searchBox.Text;
-                QueueVst3EffectFilter(comboBox, view, query, openDropDown: true);
-            };
-        }
+        var explicitReference = slot.ExternalVst3;
+        _ = comboBox.Dispatcher.BeginInvoke(
+            DispatcherPriority.ContextIdle,
+            new Action(() => ConfigureVst3PickerSearch(
+                comboBox,
+                slot,
+                explicitReference)));
     }
 
     private void OnVst3EffectGroupingModeChanged(
@@ -1298,68 +1301,6 @@ public partial class MainWindow : Window
             view.SortDescriptions.Add(new SortDescription(
                 nameof(Vst3EffectItem.DisplayName),
                 ListSortDirection.Ascending));
-        }
-    }
-
-    private void QueueVst3EffectFilter(
-        ComboBox comboBox,
-        ListCollectionView view,
-        string? query,
-        bool openDropDown)
-    {
-        var version = _vstEffectFilterVersions.TryGetValue(comboBox, out var current)
-            ? current + 1
-            : 1;
-        _vstEffectFilterVersions[comboBox] = version;
-        _ = comboBox.Dispatcher.BeginInvoke(
-            DispatcherPriority.Background,
-            new Action(() =>
-            {
-                if (!_vstEffectFilterVersions.TryGetValue(comboBox, out var latest) ||
-                    latest != version ||
-                    !ReferenceEquals(comboBox.ItemsSource, view))
-                {
-                    return;
-                }
-
-                view.Filter = string.IsNullOrWhiteSpace(query)
-                    ? null
-                    : item => item is Vst3EffectItem effect &&
-                              effect.MatchesSearch(query);
-                if (openDropDown &&
-                    !comboBox.IsDropDownOpen &&
-                    comboBox.IsKeyboardFocusWithin)
-                {
-                    comboBox.IsDropDownOpen = true;
-                }
-            }));
-    }
-
-    private void OnVst3EffectPickerDropDownOpened(object sender, EventArgs e)
-    {
-        if (sender is not ComboBox
-            {
-                ItemsSource: ListCollectionView view
-            } comboBox)
-        {
-            return;
-        }
-
-        if (comboBox.Template.FindName("PART_EditableTextBox", comboBox) is TextBox searchBox)
-        {
-            if (comboBox.SelectedItem is Vst3EffectItem selectedEffect &&
-                string.Equals(
-                    searchBox.Text,
-                    selectedEffect.DisplayLabel,
-                    StringComparison.CurrentCulture))
-            {
-                QueueVst3EffectFilter(comboBox, view, null, openDropDown: false);
-                searchBox.SelectAll();
-            }
-            else if (string.IsNullOrWhiteSpace(searchBox.Text))
-            {
-                QueueVst3EffectFilter(comboBox, view, null, openDropDown: false);
-            }
         }
     }
 

@@ -1,4 +1,6 @@
 using NAudio.Vst3;
+using System.Globalization;
+using System.Text;
 
 namespace DrumPracticeStudio.Models;
 
@@ -50,12 +52,11 @@ public sealed class Vst3EffectItem(
             return true;
         }
 
-        var searchableText =
-            $"{DisplayName} {Vendor} {EffectType} {PluginClass.SubCategories} {Module.Name}";
-        return query.Split(
-                ' ',
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .All(term => searchableText.Contains(term, StringComparison.CurrentCultureIgnoreCase));
+        var searchableText = NormalizeSearchText(
+            $"{DisplayName} {Vendor} {EffectType} {PluginClass.SubCategories} {Module.Name}");
+        return NormalizeSearchText(query)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .All(term => searchableText.Contains(term, StringComparison.Ordinal));
     }
 
     public Vst3EffectReference ToReference(string? presetPath = null) => new(
@@ -83,4 +84,30 @@ public sealed class Vst3EffectItem(
 
     public static string GetCatalogId(string modulePath, string classId) =>
         $"{Path.GetFullPath(modulePath)}|{classId.Trim()}";
+
+    private static string NormalizeSearchText(string value)
+    {
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(decomposed.Length);
+        var previousWasSeparator = false;
+        foreach (var character in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+                previousWasSeparator = false;
+            }
+            else if (!previousWasSeparator)
+            {
+                builder.Append(' ');
+                previousWasSeparator = true;
+            }
+        }
+        return builder.ToString().Trim();
+    }
 }

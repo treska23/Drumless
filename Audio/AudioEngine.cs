@@ -22,6 +22,7 @@ public sealed class AudioEngine : IDisposable
     private AudioEffectRackSampleProvider? _youtubeEffectRack;
     private AudioEffectSlotSetting[] _youtubeEffectSettings = [];
     private AudioEffectSlotSetting[] _masterEffectSettings = [];
+    private AudioInputMonitorSetting[] _lastOutputInputMonitorSettings = [];
     private bool _youtubeEffectsBypassed;
     private bool _masterEffectsBypassed;
     private AudioOutputSession? _output;
@@ -238,6 +239,7 @@ public sealed class AudioEngine : IDisposable
         var activeOutput = replacement ??
                            throw new InvalidOperationException("La salida de audio no se inicializó.");
         _output = activeOutput;
+        _lastOutputInputMonitorSettings = activeOutput.InputMonitorSettings.ToArray();
         OutputDeviceId = activeOutput.DeviceId;
         OutputDeviceName = activeOutput.DeviceName;
         Status = DescribeOutput(
@@ -340,6 +342,7 @@ public sealed class AudioEngine : IDisposable
         }
 
         _output = replacement;
+        _lastOutputInputMonitorSettings = replacement.InputMonitorSettings.ToArray();
         Status = DescribeOutput(
             replacement,
             _directVstInstrument is null ? "motor interno" : "VST3 directo");
@@ -349,8 +352,42 @@ public sealed class AudioEngine : IDisposable
     public void RecoverOutputDevice()
     {
         var deviceId = OutputDeviceId;
-        var settings = AudioInputMonitorSettings.ToArray();
+        var settings = _output?.InputMonitorSettings.ToArray() ??
+                       _lastOutputInputMonitorSettings.ToArray();
         SelectOutputDevice(deviceId, settings);
+    }
+
+    public void QuarantineFaultedOutput(AudioOutputFault fault)
+    {
+        ArgumentNullException.ThrowIfNull(fault);
+        var failedOutput = _output;
+        if (failedOutput is null ||
+            !string.Equals(
+                failedOutput.DeviceId,
+                fault.DeviceId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _lastOutputInputMonitorSettings = failedOutput.InputMonitorSettings.ToArray();
+        _output = null;
+        failedOutput.Faulted -= OnOutputFaulted;
+        try
+        {
+            // El callback que notificó el fallo ya ha terminado cuando el ViewModel llama aquí.
+            // Liberamos una sola vez el driver roto y no volvemos a abrirlo automáticamente.
+            failedOutput.Dispose();
+        }
+        catch (Exception exception)
+        {
+            Status = $"Audio aislado con aviso al liberar el driver: {exception.Message}";
+            IsAvailable = false;
+            return;
+        }
+
+        Status = $"Audio aislado por seguridad · {fault.DeviceName}";
+        IsAvailable = false;
     }
 
     public void SetAudioInputGain(float gain) =>

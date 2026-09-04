@@ -77,6 +77,10 @@ internal sealed class AudioOutputSession : IDisposable
                 (int)Math.Ceiling(device.InputLatencySamples * 1_000d / sampleRate));
         }
         device.Stopped += OnAsioStopped;
+        if (duplexRenderer is not null)
+        {
+            duplexRenderer.Faulted += OnAsioRendererFaulted;
+        }
         device.DriverResetRequest += (_, _) => ReportFault(
             new InvalidOperationException(
                 "El controlador ASIO solicitó reiniciar su configuración."));
@@ -449,6 +453,10 @@ internal sealed class AudioOutputSession : IDisposable
 
         _disposed = true;
         Stop();
+        if (_asioDuplexRenderer is not null)
+        {
+            _asioDuplexRenderer.Faulted -= OnAsioRendererFaulted;
+        }
         _asioDevice?.Dispose();
         _asioDuplexRenderer?.Dispose();
         _masterEffectRack?.Dispose();
@@ -462,6 +470,11 @@ internal sealed class AudioOutputSession : IDisposable
 
     private void OnAsioStopped(object? sender, StoppedEventArgs eventArgs) =>
         OnBackendStopped("ASIO", eventArgs.Exception);
+
+    private void OnAsioRendererFaulted(Exception exception) =>
+        ReportFault(new InvalidOperationException(
+            $"El procesamiento ASIO falló y se silenció para proteger la salida: {exception.Message}",
+            exception));
 
     private void OnBackendStopped(string backend, Exception? exception)
     {
@@ -498,14 +511,21 @@ internal sealed class AudioOutputSession : IDisposable
             return;
         }
 
-        Faulted?.Invoke(this, new AudioOutputFault(
-            DeviceId,
-            DeviceName,
-            IsAsio ? "ASIO" : "WASAPI",
-            exception.Message,
-            exception.GetType().Name,
-            GetDiagnosticErrorCode(exception),
-            DateTimeOffset.UtcNow));
+        try
+        {
+            Faulted?.Invoke(this, new AudioOutputFault(
+                DeviceId,
+                DeviceName,
+                IsAsio ? "ASIO" : "WASAPI",
+                exception.Message,
+                exception.GetType().Name,
+                GetDiagnosticErrorCode(exception),
+                DateTimeOffset.UtcNow));
+        }
+        catch
+        {
+            // Nunca se permite que una excepción de la interfaz cruce al callback nativo ASIO.
+        }
     }
 
     private static string GetDiagnosticErrorCode(Exception exception) =>
@@ -523,6 +543,9 @@ internal sealed class AudioOutputSession : IDisposable
         private readonly float[][] _inputBuffers;
         private readonly OutputRecordingSink? _recordingSink;
         private readonly AudioEffectRackProcessor _masterEffects;
+        private int _processingFailed;
+
+        public event Action<Exception>? Faulted;
 
         public IReadOnlyList<string> EffectWarnings => _processors
             .Select(processor => processor.ExternalWarning)
@@ -619,6 +642,33 @@ internal sealed class AudioOutputSession : IDisposable
 
         public void Process(in AsioProcessBuffers buffers)
         {
+            if (Volatile.Read(ref _processingFailed) != 0)
+            {
+                Silence(buffers);
+                return;
+            }
+
+            try
+            {
+                ProcessCore(buffers);
+            }
+            catch (Exception exception)
+            {
+                Interlocked.Exchange(ref _processingFailed, 1);
+                Silence(buffers);
+                try
+                {
+                    Faulted?.Invoke(exception);
+                }
+                catch
+                {
+                    // El callback ASIO debe regresar siempre al driver, incluso si falla un oyente.
+                }
+            }
+        }
+
+        private void ProcessCore(in AsioProcessBuffers buffers)
+        {
             var requiredSamples = buffers.Frames * 2;
             var read = _provider.Read(_interleavedOutput.AsSpan(0, requiredSamples));
             if (read < requiredSamples)
@@ -665,6 +715,19 @@ internal sealed class AudioOutputSession : IDisposable
             if (_recordingSink is not null)
             {
                 _recordingSink.Capture(_interleavedOutput.AsSpan(0, requiredSamples));
+            }
+        }
+
+        private static void Silence(in AsioProcessBuffers buffers)
+        {
+            try
+            {
+                buffers.GetOutput(0)[..buffers.Frames].Clear();
+                buffers.GetOutput(1)[..buffers.Frames].Clear();
+            }
+            catch
+            {
+                // Incluso el acceso a buffers inválidos de un driver que acaba de caer puede fallar.
             }
         }
 

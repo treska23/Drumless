@@ -2680,7 +2680,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         AudioAlertDetails =
             $"{fault.Backend} · {fault.ExceptionType} {fault.ErrorCode} · {fault.Message}";
         AudioOutputStatus = $"Salida interrumpida: {fault.Message}";
-        StatusMessage = "La salida de audio se ha detenido; intentando recuperarla…";
+        StatusMessage = "La salida de audio se ha detenido y se está aislando el controlador…";
 
         if (_audio.IsTrackPlaying)
         {
@@ -2694,7 +2694,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             AudioAlertDetails += " · La grabación activa se cerró para conservarla.";
         }
 
-        await RecoverAudioOutputAsync(fault, automaticAttempts: 3);
+        _audio.QuarantineFaultedOutput(fault);
+        var automaticAttempts = AudioRecoveryPolicy.GetAutomaticAttemptCount(fault.Backend);
+        if (automaticAttempts == 0)
+        {
+            AudioAlertMessage = $"La salida {fault.DeviceName} se ha detenido y ha quedado aislada";
+            AudioAlertDetails +=
+                " · Por seguridad no se reabre automáticamente un controlador ASIO que acaba de fallar. " +
+                "Pulsa «Reintentar» una vez cuando la tarjeta esté estable o elige otra salida en Dispositivos.";
+            AudioOutputStatus = $"ASIO aislado por seguridad: {fault.Message}";
+            StatusMessage = "La aplicación continúa abierta y el audio queda pausado hasta que decidas reconectarlo.";
+            AudioDiagnosticLog.Append(fault, "ASIO aislado; reconexión automática bloqueada");
+            return;
+        }
+
+        await RecoverAudioOutputAsync(fault, automaticAttempts);
     }
 
     private Task RetryAudioOutputAsync()

@@ -5,7 +5,6 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Threading;
 using DrumPracticeStudio.Models;
 
 namespace DrumPracticeStudio;
@@ -14,44 +13,6 @@ public partial class MainWindow
 {
     private static readonly ConditionalWeakTable<ComboBox, Vst3PickerSearchState>
         Vst3PickerSearchStates = new();
-
-    static MainWindow()
-    {
-        EventManager.RegisterClassHandler(
-            typeof(ComboBox),
-            FrameworkElement.LoadedEvent,
-            new RoutedEventHandler(OnAnyComboBoxLoaded),
-            handledEventsToo: true);
-    }
-
-    private static void OnAnyComboBoxLoaded(object sender, RoutedEventArgs e)
-    {
-        if (sender is not ComboBox comboBox ||
-            comboBox.Tag is not AudioEffectSlotItem slot)
-        {
-            return;
-        }
-
-        // El selector ya no hace de cuadro de búsqueda. Mantener ambas funciones en el mismo
-        // ComboBox hacía que WPF refrescara la vista mientras se escribía, comiera caracteres y
-        // perdiera SelectedItem. El ComboBox queda como selector puro.
-        var explicitReference = slot.ExternalVst3;
-        comboBox.IsEditable = false;
-        comboBox.IsTextSearchEnabled = false;
-        comboBox.StaysOpenOnEdit = false;
-        comboBox.IsSynchronizedWithCurrentItem = false;
-
-        if (explicitReference is null)
-        {
-            comboBox.SelectedIndex = -1;
-            comboBox.Text = string.Empty;
-        }
-
-        // El Loaded del propio ComboBox termina primero de envolver ItemsSource en ListCollectionView.
-        _ = comboBox.Dispatcher.BeginInvoke(
-            DispatcherPriority.ContextIdle,
-            new Action(() => ConfigureVst3PickerSearch(comboBox, slot, explicitReference)));
-    }
 
     private static void ConfigureVst3PickerSearch(
         ComboBox comboBox,
@@ -77,7 +38,7 @@ public partial class MainWindow
 
         var label = new TextBlock
         {
-            Text = "Buscar plugin",
+            Text = "Buscar plugin por nombre, fabricante o tipo",
             FontSize = 9,
             Margin = new Thickness(0, 0, 0, 2),
             Foreground = comboBox.TryFindResource("TextSecondary") as Brush
@@ -90,11 +51,12 @@ public partial class MainWindow
         };
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var searchBox = new TextBox
         {
             MinHeight = 28,
-            ToolTip = "Escribe el nombre, fabricante o tipo y pulsa Buscar"
+            ToolTip = "La lista se filtra mientras escribes. Intro aplica la búsqueda y Escape la limpia."
         };
         Grid.SetColumn(searchBox, 0);
         searchRow.Children.Add(searchBox);
@@ -104,34 +66,122 @@ public partial class MainWindow
             Content = "Buscar",
             Margin = new Thickness(6, 0, 0, 0),
             Padding = new Thickness(10, 4, 10, 4),
-            ToolTip = "Filtrar la lista de plugins"
+            ToolTip = "Filtrar la lista de plugins",
+            IsEnabled = false
         };
         searchButton.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryButton");
         Grid.SetColumn(searchButton, 1);
         searchRow.Children.Add(searchButton);
 
+        var clearButton = new Button
+        {
+            Content = "Limpiar",
+            Margin = new Thickness(6, 0, 0, 0),
+            Padding = new Thickness(10, 4, 10, 4),
+            ToolTip = "Quitar el filtro y mostrar el catálogo completo",
+            IsEnabled = false
+        };
+        clearButton.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryButton");
+        Grid.SetColumn(clearButton, 2);
+        searchRow.Children.Add(clearButton);
+
         parent.Children.Insert(comboIndex, label);
         parent.Children.Insert(comboIndex + 1, searchRow);
 
-        var state = new Vst3PickerSearchState(searchBox, label, searchButton, searchRow);
+        var searchDelay = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(220)
+        };
+        var state = new Vst3PickerSearchState(
+            searchBox,
+            label,
+            searchButton,
+            clearButton,
+            searchRow,
+            searchDelay);
         Vst3PickerSearchStates.Add(comboBox, state);
 
-        void RunSearch()
+        void ResetSearch(bool clearText)
         {
-            ApplyVst3PickerFilter(comboBox, searchBox.Text);
-            comboBox.IsDropDownOpen = true;
-        }
-
-        searchButton.Click += (_, _) => RunSearch();
-        searchBox.KeyDown += (_, eventArgs) =>
-        {
-            if (eventArgs.Key != Key.Enter)
+            searchDelay.Stop();
+            if (clearText && searchBox.Text.Length > 0)
             {
+                searchBox.Clear();
                 return;
             }
 
-            RunSearch();
-            eventArgs.Handled = true;
+            ApplyVst3PickerFilter(comboBox, null);
+            if (slot.ExternalVst3 is { } selectedReference)
+            {
+                RestoreExplicitVst3Selection(
+                    comboBox,
+                    slot,
+                    selectedReference);
+            }
+            comboBox.IsDropDownOpen = false;
+            searchButton.IsEnabled = false;
+            clearButton.IsEnabled = false;
+            label.Text = "Buscar plugin por nombre, fabricante o tipo";
+        }
+
+        void RunSearch()
+        {
+            searchDelay.Stop();
+            var query = searchBox.Text.Trim();
+            if (query.Length == 0)
+            {
+                ResetSearch(clearText: false);
+                label.Text = "Escribe algo antes de buscar; no se ejecutan búsquedas vacías.";
+                return;
+            }
+
+            var matches = ApplyVst3PickerFilter(comboBox, query);
+            label.Text = matches switch
+            {
+                < 0 => "No se pudo abrir el catálogo de plugins.",
+                0 => $"Sin resultados para «{query}».",
+                1 => $"1 plugin encontrado para «{query}».",
+                _ => $"{matches} plugins encontrados para «{query}»."
+            };
+            comboBox.IsDropDownOpen = matches > 0;
+        }
+
+        searchDelay.Tick += (_, _) => RunSearch();
+        searchButton.Click += (_, _) => RunSearch();
+        clearButton.Click += (_, _) =>
+        {
+            ResetSearch(clearText: true);
+            searchBox.Focus();
+        };
+        searchBox.TextChanged += (_, _) =>
+        {
+            searchDelay.Stop();
+            var hasQuery = !string.IsNullOrWhiteSpace(searchBox.Text);
+            searchButton.IsEnabled = hasQuery;
+            clearButton.IsEnabled = hasQuery;
+            if (!hasQuery)
+            {
+                ResetSearch(clearText: false);
+                return;
+            }
+
+            label.Text = "Buscando en el catálogo…";
+            searchDelay.Start();
+        };
+        searchBox.KeyDown += (_, eventArgs) =>
+        {
+            if (eventArgs.Key == Key.Escape)
+            {
+                ResetSearch(clearText: true);
+                eventArgs.Handled = true;
+                return;
+            }
+
+            if (eventArgs.Key == Key.Enter)
+            {
+                RunSearch();
+                eventArgs.Handled = true;
+            }
         };
 
         comboBox.SelectionChanged += (_, _) =>
@@ -143,8 +193,7 @@ public partial class MainWindow
 
             // Tras elegir un plugin se restaura el catálogo completo. La selección permanece en
             // el ComboBox y una búsqueda posterior parte de cero.
-            searchBox.Clear();
-            ApplyVst3PickerFilter(comboBox, null);
+            ResetSearch(clearText: true);
         };
 
         // No eliminamos el estado en Unloaded. ObservableCollection.Move puede descargar y volver a
@@ -155,17 +204,18 @@ public partial class MainWindow
         RestoreExplicitVst3Selection(comboBox, slot, explicitReference);
     }
 
-    private static void ApplyVst3PickerFilter(ComboBox comboBox, string? query)
+    private static int ApplyVst3PickerFilter(ComboBox comboBox, string? query)
     {
         if (comboBox.ItemsSource is not ListCollectionView view)
         {
-            return;
+            return -1;
         }
 
         var normalized = query?.Trim();
         view.Filter = string.IsNullOrWhiteSpace(normalized)
             ? null
             : item => item is Vst3EffectItem effect && effect.MatchesSearch(normalized);
+        return view.Count;
     }
 
     private static void RestoreExplicitVst3Selection(
@@ -226,11 +276,15 @@ public partial class MainWindow
         TextBox searchBox,
         TextBlock label,
         Button searchButton,
-        Grid searchRow)
+        Button clearButton,
+        Grid searchRow,
+        System.Windows.Threading.DispatcherTimer searchDelay)
     {
         public TextBox SearchBox { get; } = searchBox;
         public TextBlock Label { get; } = label;
         public Button SearchButton { get; } = searchButton;
+        public Button ClearButton { get; } = clearButton;
         public Grid SearchRow { get; } = searchRow;
+        public System.Windows.Threading.DispatcherTimer SearchDelay { get; } = searchDelay;
     }
 }
