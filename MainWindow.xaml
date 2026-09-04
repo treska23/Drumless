@@ -6,6 +6,7 @@
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
         Title="Drum Practice Studio"
+        Icon="/Assets/DrumPracticeStudio.ico"
         Width="1420"
         Height="900"
         MinWidth="240"

@@ -1,7 +1,8 @@
 <Window x:Class="DrumPracticeStudio.Views.PlaylistWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Playlist · Drum Practice Studio" Width="900" Height="720"
+        Title="Playlist · Drum Practice Studio" Icon="/Assets/DrumPracticeStudio.ico"
+        Width="900" Height="720"
         MinWidth="560" MinHeight="420" Background="{StaticResource AppBackground}"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="18">

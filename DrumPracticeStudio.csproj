@@ -7,11 +7,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\DrumPracticeStudio.ico</ApplicationIcon>
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>DrumPracticeStudio</AssemblyName>
     <RootNamespace>DrumPracticeStudio</RootNamespace>
     <DefaultItemExcludes>$(DefaultItemExcludes);mobile\**</DefaultItemExcludes>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\DrumPracticeStudio.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="3.0.0-preview.18" />
