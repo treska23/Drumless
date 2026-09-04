@@ -105,6 +105,18 @@ public partial class MainWindow
         Closed -= OnYouTubeReliabilityClosed;
     }
 
+    private void PrepareForManualYouTubeNavigation()
+    {
+        _pendingYouTubePlayback = null;
+        _managedYouTubeVideoId = null;
+        _managedLoadedYouTubeVideoId = null;
+        _lastAdvancedManagedYouTubeVideoId = null;
+        Interlocked.Increment(ref _managedYouTubeGeneration);
+        Interlocked.Increment(ref _managedYouTubeAudioRecoveryVersion);
+        Interlocked.Increment(ref _youtubeAudioProbeVersion);
+        _viewModel.ClearCurrentYouTubeVideo();
+    }
+
     private async void OnManagedYouTubePlaybackRequested(
         object? sender,
         YouTubePlaybackRequest request)
@@ -442,7 +454,7 @@ public partial class MainWindow
 
         if (string.Equals(type, "managed-video-position", StringComparison.Ordinal))
         {
-            _viewModel.UpdateYouTubeTransport(seconds, duration, playing);
+            _viewModel.UpdateYouTubeTransport(videoId, seconds, duration, playing);
             return;
         }
 
@@ -491,8 +503,14 @@ public partial class MainWindow
 
     private async void OnManagedYouTubeSeekRequested(object? sender, double seconds)
     {
-        if (YouTubeWebView.CoreWebView2 is not { } core ||
-            _managedYouTubeVideoId is not { Length: > 0 } expectedVideoId)
+        if (YouTubeWebView.CoreWebView2 is not { } core)
+        {
+            return;
+        }
+
+        var expectedVideoId = _managedYouTubeVideoId;
+        if (string.IsNullOrWhiteSpace(expectedVideoId) &&
+            !YouTubeNavigationService.TryGetVideoId(YouTubeWebView.Source, out expectedVideoId))
         {
             return;
         }

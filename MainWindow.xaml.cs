@@ -380,6 +380,7 @@ public partial class MainWindow : Window
 
         if (YouTubeNavigationService.TryGetNavigationUri(query, out var directUri))
         {
+            PrepareForManualYouTubeNavigation();
             YouTubeStatusText.Text = YouTubeNavigationService.TryGetPlaylistId(directUri, out _)
                 ? "Abriendo playlist de YouTube…"
                 : "Abriendo enlace de YouTube…";
@@ -387,6 +388,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        PrepareForManualYouTubeNavigation();
         YouTubeStatusText.Text = $"Buscando «{query}»…";
         YouTubeWebView.Source = YouTubeNavigationService.CreateSearchUri(query);
     }
@@ -395,6 +397,7 @@ public partial class MainWindow : Window
     {
         if (YouTubeWebView.CanGoBack)
         {
+            PrepareForManualYouTubeNavigation();
             YouTubeWebView.GoBack();
         }
     }
@@ -403,6 +406,7 @@ public partial class MainWindow : Window
     {
         if (YouTubeWebView.CanGoForward)
         {
+            PrepareForManualYouTubeNavigation();
             YouTubeWebView.GoForward();
         }
     }
@@ -410,6 +414,7 @@ public partial class MainWindow : Window
     private async void OnYouTubeHomeClick(object sender, RoutedEventArgs e)
     {
         await EnsureYouTubeReadyAsync();
+        PrepareForManualYouTubeNavigation();
         YouTubeWebView.Source = YouTubeNavigationService.HomeUri;
     }
 
@@ -442,6 +447,7 @@ public partial class MainWindow : Window
             : $"YouTube no pudo cargar la página ({e.WebErrorStatus})";
         if (e.IsSuccess && YouTubeWebView.CoreWebView2 is not null)
         {
+            RegisterDirectYouTubeVideoFromCurrentPage();
             await YouTubeWebView.CoreWebView2.ExecuteScriptAsync(
                 """
                 (() => {
@@ -451,11 +457,17 @@ public partial class MainWindow : Window
                     const video = document.querySelector('video');
                     if (!video || video.__drumPracticeAttached) return;
                     video.__drumPracticeAttached = true;
-                    const notifyState = () => chrome.webview.postMessage({
-                      type: 'video-state',
-                      playing: !video.paused && !video.ended,
-                      videoId: new URL(location.href).searchParams.get('v') || ''
-                    });
+                    const notifyState = () => {
+                      const duration = Number(video.duration);
+                      chrome.webview.postMessage({
+                        type: 'video-state',
+                        playing: !video.paused && !video.ended,
+                        videoId: new URL(location.href).searchParams.get('v') || '',
+                        seconds: Number(video.currentTime || 0),
+                        duration: Number.isFinite(duration) ? duration : 0,
+                        title: document.title.replace(/\s*-\s*YouTube\s*$/i, '')
+                      });
+                    };
                     video.addEventListener('play', notifyState);
                     video.addEventListener('pause', notifyState);
                     video.addEventListener('pause', () => window.__dpsMetronomeReset?.());
@@ -498,7 +510,11 @@ public partial class MainWindow : Window
                         lastPositionNotice = nowTicks;
                         chrome.webview.postMessage({
                           type: 'video-position',
-                          seconds: video.currentTime
+                          videoId: new URL(location.href).searchParams.get('v') || '',
+                          seconds: video.currentTime,
+                          duration: Number.isFinite(video.duration) ? video.duration : 0,
+                          playing: !video.paused && !video.ended,
+                          title: document.title.replace(/\s*-\s*YouTube\s*$/i, '')
                         });
                       }
                       if (!config?.metronomeEnabled) return;
@@ -757,6 +773,14 @@ public partial class MainWindow : Window
                     ? stateVideoId.GetString()
                     : null;
                 var playing = playingElement.GetBoolean();
+                RegisterDirectYouTubeVideoFromMessage(root, stateVideoIdText);
+                var seconds = TryGetFiniteDouble(root, "seconds");
+                var duration = TryGetFiniteDouble(root, "duration");
+                _viewModel.UpdateYouTubeTransport(
+                    stateVideoIdText,
+                    seconds ?? 0d,
+                    duration ?? 0d,
+                    playing);
                 if (_viewModel.HandleYouTubePlaybackState(stateVideoIdText, playing) &&
                     playing)
                 {
@@ -788,7 +812,16 @@ public partial class MainWindow : Window
                      root.TryGetProperty("seconds", out var secondsElement) &&
                      secondsElement.TryGetDouble(out var playbackSeconds))
             {
-                _viewModel.UpdateYouTubePlaybackPosition(playbackSeconds);
+                var positionVideoId = root.TryGetProperty("videoId", out var positionVideoIdElement)
+                    ? positionVideoIdElement.GetString()
+                    : null;
+                RegisterDirectYouTubeVideoFromMessage(root, positionVideoId);
+                _viewModel.UpdateYouTubeTransport(
+                    positionVideoId,
+                    playbackSeconds,
+                    TryGetFiniteDouble(root, "duration") ?? 0d,
+                    !root.TryGetProperty("playing", out var positionPlaying) ||
+                    positionPlaying.ValueKind == JsonValueKind.True);
             }
             else if (root.GetProperty("type").GetString() == "metronome-click" &&
                      root.TryGetProperty("videoTime", out var clickTime) &&
@@ -801,6 +834,58 @@ public partial class MainWindow : Window
         catch (JsonException)
         {
         }
+    }
+
+    private void RegisterDirectYouTubeVideoFromCurrentPage()
+    {
+        if (!YouTubeNavigationService.TryGetVideoId(YouTubeWebView.Source, out var videoId) ||
+            string.Equals(videoId, _managedYouTubeVideoId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _viewModel.RegisterDirectYouTubeVideo(
+            videoId,
+            NormalizeYouTubeDocumentTitle(YouTubeWebView.CoreWebView2?.DocumentTitle));
+    }
+
+    private void RegisterDirectYouTubeVideoFromMessage(JsonElement message, string? videoId)
+    {
+        if (string.IsNullOrWhiteSpace(videoId) ||
+            string.Equals(videoId, _managedYouTubeVideoId, StringComparison.Ordinal) ||
+            !YouTubeNavigationService.TryGetVideoId(YouTubeWebView.Source, out var visibleVideoId) ||
+            !string.Equals(videoId, visibleVideoId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var title = message.TryGetProperty("title", out var titleElement)
+            ? titleElement.GetString()
+            : null;
+        _viewModel.RegisterDirectYouTubeVideo(
+            videoId,
+            NormalizeYouTubeDocumentTitle(title));
+    }
+
+    private static double? TryGetFiniteDouble(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var value) &&
+        value.TryGetDouble(out var parsed) &&
+        double.IsFinite(parsed)
+            ? parsed
+            : null;
+
+    private static string? NormalizeYouTubeDocumentTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return null;
+        }
+
+        const string suffix = " - YouTube";
+        var normalized = title.Trim();
+        return normalized.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? normalized[..^suffix.Length].Trim()
+            : normalized;
     }
 
     private async Task EnsureYouTubeAudioRoutingAsync()

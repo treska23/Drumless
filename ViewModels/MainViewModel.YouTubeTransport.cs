@@ -30,11 +30,16 @@ public sealed partial class MainViewModel
     }
 
     public void UpdateYouTubeTransport(
+        string? videoId,
         double seconds,
         double durationSeconds,
         bool playing)
     {
-        if (_currentYouTubeItem is null)
+        if (_currentYouTubeItem is null ||
+            !string.Equals(
+                _currentYouTubeItem.YouTubeVideoId,
+                videoId,
+                StringComparison.Ordinal))
         {
             return;
         }

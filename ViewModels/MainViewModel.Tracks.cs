@@ -36,6 +36,7 @@ public sealed partial class MainViewModel
     private Playlist? _selectedPlaylist;
     private PlaylistItemViewModel? _selectedPlaylistItem;
     private PlaylistItem? _currentYouTubeItem;
+    private bool _currentYouTubeIsDirect;
     private bool _playlistQueueActive;
     private PlaybackModeOption? _selectedPlaybackMode;
     private string _playlistNameDraft = string.Empty;
@@ -403,7 +404,7 @@ public sealed partial class MainViewModel
         ArgumentNullException.ThrowIfNull(track);
         if (_currentYouTubeItem is not null)
         {
-            YouTubeControlRequested?.Invoke(this, new YouTubeControlRequest(YouTubeControlAction.Pause));
+            YouTubeControlRequested?.Invoke(this, new YouTubeControlRequest(YouTubeControlAction.Stop));
         }
         var requestId = Interlocked.Increment(ref _trackLoadSequence);
         CancelPendingTrackLoad();
@@ -450,6 +451,7 @@ public sealed partial class MainViewModel
 
             _activeLoadGeneration = loadGeneration;
             _currentYouTubeItem = null;
+            _currentYouTubeIsDirect = false;
             CurrentTrack = track;
             SelectedLibraryTrack = track;
             var playlistSelection = PlaylistItems.FirstOrDefault(item =>
@@ -950,6 +952,79 @@ public sealed partial class MainViewModel
 
     public void OpenYouTubePage() => Navigate("YouTube");
 
+    public void RegisterDirectYouTubeVideo(string videoId, string? title)
+    {
+        if (string.IsNullOrWhiteSpace(videoId))
+        {
+            return;
+        }
+
+        videoId = videoId.Trim();
+        if (string.Equals(
+                _currentYouTubeItem?.YouTubeVideoId,
+                videoId,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        CancelPendingTrackLoad();
+        _desiredTrackPlaying = false;
+        _activeLoadGeneration = 0;
+        _activeRunGeneration = 0;
+        _audio.UnloadTrack();
+        CurrentTrack = null;
+
+        var displayTitle = string.IsNullOrWhiteSpace(title)
+            ? $"Vídeo de YouTube · {videoId}"
+            : title.Trim();
+        var item = new PlaylistItem
+        {
+            Id = $"youtube-direct:{videoId}",
+            Kind = PlaylistItemKind.YouTube,
+            YouTubeVideoId = videoId,
+            YouTubeUrl = YouTubeNavigationService.CreateWatchUri(videoId).AbsoluteUri,
+            Title = displayTitle
+        };
+
+        _currentYouTubeItem = item;
+        _currentYouTubeIsDirect = true;
+        _playlistPlaybackItems.Clear();
+        _playlistQueueActive = false;
+        _playbackNavigator.SetQueue([item.Id], item.Id);
+        BeginYouTubeTransport();
+        OnCurrentYouTubeChanged(item);
+        OnPropertyChanged(nameof(CanStartOutputRecording));
+        OnPropertyChanged(nameof(CurrentMediaKindLabel));
+        OnPropertyChanged(nameof(CurrentTrackTitle));
+        OnPropertyChanged(nameof(CurrentTrackSubtitle));
+        OnPropertyChanged(nameof(HasTrack));
+        StatusMessage = $"YouTube preparado: {displayTitle}";
+    }
+
+    public void ClearCurrentYouTubeVideo()
+    {
+        if (_currentYouTubeItem is null)
+        {
+            return;
+        }
+
+        FinishPerformanceEvaluation(naturalEnd: false);
+        SetYouTubeAudioActive(false);
+        _currentYouTubeItem = null;
+        _currentYouTubeIsDirect = false;
+        _playlistPlaybackItems.Clear();
+        _playlistQueueActive = false;
+        _playbackNavigator.SetQueue([]);
+        BeginYouTubeTransport();
+        OnCurrentTrackChanged(CurrentTrack);
+        OnPropertyChanged(nameof(CanStartOutputRecording));
+        OnPropertyChanged(nameof(CurrentMediaKindLabel));
+        OnPropertyChanged(nameof(CurrentTrackTitle));
+        OnPropertyChanged(nameof(CurrentTrackSubtitle));
+        OnPropertyChanged(nameof(HasTrack));
+    }
+
     private void PlaylistChanged(string? selectedItemId = null)
     {
         RebuildPlaylistItems();
@@ -1054,6 +1129,14 @@ public sealed partial class MainViewModel
 
         FinishPerformanceEvaluation(naturalEnd: true);
 
+        if (_currentYouTubeIsDirect)
+        {
+            SetYouTubeAudioActive(false);
+            SetYouTubeTransportPlaying(false);
+            StatusMessage = "El vídeo ha terminado";
+            return;
+        }
+
         var nextId = _playbackNavigator.NextAutomatic();
         if (nextId is null)
         {
@@ -1085,8 +1168,10 @@ public sealed partial class MainViewModel
                 _audio.UnloadTrack();
                 CurrentTrack = null;
                 _currentYouTubeItem = playlistItem;
+                _currentYouTubeIsDirect = false;
                 OnCurrentYouTubeChanged(playlistItem);
                 OnPropertyChanged(nameof(CanStartOutputRecording));
+                OnPropertyChanged(nameof(CurrentMediaKindLabel));
                 OnPropertyChanged(nameof(CurrentTrackTitle));
                 OnPropertyChanged(nameof(CurrentTrackSubtitle));
                 OnPropertyChanged(nameof(HasTrack));

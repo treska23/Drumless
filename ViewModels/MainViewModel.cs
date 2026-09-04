@@ -510,6 +510,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _currentTrack, value))
             {
+                OnPropertyChanged(nameof(CurrentMediaKindLabel));
                 OnPropertyChanged(nameof(CurrentTrackTitle));
                 OnPropertyChanged(nameof(CurrentTrackSubtitle));
                 OnPropertyChanged(nameof(HasTrack));
@@ -769,6 +770,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SelectedStemSelection != StemSelection.None;
     public string ActiveKitName => ActiveKit?.Name ?? "Ningún kit";
     public string ActiveLibraryName => Libraries.FirstOrDefault(library => library.Id == ActiveKit?.LibraryId)?.Name ?? "Sin librería";
+    public string CurrentMediaKindLabel => _currentYouTubeItem is not null ? "YOUTUBE" : "PISTA LOCAL";
     public string CurrentTrackTitle => CurrentTrack?.Title ??
                                        _currentYouTubeItem?.Title ??
                                        "Sin pista cargada";
@@ -1117,6 +1119,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_currentYouTubeItem is not null)
         {
             YouTubeControlRequested?.Invoke(this, new YouTubeControlRequest(YouTubeControlAction.Stop));
+            SetYouTubeAudioActive(false);
+            SetYouTubeTransportPlaying(false);
         }
         if (_isTrackLoading)
         {
@@ -1136,6 +1140,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (!double.TryParse(secondsValue, out var delta))
         {
+            return;
+        }
+
+        if (_currentYouTubeItem is not null)
+        {
+            CommitYouTubeTransportSeek(_youtubePerformancePositionSeconds + delta);
             return;
         }
 
