@@ -238,18 +238,33 @@ public partial class MainWindow
                 return;
             }
 
-            var selected = items
-                .Cast<object>()
-                .OfType<Vst3EffectItem>()
-                .FirstOrDefault(effect =>
-                    string.Equals(
-                        effect.PluginClass.ClassId,
-                        explicitReference.ClassId,
-                        StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(
-                        effect.Module.Path,
-                        explicitReference.ModulePath,
-                        StringComparison.OrdinalIgnoreCase));
+            var selected = FindMatchingVst3Effect(items, explicitReference);
+
+            // Una configuración .dpsfx puede contener un plugin válido que todavía no estaba en el
+            // catálogo de esta sesión. Antes el slot conservaba la referencia internamente, pero el
+            // selector quedaba vacío y el plugin no podía reutilizarse en otro slot. Al restaurarlo,
+            // lo incorporamos al ObservableCollection que alimenta el catálogo. No se escanea ni se
+            // modifica el plugin; sólo se recupera la identidad ya validada que venía en el preset.
+            if (selected is null &&
+                Path.Exists(explicitReference.ModulePath) &&
+                comboBox.ItemsSource is ListCollectionView view &&
+                view.SourceCollection is IList sourceCollection)
+            {
+                var catalogId = Vst3EffectItem.GetCatalogId(
+                    explicitReference.ModulePath,
+                    explicitReference.ClassId);
+                selected = sourceCollection
+                    .Cast<object>()
+                    .OfType<Vst3EffectItem>()
+                    .FirstOrDefault(effect =>
+                        string.Equals(effect.CatalogId, catalogId, StringComparison.OrdinalIgnoreCase));
+                if (selected is null)
+                {
+                    selected = Vst3EffectItem.FromReference(explicitReference);
+                    sourceCollection.Add(selected);
+                    view.Refresh();
+                }
+            }
 
             comboBox.SelectedItem = selected;
         }
@@ -258,6 +273,21 @@ public partial class MainWindow
             state.IsRestoringSelection = wasRestoringSelection;
         }
     }
+
+    private static Vst3EffectItem? FindMatchingVst3Effect(
+        IEnumerable items,
+        Vst3EffectReference reference) => items
+        .Cast<object>()
+        .OfType<Vst3EffectItem>()
+        .FirstOrDefault(effect =>
+            string.Equals(
+                effect.PluginClass.ClassId,
+                reference.ClassId,
+                StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                effect.Module.Path,
+                reference.ModulePath,
+                StringComparison.OrdinalIgnoreCase));
 
     private static StackPanel? FindDirectStackPanelParent(DependencyObject child)
     {
