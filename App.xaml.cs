@@ -2,6 +2,7 @@
 using System.Runtime.Loader;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using DrumPracticeStudio.Services;
@@ -73,6 +74,7 @@ public partial class App : Application
         base.OnStartup(e);
         EnsureDemucsCliCompatibility();
         EnsureSafeMixerKnobStyle();
+        EnsureGlobalScrollBarStyle();
         FreezeThemeBrushes();
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         var mainWindow = new MainWindow();
@@ -145,6 +147,31 @@ public partial class App : Application
         style.Setters.Add(new Setter(FrameworkElement.HeightProperty, 28d));
         style.Setters.Add(new Setter(FrameworkElement.CursorProperty, Cursors.Hand));
         Resources["MixerKnob"] = style;
+    }
+
+    private void EnsureGlobalScrollBarStyle()
+    {
+        // Algunos controles de WPF crean ScrollBar dentro de sus plantillas (ListBox, ComboBox,
+        // ScrollViewer de ventanas secundarias, popups...). En esos casos el estilo implícito de
+        // Application no siempre gana al estilo de tema que la plantilla asigna internamente.
+        // Registramos un handler de clase para que cualquier ScrollBar WPF, presente o creada más
+        // tarde, reciba exactamente el estilo oscuro definido en App.xaml.
+        if (TryFindResource(typeof(ScrollBar)) is not Style drumlessScrollBarStyle)
+        {
+            return;
+        }
+
+        EventManager.RegisterClassHandler(
+            typeof(ScrollBar),
+            FrameworkElement.LoadedEvent,
+            new RoutedEventHandler((sender, _) =>
+            {
+                if (sender is ScrollBar scrollBar &&
+                    !ReferenceEquals(scrollBar.Style, drumlessScrollBarStyle))
+                {
+                    scrollBar.Style = drumlessScrollBarStyle;
+                }
+            }));
     }
 
     private static void EnsureWindowsAudioAssembliesLoaded()
