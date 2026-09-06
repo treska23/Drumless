@@ -456,6 +456,50 @@ public sealed class AudioEngine : IDisposable
             : await request;
     }
 
+    internal bool TryCaptureInputVstEffectState(
+        int channelIndex,
+        string slotId,
+        out byte[] state)
+    {
+        if (_output?.TryCaptureInputEffectState(channelIndex, slotId, out state) == true)
+        {
+            return true;
+        }
+
+        state = [];
+        return false;
+    }
+
+    internal bool TryCaptureBusVstEffectState(
+        AudioEffectBusTarget target,
+        string slotId,
+        out byte[] state)
+    {
+        switch (target)
+        {
+            case AudioEffectBusTarget.Track:
+                return _trackEffects.TryCaptureState(slotId, out state);
+            case AudioEffectBusTarget.YouTube:
+                lock (_youtubeCaptureGate)
+                {
+                    if (_youtubeEffectRack?.TryCaptureState(slotId, out state) == true)
+                    {
+                        return true;
+                    }
+                }
+                break;
+            case AudioEffectBusTarget.Master:
+                if (_output?.TryCaptureMasterEffectState(slotId, out state) == true)
+                {
+                    return true;
+                }
+                break;
+        }
+
+        state = [];
+        return false;
+    }
+
     public async Task LoadVstInstrumentAsync(
         Vst3InstrumentItem instrument,
         CancellationToken cancellationToken = default)

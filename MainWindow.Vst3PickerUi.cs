@@ -210,39 +210,53 @@ public partial class MainWindow
         AudioEffectSlotItem slot,
         Vst3EffectReference? explicitReference)
     {
-        // Un slot recién creado debe quedarse vacío. El antiguo selector editable podía promover
-        // el primer elemento actual de ICollectionView a SelectedItem y parecía que la aplicación
-        // había elegido un plugin por su cuenta.
-        if (explicitReference is null)
+        if (!Vst3PickerSearchStates.TryGetValue(comboBox, out var state))
         {
-            comboBox.SelectedIndex = -1;
-            comboBox.Text = string.Empty;
-            if (slot.ExternalVst3 is not null)
+            return;
+        }
+
+        var wasRestoringSelection = state.IsRestoringSelection;
+        state.IsRestoringSelection = true;
+        try
+        {
+            // Un slot recién creado debe quedarse vacío. El antiguo selector editable podía promover
+            // el primer elemento actual de ICollectionView a SelectedItem y parecía que la aplicación
+            // había elegido un plugin por su cuenta.
+            if (explicitReference is null)
             {
-                slot.ExternalVst3 = null;
+                comboBox.SelectedIndex = -1;
+                comboBox.Text = string.Empty;
+                if (slot.ExternalVst3 is not null)
+                {
+                    slot.ExternalVst3 = null;
+                }
+                return;
             }
-            return;
-        }
 
-        if (comboBox.ItemsSource is not IEnumerable items)
+            if (comboBox.ItemsSource is not IEnumerable items)
+            {
+                return;
+            }
+
+            var selected = items
+                .Cast<object>()
+                .OfType<Vst3EffectItem>()
+                .FirstOrDefault(effect =>
+                    string.Equals(
+                        effect.PluginClass.ClassId,
+                        explicitReference.ClassId,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        effect.Module.Path,
+                        explicitReference.ModulePath,
+                        StringComparison.OrdinalIgnoreCase));
+
+            comboBox.SelectedItem = selected;
+        }
+        finally
         {
-            return;
+            state.IsRestoringSelection = wasRestoringSelection;
         }
-
-        var selected = items
-            .Cast<object>()
-            .OfType<Vst3EffectItem>()
-            .FirstOrDefault(effect =>
-                string.Equals(
-                    effect.PluginClass.ClassId,
-                    explicitReference.ClassId,
-                    StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(
-                    effect.Module.Path,
-                    explicitReference.ModulePath,
-                    StringComparison.OrdinalIgnoreCase));
-
-        comboBox.SelectedItem = selected;
     }
 
     private static StackPanel? FindDirectStackPanelParent(DependencyObject child)
@@ -271,5 +285,6 @@ public partial class MainWindow
         public Button SearchButton { get; } = searchButton;
         public Grid SearchRow { get; } = searchRow;
         public System.Windows.Threading.DispatcherTimer SearchDelay { get; } = searchDelay;
+        public bool IsRestoringSelection { get; set; }
     }
 }

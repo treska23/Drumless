@@ -1278,14 +1278,18 @@ public partial class MainWindow : Window
         object sender,
         SelectionChangedEventArgs e)
     {
-        if (sender is ComboBox
+        if (sender is not ComboBox
             {
                 Tag: AudioEffectSlotItem slot,
                 SelectedItem: Vst3EffectItem effect
-            })
+            } comboBox ||
+            Vst3PickerSearchStates.TryGetValue(comboBox, out var pickerState) &&
+            pickerState.IsRestoringSelection)
         {
-            slot.SelectExternalVst3(effect.ToReference());
+            return;
         }
+
+        slot.SelectExternalVst3(effect.ToReference());
     }
 
     private void OnVst3EffectPickerLoaded(object sender, RoutedEventArgs e)

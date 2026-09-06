@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Windows;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
@@ -83,7 +81,7 @@ internal sealed class InProcessVst3EffectCore : IDisposable
                     $"{plugin.OutputChannelCount} salida(s); sólo se admiten buses mono o estéreo.");
             }
 
-            var statePath = GetAutomaticStatePath(slotId, reference);
+            var statePath = Vst3EffectStateFiles.GetAutomaticPath(slotId, reference);
             var automaticStateExists = File.Exists(statePath);
             var loadedAutomaticState = false;
             var loadPath = automaticStateExists ? statePath : reference.PresetPath;
@@ -260,6 +258,31 @@ internal sealed class InProcessVst3EffectCore : IDisposable
         }).Task;
     }
 
+    public bool TryCaptureState(out byte[] state)
+    {
+        lock (_gate)
+        {
+            state = [];
+            if (_disposed || !Plugin.HasEditController)
+            {
+                return false;
+            }
+
+            try
+            {
+                using var stream = new MemoryStream();
+                Plugin.SavePreset(stream);
+                state = stream.ToArray();
+                return state.Length > 0;
+            }
+            catch
+            {
+                state = [];
+                return false;
+            }
+        }
+    }
+
     internal int ApplyConfiguredParameters()
     {
         if (_disposed || _loadedAutomaticState || !Plugin.HasEditController)
@@ -411,37 +434,22 @@ internal sealed class InProcessVst3EffectCore : IDisposable
 
     private void SaveState()
     {
-        try
+        lock (_gate)
         {
-            if (!Plugin.HasEditController)
+            try
             {
-                return;
+                if (_disposed || !Plugin.HasEditController)
+                {
+                    return;
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(_statePath)!);
+                Plugin.SavePreset(_statePath);
             }
-            Directory.CreateDirectory(Path.GetDirectoryName(_statePath)!);
-            Plugin.SavePreset(_statePath);
-        }
-        catch
-        {
-            // State persistence is optional.
+            catch
+            {
+                // State persistence is optional.
+            }
         }
     }
 
-    private static string GetAutomaticStatePath(string slotId, Vst3EffectReference reference)
-    {
-        var identity = Encoding.UTF8.GetBytes(
-            $"{reference.ModulePath}|{reference.ClassId}|{reference.PresetPath}|" +
-            string.Join(",", reference.EffectiveParameterSettings.Select(setting =>
-                $"{setting.Id}:{setting.NormalizedValue:R}")));
-        var fingerprint = Convert.ToHexString(SHA256.HashData(identity))[..16];
-        var safeSlotId = string.Concat(slotId.Where(char.IsLetterOrDigit));
-        if (string.IsNullOrWhiteSpace(safeSlotId))
-        {
-            safeSlotId = "slot";
-        }
-        else if (safeSlotId.Length > 64)
-        {
-            safeSlotId = safeSlotId[..64];
-        }
-        return Path.Combine(AppPaths.VstStates, $"effect-{safeSlotId}-{fingerprint}.vstpreset");
-    }
 }

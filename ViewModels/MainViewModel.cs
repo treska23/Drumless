@@ -1668,17 +1668,30 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         try
         {
+            var effects = monitor.EffectSlots
+                .Select(slot => slot.ToSetting())
+                .ToArray();
+            var pluginStates = CaptureEffectStates(
+                effects,
+                slotId => _audio.TryCaptureInputVstEffectState(
+                    monitor.ChannelIndex,
+                    slotId,
+                    out var state)
+                    ? state
+                    : null);
             _audioEffectPresets.Save(
                 dialog.FileName,
                 new AudioEffectChainPreset(
                     $"{monitor.DisplayName} · {AudioInputProfileCatalog.Get(monitor.Profile).Label}",
-                    monitor.EffectSlots.Select(slot => slot.ToSetting()).ToArray(),
-                    monitor.EffectsBypassed));
+                    effects,
+                    monitor.EffectsBypassed,
+                    pluginStates));
             AudioInputStatus = $"Cadena exportada: {dialog.FileName}";
         }
         catch (Exception exception) when (exception is
             IOException or
             UnauthorizedAccessException or
+            InvalidDataException or
             ArgumentException or
             NotSupportedException)
         {
@@ -1861,17 +1874,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             var setting = bus.ToSetting();
+            var pluginStates = CaptureEffectStates(
+                setting.EffectiveEffects,
+                slotId => _audio.TryCaptureBusVstEffectState(
+                    setting.Target,
+                    slotId,
+                    out var state)
+                    ? state
+                    : null);
             _audioEffectPresets.Save(
                 dialog.FileName,
                 new AudioEffectChainPreset(
                     bus.Name,
                     setting.EffectiveEffects,
-                    setting.EffectsBypassed));
+                    setting.EffectsBypassed,
+                    pluginStates));
             AudioInputStatus = $"Cadena de {bus.Name} exportada.";
         }
         catch (Exception exception) when (exception is
             IOException or
             UnauthorizedAccessException or
+            InvalidDataException or
             ArgumentException or
             NotSupportedException)
         {

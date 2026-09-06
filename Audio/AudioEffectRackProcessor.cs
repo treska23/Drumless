@@ -87,6 +87,22 @@ internal sealed class AudioEffectRackProcessor : IDisposable
         }
     }
 
+    public bool TryCaptureState(string slotId, out byte[] state)
+    {
+        lock (_gate)
+        {
+            var effect = _external.FirstOrDefault(effect =>
+                string.Equals(effect.Id, slotId, StringComparison.Ordinal));
+            if (effect is not null)
+            {
+                return effect.Processor.TryCaptureState(out state);
+            }
+
+            state = [];
+            return false;
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)
@@ -186,6 +202,8 @@ internal sealed class AudioEffectRackSampleProvider : ISampleProvider, IDisposab
     public uint LatencySamples => _processor.LatencySamples;
     public Task<Vst3EffectEditorResult>? TryOpenEditorAsync(string slotId) =>
         _processor.TryOpenEditorAsync(slotId);
+    public bool TryCaptureState(string slotId, out byte[] state) =>
+        _processor.TryCaptureState(slotId, out state);
 
     public int Read(Span<float> buffer)
     {

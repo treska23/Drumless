@@ -1,8 +1,7 @@
-using System.Security.Cryptography;
-using System.Text;
 using DrumPracticeStudio.Infrastructure;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
+using NAudio.Vst3;
 
 namespace DrumPracticeStudio.ViewModels;
 
@@ -152,30 +151,108 @@ public sealed partial class MainViewModel
     private static Vst3EffectReference ResolveStateBackedReference(AudioEffectSlotItem slot)
     {
         var effect = slot.ExternalVst3!;
-        var automaticStatePath = GetAutomaticEffectStatePath(slot.Id, effect);
+        var automaticStatePath = Vst3EffectStateFiles.GetAutomaticPath(slot.Id, effect);
         return File.Exists(automaticStatePath)
             ? effect with { PresetPath = automaticStatePath }
             : effect;
     }
 
-    private static string GetAutomaticEffectStatePath(
-        string slotId,
-        Vst3EffectReference reference)
+    private static IReadOnlyDictionary<string, byte[]> CaptureEffectStates(
+        IReadOnlyList<AudioEffectSlotSetting> effects,
+        Func<string, byte[]?> captureLiveState)
     {
-        var identity = Encoding.UTF8.GetBytes(
-            $"{reference.ModulePath}|{reference.ClassId}|{reference.PresetPath}|" +
-            string.Join(",", reference.EffectiveParameterSettings.Select(setting =>
-                $"{setting.Id}:{setting.NormalizedValue:R}")));
-        var fingerprint = Convert.ToHexString(SHA256.HashData(identity))[..16];
-        var safeSlotId = string.Concat(slotId.Where(char.IsLetterOrDigit));
-        if (string.IsNullOrWhiteSpace(safeSlotId))
+        const long maximumStateBytes = 64L * 1024 * 1024;
+        var states = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        foreach (var effect in effects)
         {
-            safeSlotId = "slot";
+            if (effect.ExternalVst3 is not { } reference)
+            {
+                continue;
+            }
+
+            var liveState = captureLiveState(effect.Id);
+            if (IsCompatibleVstPreset(
+                    liveState,
+                    reference.ClassId,
+                    maximumStateBytes))
+            {
+                states[effect.Id] = liveState!;
+                continue;
+            }
+
+            var automaticStatePath = Vst3EffectStateFiles.GetAutomaticPath(effect.Id, reference);
+            var storedState = TryReadCompatibleVstPreset(
+                                  automaticStatePath,
+                                  reference.ClassId,
+                                  maximumStateBytes) ??
+                              TryReadCompatibleVstPreset(
+                                  reference.PresetPath,
+                                  reference.ClassId,
+                                  maximumStateBytes);
+            if (storedState is not null)
+            {
+                states[effect.Id] = storedState;
+            }
         }
-        else if (safeSlotId.Length > 64)
+        return states;
+    }
+
+    private static byte[]? TryReadCompatibleVstPreset(
+        string? path,
+        string classId,
+        long maximumStateBytes)
+    {
+        if (string.IsNullOrWhiteSpace(path))
         {
-            safeSlotId = safeSlotId[..64];
+            return null;
         }
-        return Path.Combine(AppPaths.VstStates, $"effect-{safeSlotId}-{fingerprint}.vstpreset");
+        try
+        {
+            var file = new FileInfo(path);
+            if (!file.Exists || file.Length <= 0 || file.Length > maximumStateBytes)
+            {
+                return null;
+            }
+            var state = File.ReadAllBytes(file.FullName);
+            return IsCompatibleVstPreset(state, classId, maximumStateBytes)
+                ? state
+                : null;
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            InvalidDataException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsCompatibleVstPreset(
+        byte[]? state,
+        string classId,
+        long maximumStateBytes)
+    {
+        if (state is not { Length: > 0 } || state.LongLength > maximumStateBytes)
+        {
+            return false;
+        }
+        try
+        {
+            using var stream = new MemoryStream(state, writable: false);
+            return string.Equals(
+                Vst3Preset.Read(stream).ClassId,
+                classId,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            InvalidDataException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            return false;
+        }
     }
 }

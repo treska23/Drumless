@@ -162,6 +162,22 @@ internal sealed class AudioInputProfileProcessor : IDisposable
         }
     }
 
+    public bool TryCaptureState(string slotId, out byte[] state)
+    {
+        lock (_externalGate)
+        {
+            var effect = _externalEffects.FirstOrDefault(effect =>
+                string.Equals(effect.Id, slotId, StringComparison.Ordinal));
+            if (effect is not null)
+            {
+                return effect.Processor.TryCaptureState(out state);
+            }
+
+            state = [];
+            return false;
+        }
+    }
+
     public void Dispose()
     {
         lock (_externalGate)
@@ -186,7 +202,9 @@ internal sealed class AudioInputProfileProcessor : IDisposable
             "|",
             external.Select(effect =>
                 $"{effect.Id}:{effect.ExternalVst3!.ModulePath}:{effect.ExternalVst3.ClassId}:" +
-                $"{effect.ExternalVst3.PresetPath}"));
+                $"{effect.ExternalVst3.PresetPath}:" +
+                string.Join(",", effect.ExternalVst3.EffectiveParameterSettings.Select(setting =>
+                    $"{setting.Id}:{setting.NormalizedValue:R}"))));
         lock (_externalGate)
         {
             if (string.Equals(signature, _externalSignature, StringComparison.Ordinal) &&

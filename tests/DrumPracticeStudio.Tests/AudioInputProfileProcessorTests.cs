@@ -1,5 +1,6 @@
 using DrumPracticeStudio.Audio;
 using DrumPracticeStudio.Models;
+using System.Reflection;
 
 namespace DrumPracticeStudio.Tests;
 
@@ -95,4 +96,58 @@ public sealed class AudioInputProfileProcessorTests
             Assert.AreEqual(0, AudioInputEffectPresetCatalog.Create(profile).Count);
         }
     }
+
+    [TestMethod]
+    public void ExternalSignature_ChangesWhenConfiguredParametersChange()
+    {
+        using var processor = new AudioInputProfileProcessor(
+            48_000,
+            AudioInputProfileKind.Clean);
+        var pluginPath = Path.Combine(
+            Path.GetTempPath(),
+            $"missing-{Guid.NewGuid():N}.vst3");
+        var reference = new Vst3EffectReference(
+            pluginPath,
+            "Missing",
+            "00112233445566778899AABBCCDDEEFF",
+            "Audio Module Class",
+            "Missing FX",
+            "Vendor",
+            "1",
+            "3.7",
+            "Fx",
+            ParameterSettings:
+            [
+                new Vst3ParameterSetting(17, "Drive", 0.25d)
+            ]);
+        var slot = new AudioEffectSlotSetting(
+            "slot-1",
+            AudioEffectKind.ExternalVst3,
+            ExternalVst3: reference);
+
+        processor.SetEffects([slot], bypassed: false);
+        var firstSignature = GetExternalSignature(processor);
+
+        processor.SetEffects(
+            [slot with
+            {
+                ExternalVst3 = reference with
+                {
+                    ParameterSettings =
+                    [
+                        new Vst3ParameterSetting(17, "Drive", 0.75d)
+                    ]
+                }
+            }],
+            bypassed: false);
+        var secondSignature = GetExternalSignature(processor);
+
+        Assert.AreNotEqual(firstSignature, secondSignature);
+    }
+
+    private static string GetExternalSignature(AudioInputProfileProcessor processor) =>
+        (string)(typeof(AudioInputProfileProcessor)
+            .GetField("_externalSignature", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(processor)
+            ?? throw new AssertFailedException("No se encontró la firma externa del procesador."));
 }

@@ -88,6 +88,9 @@ internal sealed class IsolatedVst3EffectProcessor : IDisposable
     public void ProcessStereo(Span<float> samples, float wetMix) =>
         _core.ProcessStereo(samples, wetMix);
 
+    public bool TryCaptureState(out byte[] state) =>
+        _core.TryCaptureState(out state);
+
     public async Task<Vst3EffectEditorResult> OpenEditorAsync(
         CancellationToken cancellationToken = default)
     {

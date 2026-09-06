@@ -444,6 +444,32 @@ internal sealed class AudioOutputSession : IDisposable
         _asioDuplexRenderer?.TryOpenEffectEditorAsync(slotId) ??
         _masterEffectRack?.TryOpenEditorAsync(slotId);
 
+    public bool TryCaptureInputEffectState(
+        int channelIndex,
+        string slotId,
+        out byte[] state)
+    {
+        if (_asioDuplexRenderer?.TryCaptureInputEffectState(channelIndex, slotId, out state) == true)
+        {
+            return true;
+        }
+
+        state = [];
+        return false;
+    }
+
+    public bool TryCaptureMasterEffectState(string slotId, out byte[] state)
+    {
+        if (_asioDuplexRenderer?.TryCaptureMasterEffectState(slotId, out state) == true ||
+            _masterEffectRack?.TryCaptureState(slotId, out state) == true)
+        {
+            return true;
+        }
+
+        state = [];
+        return false;
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -639,6 +665,24 @@ internal sealed class AudioOutputSession : IDisposable
             }
             return _masterEffects.TryOpenEditorAsync(slotId);
         }
+
+        public bool TryCaptureInputEffectState(
+            int channelIndex,
+            string slotId,
+            out byte[] state)
+        {
+            var position = Array.IndexOf(_channelIndexes, channelIndex);
+            if (position >= 0)
+            {
+                return _processors[position].TryCaptureState(slotId, out state);
+            }
+
+            state = [];
+            return false;
+        }
+
+        public bool TryCaptureMasterEffectState(string slotId, out byte[] state) =>
+            _masterEffects.TryCaptureState(slotId, out state);
 
         public void Process(in AsioProcessBuffers buffers)
         {
