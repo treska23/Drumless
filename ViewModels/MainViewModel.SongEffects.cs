@@ -291,18 +291,26 @@ public sealed partial class MainViewModel
         };
     }
 
-    private int ApplySongEffectProfileToAvailableInputs(SongEffectProfile profile)
+    private int ApplySongEffectProfileToAvailableInputs(
+        SongEffectProfile profile,
+        bool preserveImportedChains = false)
     {
         _songEffectApplyErrors.Clear();
         var applied = 0;
-        applied += ApplySongEffectChain(
-            profile.MediaKey,
-            profile.Guitar,
-            AudioInputProfileKind.GuitarDrive) ? 1 : 0;
-        applied += ApplySongEffectChain(
-            profile.MediaKey,
-            profile.Voice,
-            AudioInputProfileKind.Voice) ? 1 : 0;
+        if (!preserveImportedChains || !HasImportedInputEffectOverride(profile.Guitar.ChannelIndex))
+        {
+            applied += ApplySongEffectChain(
+                profile.MediaKey,
+                profile.Guitar,
+                AudioInputProfileKind.GuitarDrive) ? 1 : 0;
+        }
+        if (!preserveImportedChains || !HasImportedInputEffectOverride(profile.Voice.ChannelIndex))
+        {
+            applied += ApplySongEffectChain(
+                profile.MediaKey,
+                profile.Voice,
+                AudioInputProfileKind.Voice) ? 1 : 0;
+        }
         if (applied > 0)
         {
             RememberAudioInputMonitors();
@@ -310,6 +318,16 @@ public sealed partial class MainViewModel
         }
         return applied;
     }
+
+    private bool HasImportedInputEffectOverride(int channelIndex) =>
+        AudioInputMonitors.FirstOrDefault(item => item.ChannelIndex == channelIndex)?
+            .EffectSlots.Any(slot => slot.Id.StartsWith(
+                AudioEffectPresetStore.ImportedSlotIdPrefix,
+                StringComparison.Ordinal)) == true;
+
+    private bool HasImportedInputEffectOverride(SongEffectProfile profile) =>
+        HasImportedInputEffectOverride(profile.Guitar.ChannelIndex) ||
+        HasImportedInputEffectOverride(profile.Voice.ChannelIndex);
 
     private bool ApplySongEffectChain(
         string mediaKey,
@@ -399,13 +417,19 @@ public sealed partial class MainViewModel
 
         if (applyToInputs)
         {
-            var applied = ApplySongEffectProfileToAvailableInputs(SavedSongEffectProfile);
-            SongEffectStatus = _songEffectApplyErrors.Count > 0
-                ? "Configuración restaurada con plugins pendientes: " +
-                  string.Join(" · ", _songEffectApplyErrors)
-                : applied == 2
-                ? "Configuración guardada restaurada para esta canción."
-                : "Configuración guardada pendiente de disponer de los dos inputs ASIO.";
+            var preservesImportedChain = HasImportedInputEffectOverride(SavedSongEffectProfile);
+            var applied = ApplySongEffectProfileToAvailableInputs(
+                SavedSongEffectProfile,
+                preserveImportedChains: true);
+            SongEffectStatus = preservesImportedChain
+                ? "Se mantiene la cadena VST3 importada manualmente; la configuración automática " +
+                  "de la canción no la sustituye."
+                : _songEffectApplyErrors.Count > 0
+                    ? "Configuración restaurada con plugins pendientes: " +
+                      string.Join(" · ", _songEffectApplyErrors)
+                    : applied == 2
+                        ? "Configuración guardada restaurada para esta canción."
+                        : "Configuración guardada pendiente de disponer de los dos inputs ASIO.";
         }
     }
 
@@ -416,7 +440,9 @@ public sealed partial class MainViewModel
             : _analysisDatabase.Get($"local:{CurrentTrack.Id}")?.SongEffectProfile;
         if (profile is not null)
         {
-            ApplySongEffectProfileToAvailableInputs(profile);
+            ApplySongEffectProfileToAvailableInputs(
+                profile,
+                preserveImportedChains: true);
         }
     }
 }
