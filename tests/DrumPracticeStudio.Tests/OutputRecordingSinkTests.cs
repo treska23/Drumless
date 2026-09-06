@@ -35,6 +35,55 @@ public sealed class OutputRecordingSinkTests
     }
 
     [TestMethod]
+    public async Task CaptureDuringStop_DoesNotLeakSamplesIntoTheNextTake()
+    {
+        using var temporary = new TemporaryDirectory();
+        var format = WaveFormat.CreateIeeeFloatWaveFormat(48_000, 2);
+        using var sink = new OutputRecordingSink();
+        var previousSamples = Enumerable.Repeat(0.25f, 960).ToArray();
+        var nextSamples = Enumerable.Repeat(-0.5f, 480).ToArray();
+
+        for (var iteration = 0; iteration < 20; iteration++)
+        {
+            sink.Start(temporary.Combine($"previous-{iteration}.wav"), format);
+            using var capturing = new ManualResetEventSlim();
+            using var stopCapture = new CancellationTokenSource();
+            var capture = Task.Run(() =>
+            {
+                sink.Capture(previousSamples);
+                capturing.Set();
+                while (!stopCapture.IsCancellationRequested)
+                {
+                    sink.Capture(previousSamples);
+                    Thread.Yield();
+                }
+            });
+            try
+            {
+                Assert.IsTrue(capturing.Wait(TimeSpan.FromSeconds(5)));
+                await sink.StopAsync();
+            }
+            finally
+            {
+                stopCapture.Cancel();
+                await capture;
+            }
+
+            var nextPath = temporary.Combine($"next-{iteration}.wav");
+            sink.Start(nextPath, format);
+            sink.Capture(nextSamples);
+            await sink.StopAsync();
+
+            using var reader = new DrumlessAudioFileReader(nextPath);
+            var recorded = new float[nextSamples.Length + previousSamples.Length];
+            var read = ((ISampleProvider)reader).Read(recorded);
+            Assert.AreEqual(nextSamples.Length, read,
+                "La nueva toma solo debe contener sus propias muestras.");
+            CollectionAssert.AreEqual(nextSamples, recorded[..read]);
+        }
+    }
+
+    [TestMethod]
     public async Task RecordingSampleProvider_RecordsExactlyWhatItReturns()
     {
         using var temporary = new TemporaryDirectory();

@@ -95,4 +95,49 @@ public sealed class PlaylistEditorTests
         Variant = TrackVariant.Original,
         IsMissing = !File.Exists(path)
     };
+
+    [TestMethod]
+    [DataRow(true, "bc", "bcade")]
+    [DataRow(false, "bc", "adbce")]
+    [DataRow(true, "abde", "abdec")]
+    [DataRow(false, "acde", "bacde")]
+    [DataRow(true, "db", "badce")]
+    [DataRow(false, "db", "acbed")]
+    public void MoveSelection_PreservesRelativeOrderIncludingBlocksAtBoundary(
+        bool moveUp, string selected, string expected)
+    {
+        var playlist = CreateFiveItemPlaylist();
+
+        Assert.IsTrue(PlaylistEditor.MoveSelection(
+            playlist, selected.Select(id => id.ToString()), moveUp));
+
+        Assert.AreEqual(expected, string.Concat(playlist.Items.Select(item => item.Id)));
+    }
+
+    [TestMethod]
+    public void MoveSelection_IgnoresMissingIdsAndDoesNotMoveWholePlaylist()
+    {
+        var playlist = CreateFiveItemPlaylist();
+
+        Assert.IsFalse(PlaylistEditor.MoveSelection(playlist, ["missing"], moveUp: true));
+        Assert.IsFalse(PlaylistEditor.MoveSelection(
+            playlist, playlist.Items.Select(item => item.Id), moveUp: false));
+        Assert.AreEqual("abcde", string.Concat(playlist.Items.Select(item => item.Id)));
+    }
+
+    private static Playlist CreateFiveItemPlaylist()
+    {
+        var playlist = new Playlist { Id = "playlist", Name = "Practice" };
+        foreach (var id in "abcde")
+        {
+            playlist.Items.Add(new PlaylistItem
+            {
+                Id = id.ToString(),
+                TrackId = $"track-{id}",
+                Title = id.ToString(),
+                Kind = PlaylistItemKind.LocalTrack
+            });
+        }
+        return playlist;
+    }
 }

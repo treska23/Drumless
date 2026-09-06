@@ -116,7 +116,8 @@ public partial class MainWindow
         object sender,
         RoutedEventArgs eventArgs)
     {
-        _viewModel.RemoveLibrarySelectionWithDeletePrompt(GetSelectedLibraryTracks());
+        PreserveLibraryList(() =>
+            _viewModel.RemoveLibrarySelectionWithDeletePrompt(GetSelectedLibraryTracks()));
         UpdateLibrarySelectionControls();
     }
 

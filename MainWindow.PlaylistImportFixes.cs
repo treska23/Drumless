@@ -47,7 +47,8 @@ public partial class MainWindow
 
     private void OnPlaylistItemDoubleClickFixed(object sender, MouseButtonEventArgs e)
     {
-        if (PlaylistItemList.SelectedItem is PlaylistItemViewModel item)
+        if (!IsPlaylistSelectionMode && e.ChangedButton == MouseButton.Left &&
+            FindItemFromSource<PlaylistItemViewModel>(PlaylistItemList, e.OriginalSource) is { } item)
         {
             _viewModel.PlayEditedPlaylistItem(item);
         }

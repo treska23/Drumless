@@ -40,21 +40,27 @@ internal sealed class OutputRecordingSink : IDisposable
 
     public void Capture(ReadOnlySpan<float> samples)
     {
-        if (!_accepting || samples.IsEmpty)
+        var writer = Volatile.Read(ref _writerTask);
+        if (!_accepting || writer is null || samples.IsEmpty)
         {
             return;
         }
 
         var buffer = ArrayPool<float>.Shared.Rent(samples.Length);
         samples.CopyTo(buffer);
-        if (!_accepting)
+        lock (_gate)
         {
-            ArrayPool<float>.Shared.Return(buffer);
-            return;
-        }
+            // Admission and shutdown share this lock: a capture must either be
+            // queued before the writer stops, or returned without being queued.
+            if (!_accepting || !ReferenceEquals(writer, _writerTask))
+            {
+                ArrayPool<float>.Shared.Return(buffer);
+                return;
+            }
 
-        _queue.Enqueue((buffer, samples.Length));
-        _signal.Release();
+            _queue.Enqueue((buffer, samples.Length));
+            _signal.Release();
+        }
     }
 
     public async Task<string?> StopAsync()
@@ -82,8 +88,13 @@ internal sealed class OutputRecordingSink : IDisposable
         {
             lock (_gate)
             {
-                _writerTask = null;
-                CurrentPath = null;
+                // Multiple callers can await the same stop. A late continuation
+                // must not clear a subsequent recording that has already started.
+                if (ReferenceEquals(_writerTask, writer))
+                {
+                    _writerTask = null;
+                    CurrentPath = null;
+                }
             }
         }
     }
@@ -111,7 +122,10 @@ internal sealed class OutputRecordingSink : IDisposable
         }
         catch
         {
-            _accepting = false;
+            lock (_gate)
+            {
+                _accepting = false;
+            }
             while (_queue.TryDequeue(out var item))
             {
                 ArrayPool<float>.Shared.Return(item.Buffer);
@@ -122,12 +136,21 @@ internal sealed class OutputRecordingSink : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (_gate)
         {
-            return;
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
         }
-        _disposed = true;
-        StopAsync().GetAwaiter().GetResult();
-        _signal.Dispose();
+        try
+        {
+            StopAsync().GetAwaiter().GetResult();
+        }
+        finally
+        {
+            _signal.Dispose();
+        }
     }
 }

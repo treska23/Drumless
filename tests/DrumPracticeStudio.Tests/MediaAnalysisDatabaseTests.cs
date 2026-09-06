@@ -7,6 +7,37 @@ namespace DrumPracticeStudio.Tests;
 public sealed class MediaAnalysisDatabaseTests
 {
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void ImportTempoIfMissing_PreservesOtherAnalysisAndExistingTempo(bool hasTempo)
+    {
+        var database = new MediaAnalysisDatabase();
+        var updatedAt = new DateTimeOffset(2026, 7, 16, 10, 30, 0, TimeSpan.Zero);
+        database.SetDrumReference("local:track-a", new DrumReferenceMap(
+            "reference-v1", "source.wav", updatedAt, 0.8d, [0.5d, 1d]));
+        if (hasTempo)
+        {
+            database.SetTempo(
+                "local:track-a", new TempoSettings(110d, 0.2d),
+                TempoAnalysisOrigin.ManuallyAdjusted, updatedAt);
+        }
+
+        database.ImportTempoIfMissing("local:track-a", new TempoSettings(123d, 0.4d));
+
+        var record = database.Get("local:track-a");
+        Assert.IsNotNull(record);
+        Assert.AreEqual(hasTempo ? 110d : 123d, record.Tempo?.Bpm);
+        Assert.IsNotNull(record.DrumReference);
+        Assert.AreEqual("reference-v1", record.DrumReference.Version);
+        Assert.AreEqual(2, record.DrumReference.HitTimesSeconds.Count);
+        if (hasTempo)
+        {
+            Assert.AreEqual(TempoAnalysisOrigin.ManuallyAdjusted, record.TempoOrigin);
+            Assert.AreEqual(updatedAt, record.TempoUpdatedAtUtc);
+        }
+    }
+
+    [TestMethod]
     public void SnapshotAndLoad_PreserveTempoOriginAndPerformanceHistory()
     {
         var database = new MediaAnalysisDatabase();

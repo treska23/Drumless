@@ -905,13 +905,16 @@ public sealed partial class MainViewModel
 
     public void MovePlaylistSelection(IReadOnlyList<PlaylistItemViewModel> items, bool moveUp)
     {
-        if (items.Count != 1)
+        if (SelectedPlaylist is null || items.Count == 0)
         {
-            StatusMessage = "Selecciona un solo elemento para cambiarlo de posición";
+            StatusMessage = "Selecciona uno o varios elementos para cambiarlos de posición";
             return;
         }
 
-        MovePlaylistItem(items[0], moveUp);
+        if (PlaylistEditor.MoveSelection(SelectedPlaylist, items.Select(item => item.Id), moveUp))
+        {
+            PlaylistChanged(items[0].Id);
+        }
     }
 
     public void RemovePlaylistSelection(IReadOnlyList<PlaylistItemViewModel> items)

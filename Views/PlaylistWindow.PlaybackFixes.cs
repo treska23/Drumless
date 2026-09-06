@@ -28,9 +28,11 @@ public partial class PlaylistWindow
 
     private void OnItemDoubleClickFixed(object sender, MouseButtonEventArgs e)
     {
-        if (FloatingPlaylistList.SelectedItem is PlaylistItemViewModel item)
+        if (!IsSelectionMode && e.ChangedButton == MouseButton.Left &&
+            FindItem(e.OriginalSource) is { } item)
         {
             _viewModel.PlayEditedPlaylistItem(item);
+            e.Handled = true;
         }
     }
 }

@@ -153,8 +153,10 @@ internal sealed class TrackTransportProvider : ISampleProvider, IDisposable
             }
 
             ClearEndedNotifications();
+            // The resampler can read ahead to the end of the file while it still
+            // has audible samples buffered. Resume from the rendered timeline.
             if (_playbackState == TrackPlaybackState.Ended ||
-                _session.Reader.Position >= _session.Reader.Length)
+                _positionSeconds >= _durationSeconds)
             {
                 _session.Seek(TimeSpan.Zero);
                 _positionSeconds = 0d;

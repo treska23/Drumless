@@ -61,6 +61,51 @@ public sealed class TrackTransportProviderTests
     }
 
     [TestMethod]
+    public async Task PauseNearEndOfResampledTrack_ResumesBufferedAudioWithoutRestarting()
+    {
+        using var temporary = new TemporaryDirectory();
+        var trackPath = temporary.Combine("resampled.wav");
+        const int sourceSampleRate = 44_100;
+        using (var writer = new WaveFileWriter(
+                   trackPath,
+                   WaveFormat.CreateIeeeFloatWaveFormat(sourceSampleRate, 1)))
+        {
+            // A ramp makes a rewind distinguishable from the continuous output.
+            var samples = Enumerable.Range(0, sourceSampleRate / 10)
+                .Select(index => index / (float)sourceSampleRate)
+                .ToArray();
+            writer.WriteSamples(samples, 0, samples.Length);
+        }
+
+        using var uninterrupted = new TrackTransportProvider(OutputFormat);
+        using var paused = new TrackTransportProvider(OutputFormat);
+        await uninterrupted.LoadAsync(trackPath);
+        await paused.LoadAsync(trackPath);
+        uninterrupted.Play();
+        paused.Play();
+        var expected = new float[96];
+        var actual = new float[96];
+
+        // Pause at every millisecond, including while the resampler holds the
+        // final buffered samples after its underlying reader reaches EOF.
+        for (var block = 0; block < 100; block++)
+        {
+            uninterrupted.Read(expected);
+            paused.Read(actual);
+            CollectionAssert.AreEqual(expected, actual, $"Audio discontinuo en el bloque {block}.");
+
+            if (block < 99)
+            {
+                var position = paused.Position;
+                paused.Pause();
+                paused.Play();
+                Assert.AreEqual(position, paused.Position,
+                    "Reanudar no debe reiniciar una pista que aún tiene audio pendiente.");
+            }
+        }
+    }
+
+    [TestMethod]
     public async Task Unload_ClearsTheInstalledSessionAndInvalidatesPlayback()
     {
         using var temporary = new TemporaryDirectory();

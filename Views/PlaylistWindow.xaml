@@ -4,7 +4,11 @@
         Title="Playlist · Drum Practice Studio" Icon="/Assets/DrumPracticeStudio.ico"
         Width="900" Height="720"
         MinWidth="560" MinHeight="420" Background="{StaticResource AppBackground}"
+        PreviewKeyDown="OnWindowPreviewKeyDown"
         WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="SelectionVisibility" />
+    </Window.Resources>
     <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -20,7 +24,8 @@
                 <TextBlock Text="PLAYLIST FLOTANTE" Foreground="{StaticResource Accent}"
                            FontSize="10" FontWeight="Bold" />
                 <TextBlock Text="{Binding SelectedPlaylist.Name, TargetNullValue=Sin playlist}"
-                           FontSize="28" FontWeight="SemiBold" Margin="0,4,0,2" />
+                           FontSize="28" FontWeight="SemiBold" Margin="0,4,12,2"
+                           TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectedPlaylist.Name}" />
                 <TextBlock Text="{Binding SelectedPlaylistSummary}"
                            Foreground="{StaticResource TextSecondary}" />
             </StackPanel>
@@ -52,26 +57,42 @@
                         <Button x:Name="FloatingPlayButton" Style="{StaticResource PrimaryButton}"
                                 Content="▶" Padding="10,7" Margin="0,0,6,0" IsEnabled="False"
                                 Click="OnPlaySelectionClick" ToolTip="Reproducir el elemento seleccionado" />
-                        <Button x:Name="FloatingMoveUpButton" Style="{StaticResource SecondaryButton}"
-                                Content="↑" Padding="9,7" Margin="0,0,6,0" IsEnabled="False"
-                                Click="OnMoveSelectionUpClick" ToolTip="Subir el elemento seleccionado" />
-                        <Button x:Name="FloatingMoveDownButton" Style="{StaticResource SecondaryButton}"
-                                Content="↓" Padding="9,7" Margin="0,0,6,0" IsEnabled="False"
-                                Click="OnMoveSelectionDownClick" ToolTip="Bajar el elemento seleccionado" />
-                        <Button x:Name="FloatingRemoveButton" Style="{StaticResource SecondaryButton}"
-                                Content="✕" Padding="9,7" IsEnabled="False"
-                                Click="OnRemoveSelectionClick"
-                                ToolTip="Quitar los elementos seleccionados; no elimina los orígenes" />
+                        <Button x:Name="FloatingSelectButton" Style="{StaticResource SecondaryButton}"
+                                Content="Seleccionar" Padding="10,7" Click="OnToggleSelectionClick"
+                                AutomationProperties.AutomationId="FloatingSelectButton" />
                     </WrapPanel>
-                    <TextBlock x:Name="FloatingSelectionSummary" Text="0 seleccionados"
-                               Foreground="{StaticResource TextSecondary}" FontSize="10"
-                               HorizontalAlignment="Right" Margin="0,3,0,0" />
                 </StackPanel>
             </Grid>
-
+            <Grid Grid.Row="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <WrapPanel Margin="0,0,0,9"
+                           Visibility="{Binding IsSelectionMode, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource SelectionVisibility}}">
+                    <Button Style="{StaticResource SecondaryButton}" Content="Seleccionar todos"
+                            Click="OnSelectAllClick" Padding="10,7" Margin="0,0,6,0"
+                            ToolTip="Seleccionar todos los elementos visibles"
+                            AutomationProperties.AutomationId="FloatingSelectAllButton" />
+                    <Button x:Name="FloatingMoveUpButton" Style="{StaticResource SecondaryButton}"
+                            Content="↑" Padding="9,7" Margin="0,0,6,0" IsEnabled="False"
+                            Click="OnMoveSelectionUpClick" ToolTip="Subir los elementos seleccionados"
+                            AutomationProperties.Name="Subir selección" />
+                    <Button x:Name="FloatingMoveDownButton" Style="{StaticResource SecondaryButton}"
+                            Content="↓" Padding="9,7" Margin="0,0,6,0" IsEnabled="False"
+                            Click="OnMoveSelectionDownClick" ToolTip="Bajar los elementos seleccionados"
+                            AutomationProperties.Name="Bajar selección" />
+                    <Button x:Name="FloatingRemoveButton" Style="{StaticResource SecondaryButton}"
+                            Content="Quitar" Padding="9,7" IsEnabled="False"
+                            Click="OnRemoveSelectionClick"
+                            ToolTip="Quitar los elementos seleccionados; no elimina los orígenes" />
+                    <TextBlock x:Name="FloatingSelectionSummary" Text="0 seleccionados"
+                               Foreground="{StaticResource TextSecondary}" FontSize="11"
+                               VerticalAlignment="Center" Margin="12,0,0,0" />
+                </WrapPanel>
             <ListBox x:Name="FloatingPlaylistList" Grid.Row="1"
                      ItemsSource="{Binding VisiblePlaylistItems}" SelectedItem="{Binding SelectedPlaylistItem}"
-                     SelectionMode="Extended" SelectionChanged="OnSelectionChanged"
+                     SelectionMode="Single" SelectionChanged="OnSelectionChanged"
                      ScrollViewer.VerticalScrollBarVisibility="Auto"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      ScrollViewer.CanContentScroll="False"
@@ -91,14 +112,16 @@
                         <Border BorderBrush="{StaticResource Stroke}" BorderThickness="0,0,0,1" Padding="8,12">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="40" />
+                                    <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="☰" FontSize="20" Foreground="{StaticResource TextSecondary}"
-                                           VerticalAlignment="Center" />
+                                <CheckBox Margin="0,0,12,0" VerticalAlignment="Center"
+                                          IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}, Mode=TwoWay}"
+                                          Visibility="{Binding IsSelectionMode, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource SelectionVisibility}}"
+                                          AutomationProperties.Name="{Binding Title}" />
                                 <StackPanel Grid.Column="1" Margin="4,0,12,0">
                                     <TextBlock Text="{Binding Title}" FontSize="17" FontWeight="SemiBold"
-                                               TextTrimming="CharacterEllipsis" />
+                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}" />
                                     <TextBlock Text="{Binding AvailabilityLabel}" Foreground="{StaticResource Accent}"
                                                FontSize="11" />
                                     <TextBlock Text="{Binding Detail}" Foreground="{StaticResource TextSecondary}"
@@ -109,16 +132,17 @@
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
+            </Grid>
         </Grid>
 
         <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="Arrastra elementos para ordenar. También acepta pistas arrastradas desde la biblioteca."
-                       Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
-            <WrapPanel Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock Text="Pulsa Seleccionar para ordenar o quitar elementos. Puedes añadir pistas desde la biblioteca arrastrándolas aquí."
+                       Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,10" />
+            <WrapPanel Grid.Row="1" HorizontalAlignment="Right">
                 <Button Style="{StaticResource SecondaryButton}" Content="Anterior" Padding="11,7" Margin="0,0,6,0"
                         Command="{Binding PreviousTrackCommand}" />
                 <Button Style="{StaticResource PrimaryButton}" Content="Reproducir cola" Padding="11,7" Margin="0,0,6,0"

@@ -131,6 +131,31 @@ public static class PlaylistEditor
         return true;
     }
 
+    public static bool MoveSelection(Playlist playlist, IEnumerable<string> itemIds, bool moveUp)
+    {
+        ArgumentNullException.ThrowIfNull(playlist);
+        ArgumentNullException.ThrowIfNull(itemIds);
+        var selectedIds = itemIds.ToHashSet(StringComparer.Ordinal);
+        var moved = false;
+        var direction = moveUp ? -1 : 1;
+        var index = moveUp ? 1 : playlist.Items.Count - 2;
+        for (; index >= 0 && index < playlist.Items.Count; index -= direction)
+        {
+            var neighbour = index + direction;
+            if (neighbour < 0 || neighbour >= playlist.Items.Count ||
+                !selectedIds.Contains(playlist.Items[index].Id) ||
+                selectedIds.Contains(playlist.Items[neighbour].Id))
+            {
+                continue;
+            }
+
+            playlist.Items.Move(index, neighbour);
+            moved = true;
+        }
+
+        return moved;
+    }
+
     private static int FindIndex(Playlist playlist, string itemId)
     {
         for (var index = 0; index < playlist.Items.Count; index++)

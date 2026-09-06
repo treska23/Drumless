@@ -197,7 +197,7 @@ public sealed class StudioStateStore
 
         foreach (var monitor in document.AudioInputMonitors ?? [])
         {
-            if (monitor.ChannelIndex is >= 0)
+            if (monitor is not null && monitor.ChannelIndex is >= 0)
             {
                 state.AudioInputMonitors.Add(new AudioInputMonitorSetting(
                     monitor.ChannelIndex.Value,
@@ -229,7 +229,7 @@ public sealed class StudioStateStore
 
         foreach (var bus in document.AudioEffectBuses ?? [])
         {
-            if (!Enum.IsDefined(bus.Target) ||
+            if (bus is null || !Enum.IsDefined(bus.Target) ||
                 state.AudioEffectBuses.Any(existing => existing.Target == bus.Target))
             {
                 continue;
@@ -251,7 +251,7 @@ public sealed class StudioStateStore
 
         foreach (var track in document.Tracks ?? [])
         {
-            if (string.IsNullOrWhiteSpace(track.Id) ||
+            if (track is null || string.IsNullOrWhiteSpace(track.Id) ||
                 string.IsNullOrWhiteSpace(track.Title) ||
                 string.IsNullOrWhiteSpace(track.Path) ||
                 !Enum.IsDefined(track.Variant))
@@ -272,7 +272,8 @@ public sealed class StudioStateStore
 
         foreach (var playlist in document.Playlists ?? [])
         {
-            if (string.IsNullOrWhiteSpace(playlist.Id) || string.IsNullOrWhiteSpace(playlist.Name))
+            if (playlist is null || string.IsNullOrWhiteSpace(playlist.Id) ||
+                string.IsNullOrWhiteSpace(playlist.Name))
             {
                 continue;
             }
@@ -462,21 +463,28 @@ public sealed class StudioStateStore
         string mediaKey,
         TempoSettings tempo)
     {
-        if (string.IsNullOrWhiteSpace(mediaKey) ||
-            state.AnalysisRecords.Any(record => record.MediaKey == mediaKey))
+        if (string.IsNullOrWhiteSpace(mediaKey))
         {
             return;
         }
 
-        state.AnalysisRecords.Add(new MediaAnalysisRecord
+        var record = state.AnalysisRecords.FirstOrDefault(existing => existing.MediaKey == mediaKey);
+        if (record?.Tempo is not null)
         {
-            MediaKey = mediaKey,
-            Tempo = TempoSettings.Normalize(tempo),
-            TempoOrigin = tempo.AnalysisConfidence > 0d
-                ? TempoAnalysisOrigin.Automatic
-                : TempoAnalysisOrigin.Manual,
-            TempoUpdatedAtUtc = null
-        });
+            return;
+        }
+
+        if (record is null)
+        {
+            record = new MediaAnalysisRecord { MediaKey = mediaKey };
+            state.AnalysisRecords.Add(record);
+        }
+
+        record.Tempo = TempoSettings.Normalize(tempo);
+        record.TempoOrigin = tempo.AnalysisConfidence > 0d
+            ? TempoAnalysisOrigin.Automatic
+            : TempoAnalysisOrigin.Manual;
+        record.TempoUpdatedAtUtc = null;
     }
 
     private static void HydrateTempoFromAnalysis(StudioState state)
@@ -498,11 +506,11 @@ public sealed class StudioStateStore
     }
 
     private static bool TryCreateAnalysisRecord(
-        MediaAnalysisDto dto,
+        MediaAnalysisDto? dto,
         out MediaAnalysisRecord record)
     {
         record = null!;
-        if (string.IsNullOrWhiteSpace(dto.MediaKey))
+        if (dto is null || string.IsNullOrWhiteSpace(dto.MediaKey))
         {
             return false;
         }
@@ -620,7 +628,7 @@ public sealed class StudioStateStore
 
         var sections = (dto.Sections ?? [])
             .Where(section =>
-                !string.IsNullOrWhiteSpace(section.Id) &&
+                section is not null && !string.IsNullOrWhiteSpace(section.Id) &&
                 section.StartSeconds is >= 0d &&
                 section.EndSeconds is > 0d &&
                 section.EndSeconds > section.StartSeconds &&
@@ -657,7 +665,7 @@ public sealed class StudioStateStore
 
         var lines = (dto.Lines ?? [])
             .Where(line =>
-                !string.IsNullOrWhiteSpace(line.Id) &&
+                line is not null && !string.IsNullOrWhiteSpace(line.Id) &&
                 line.Order is >= 0 &&
                 Enum.IsDefined(line.Kind))
             .Select(line => new ChordSheetLine(
@@ -689,6 +697,7 @@ public sealed class StudioStateStore
             dto.ViewSwitchSeconds,
             dto.ViewSwitchLineId,
             (dto.ViewportMarkers ?? [])
+                .Where(marker => marker is not null)
                 .Select(marker => new ChordSheetViewportMarker(
                     marker.Id ?? string.Empty,
                     marker.Seconds ?? -1d,
@@ -697,11 +706,11 @@ public sealed class StudioStateStore
     }
 
     private static bool TryCreatePerformanceSession(
-        DrumPerformanceSessionDto dto,
+        DrumPerformanceSessionDto? dto,
         out DrumPerformanceSession session)
     {
         session = null!;
-        if (string.IsNullOrWhiteSpace(dto.Id) || dto.FinishedAtUtc == default ||
+        if (dto is null || string.IsNullOrWhiteSpace(dto.Id) || dto.FinishedAtUtc == default ||
             dto.TotalHits is < 0 || dto.AccurateHits is < 0 ||
             dto.EarlyHits is < 0 || dto.LateHits is < 0 ||
             dto.ExpectedHits is < 0 || dto.MissedHits is < 0 || dto.ExtraHits is < 0 ||
@@ -844,10 +853,10 @@ public sealed class StudioStateStore
             }).ToList()
     };
 
-    private static bool TryCreatePlaylistItem(PlaylistItemDto dto, out PlaylistItem item)
+    private static bool TryCreatePlaylistItem(PlaylistItemDto? dto, out PlaylistItem item)
     {
         item = null!;
-        if (string.IsNullOrWhiteSpace(dto.Id) || string.IsNullOrWhiteSpace(dto.Title) ||
+        if (dto is null || string.IsNullOrWhiteSpace(dto.Id) || string.IsNullOrWhiteSpace(dto.Title) ||
             !Enum.IsDefined(dto.Kind))
         {
             return false;
@@ -895,7 +904,7 @@ public sealed class StudioStateStore
             tempo.AnalysisConfidence ?? 0d,
             (tempo.Segments ?? [])
                 .Where(segment =>
-                    !string.IsNullOrWhiteSpace(segment.Id) &&
+                    segment is not null && !string.IsNullOrWhiteSpace(segment.Id) &&
                     segment.StartSeconds is >= 0d &&
                     segment.Bpm is >= 40d and <= 240d &&
                     segment.FirstBeatSeconds is >= 0d)
@@ -932,9 +941,9 @@ public sealed class StudioStateStore
         }).ToList()
     };
 
-    private static AudioEffectSlotSetting? TryCreateAudioEffect(AudioEffectSlotDto dto)
+    private static AudioEffectSlotSetting? TryCreateAudioEffect(AudioEffectSlotDto? dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.Id) || !Enum.IsDefined(dto.Kind))
+        if (dto is null || string.IsNullOrWhiteSpace(dto.Id) || !Enum.IsDefined(dto.Kind))
         {
             return null;
         }

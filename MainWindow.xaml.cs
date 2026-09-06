@@ -1146,15 +1146,15 @@ public partial class MainWindow : Window
         """;
 
     private void OnLibraryDragStart(object sender, MouseButtonEventArgs e) =>
-        _libraryDragOrigin = e.GetPosition(TrackLibraryList);
+        _libraryDragOrigin = IsLibrarySelectionMode ? null : e.GetPosition(TrackLibraryList);
 
     private IReadOnlyList<LocalTrack> GetSelectedLibraryTracks() =>
-        TrackLibraryList.SelectedItems.Cast<LocalTrack>().ToArray();
+        TrackLibraryList.Items.Cast<LocalTrack>().Where(TrackLibraryList.SelectedItems.Contains).ToArray();
 
     private void OnLibrarySelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         var selected = GetSelectedLibraryTracks();
-        _viewModel.SelectedLibraryTrack = selected.LastOrDefault();
+        _viewModel.SelectedLibraryTrack = TrackLibraryList.SelectedItem as LocalTrack;
         LibrarySelectionSummary.Text = selected.Count == 1
             ? "1 seleccionada"
             : $"{selected.Count} seleccionadas";
@@ -1168,11 +1168,11 @@ public partial class MainWindow : Window
         _viewModel.LoadLibrarySelection(GetSelectedLibraryTracks());
 
     private void OnAddLibrarySelectionToPlaylistClick(object sender, RoutedEventArgs e) =>
-        _viewModel.AddLibrarySelectionToPlaylist(GetSelectedLibraryTracks());
+        PreservePlaylistList(() => _viewModel.AddLibrarySelectionToPlaylist(GetSelectedLibraryTracks()));
 
     private void OnRemoveLibrarySelectionClick(object sender, RoutedEventArgs e)
     {
-        _viewModel.RemoveLibrarySelection(GetSelectedLibraryTracks());
+        PreserveLibraryList(() => _viewModel.RemoveLibrarySelection(GetSelectedLibraryTracks()));
         UpdateLibrarySelectionControls();
     }
 
@@ -1199,22 +1199,27 @@ public partial class MainWindow : Window
     }
 
     private void OnPlaylistDragStart(object sender, MouseButtonEventArgs e) =>
-        _playlistDragOrigin = e.GetPosition(PlaylistItemList);
+        _playlistDragOrigin = IsPlaylistSelectionMode &&
+                              FindItemFromSource<PlaylistItemViewModel>(PlaylistItemList, e.OriginalSource) is not null &&
+                              e.OriginalSource is DependencyObject source && source is not CheckBox &&
+                              FindVisualParent<CheckBox>(source) is null
+            ? e.GetPosition(PlaylistItemList)
+            : null;
 
     private IReadOnlyList<PlaylistItemViewModel> GetSelectedPlaylistItems() =>
-        PlaylistItemList.SelectedItems.Cast<PlaylistItemViewModel>().ToArray();
+        PlaylistItemList.Items.Cast<PlaylistItemViewModel>().Where(PlaylistItemList.SelectedItems.Contains).ToArray();
 
     private void OnPlaylistSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         var selected = GetSelectedPlaylistItems();
-        _viewModel.SelectedPlaylistItem = selected.LastOrDefault();
+        _viewModel.SelectedPlaylistItem = PlaylistItemList.SelectedItem as PlaylistItemViewModel;
         PlaylistItemSelectionSummary.Text = selected.Count == 1
             ? "1 seleccionado"
             : $"{selected.Count} seleccionados";
         var single = selected.Count == 1;
         PlayPlaylistSelectionButton.IsEnabled = single && selected[0].IsAvailable;
-        MovePlaylistSelectionUpButton.IsEnabled = single;
-        MovePlaylistSelectionDownButton.IsEnabled = single;
+        MovePlaylistSelectionUpButton.IsEnabled = selected.Count > 0;
+        MovePlaylistSelectionDownButton.IsEnabled = selected.Count > 0;
         RemovePlaylistSelectionButton.IsEnabled = selected.Count > 0;
     }
 
@@ -1222,17 +1227,18 @@ public partial class MainWindow : Window
         _viewModel.PlayPlaylistSelection(GetSelectedPlaylistItems());
 
     private void OnMovePlaylistSelectionUpClick(object sender, RoutedEventArgs e) =>
-        _viewModel.MovePlaylistSelection(GetSelectedPlaylistItems(), moveUp: true);
+        PreservePlaylistList(() => _viewModel.MovePlaylistSelection(GetSelectedPlaylistItems(), moveUp: true));
 
     private void OnMovePlaylistSelectionDownClick(object sender, RoutedEventArgs e) =>
-        _viewModel.MovePlaylistSelection(GetSelectedPlaylistItems(), moveUp: false);
+        PreservePlaylistList(() => _viewModel.MovePlaylistSelection(GetSelectedPlaylistItems(), moveUp: false));
 
     private void OnRemovePlaylistSelectionClick(object sender, RoutedEventArgs e) =>
-        _viewModel.RemovePlaylistSelection(GetSelectedPlaylistItems());
+        PreservePlaylistList(() => _viewModel.RemovePlaylistSelection(GetSelectedPlaylistItems()));
 
     private void OnPlaylistPreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed ||
+        if (!IsPlaylistSelectionMode || PlaylistItemList.SelectedItems.Count != 1 ||
+            e.LeftButton != MouseButtonState.Pressed ||
             _playlistDragOrigin is not { } origin ||
             !ExceededDragThreshold(origin, e.GetPosition(PlaylistItemList)) ||
             PlaylistItemList.SelectedItem is not PlaylistItemViewModel item)
@@ -1249,11 +1255,11 @@ public partial class MainWindow : Window
         if (e.Data.GetDataPresent(typeof(LocalTrack)) &&
             e.Data.GetData(typeof(LocalTrack)) is LocalTrack track)
         {
-            _viewModel.AddTrackToSelectedPlaylist(track);
+            PreservePlaylistList(() => _viewModel.AddTrackToSelectedPlaylist(track));
             return;
         }
 
-        if (!e.Data.GetDataPresent(typeof(PlaylistItemViewModel)) ||
+        if (!IsPlaylistSelectionMode || !e.Data.GetDataPresent(typeof(PlaylistItemViewModel)) ||
             e.Data.GetData(typeof(PlaylistItemViewModel)) is not PlaylistItemViewModel dragged)
         {
             return;
@@ -1263,12 +1269,13 @@ public partial class MainWindow : Window
         var targetIndex = target is null
             ? _viewModel.PlaylistItems.Count - 1
             : _viewModel.PlaylistItems.IndexOf(target);
-        _viewModel.MoveSelectedPlaylistItem(dragged, targetIndex);
+        PreservePlaylistList(() => _viewModel.MoveSelectedPlaylistItem(dragged, targetIndex));
     }
 
     private void OnPlaylistItemDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (PlaylistItemList.SelectedItem is PlaylistItemViewModel item)
+        if (!IsPlaylistSelectionMode && e.ChangedButton == MouseButton.Left &&
+            FindItemFromSource<PlaylistItemViewModel>(PlaylistItemList, e.OriginalSource) is { } item)
         {
             _viewModel.PlayPlaylistItem(item);
         }

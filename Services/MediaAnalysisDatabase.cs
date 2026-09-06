@@ -33,7 +33,7 @@ public sealed class MediaAnalysisDatabase
     public void ImportTempoIfMissing(string mediaKey, TempoSettings? tempo)
     {
         if (tempo is null || string.IsNullOrWhiteSpace(mediaKey) ||
-            _records.ContainsKey(mediaKey))
+            GetTempo(mediaKey) is not null)
         {
             return;
         }

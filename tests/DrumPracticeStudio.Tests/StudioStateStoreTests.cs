@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
 
@@ -7,7 +8,9 @@ namespace DrumPracticeStudio.Tests;
 public sealed class StudioStateStoreTests
 {
     [TestMethod]
-    public void SaveAndLoad_RoundTripsCompleteState()
+    [DataRow(false)]
+    [DataRow(true)]
+    public void SaveAndLoad_PreservesCompleteStateIgnoringNullRecords(bool insertNullRecords)
     {
         var dateAddedUtc = new DateTimeOffset(2026, 7, 10, 9, 30, 0, TimeSpan.Zero);
         using var temporary = new TemporaryDirectory();
@@ -248,6 +251,12 @@ public sealed class StudioStateStoreTests
         });
 
         store.Save(state);
+        if (insertNullRecords)
+        {
+            var json = JsonNode.Parse(File.ReadAllText(statePath))!;
+            InsertNullRecords(json);
+            File.WriteAllText(statePath, json.ToJsonString());
+        }
         var loaded = store.Load();
 
         Assert.IsNull(store.LastLoadWarning);
@@ -366,6 +375,83 @@ public sealed class StudioStateStoreTests
         Assert.IsTrue(loadedAnalysis.PerformanceSessions[0].FinishedAtNaturalEnd);
         Assert.AreEqual(2, loadedAnalysis.PerformanceSessions[0].MissedHits);
         Assert.AreEqual("reference-v1", loadedAnalysis.PerformanceSessions[0].ReferenceVersion);
+    }
+
+    private static void InsertNullRecords(JsonNode node)
+    {
+        if (node is JsonObject document)
+        {
+            foreach (var property in document)
+            {
+                if (property.Value is not null)
+                {
+                    InsertNullRecords(property.Value);
+                }
+            }
+        }
+        else if (node is JsonArray array)
+        {
+            foreach (var child in array.OfType<JsonObject>().ToArray())
+            {
+                InsertNullRecords(child);
+            }
+            if (array.OfType<JsonObject>().Any())
+            {
+                array.Insert(0, null);
+                array.Add((JsonNode?)null);
+            }
+        }
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void Load_EmbeddedTempoFillsExistingAnalysisWithoutOverwritingItsTempo(bool hasAnalysisTempo)
+    {
+        using var temporary = new TemporaryDirectory();
+        var store = new StudioStateStore(temporary.Combine("studio-state.json"));
+        var playlist = new Playlist { Id = "practice", Name = "Practice" };
+        playlist.Items.Add(new PlaylistItem
+        {
+            Id = "video-item",
+            Kind = PlaylistItemKind.YouTube,
+            YouTubeVideoId = "abc123",
+            YouTubeUrl = "https://www.youtube.com/watch?v=abc123",
+            Title = "Video",
+            Tempo = new TempoSettings(123d, 0.4d)
+        });
+        var updatedAt = new DateTimeOffset(2026, 7, 16, 10, 30, 0, TimeSpan.Zero);
+        store.Save(new StudioState
+        {
+            Playlists = [playlist],
+            AnalysisRecords =
+            [
+                new MediaAnalysisRecord
+                {
+                    MediaKey = "youtube:abc123",
+                    Tempo = hasAnalysisTempo ? new TempoSettings(110d, 0.2d) : null,
+                    TempoOrigin = TempoAnalysisOrigin.ManuallyAdjusted,
+                    TempoUpdatedAtUtc = hasAnalysisTempo ? updatedAt : null,
+                    DrumReference = new DrumReferenceMap(
+                        "reference-v1", "source.wav", updatedAt, 0.8d, [0.5d, 1d])
+                }
+            ]
+        });
+
+        var loaded = store.Load();
+
+        Assert.IsNull(store.LastLoadWarning);
+        Assert.AreEqual(1, loaded.AnalysisRecords.Count);
+        var analysis = loaded.AnalysisRecords[0];
+        Assert.AreEqual(hasAnalysisTempo ? 110d : 123d, analysis.Tempo?.Bpm);
+        Assert.AreEqual(analysis.Tempo, loaded.Playlists[0].Items[0].Tempo);
+        Assert.AreEqual(
+            hasAnalysisTempo ? TempoAnalysisOrigin.ManuallyAdjusted : TempoAnalysisOrigin.Manual,
+            analysis.TempoOrigin);
+        Assert.AreEqual(hasAnalysisTempo ? updatedAt : (DateTimeOffset?)null, analysis.TempoUpdatedAtUtc);
+        Assert.IsNotNull(analysis.DrumReference);
+        Assert.AreEqual("reference-v1", analysis.DrumReference.Version);
+        Assert.AreEqual(2, analysis.DrumReference.HitTimesSeconds.Count);
     }
 
     [TestMethod]
