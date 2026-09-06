@@ -108,6 +108,49 @@ public sealed class AudioInputChannelItemTests
         Assert.AreEqual(4, monitor.EffectSlots.Count, "Cambiar la etiqueta no debe borrar los VST3 elegidos.");
     }
 
+    [TestMethod]
+    public void Monitor_LoadingImportedChain_EnablesInputSoItBecomesEffectiveAndPersistable()
+    {
+        var monitor = new AudioInputMonitorItem
+        {
+            ChannelIndex = 0,
+            Name = "Mic",
+            Profile = AudioInputProfileKind.Voice,
+            IsEnabled = false
+        };
+        var imported = new AudioEffectSlotSetting(
+            "imported-0123456789abcdef",
+            AudioEffectKind.ExternalVst3,
+            ExternalVst3: Effect("Imported FX"));
+
+        monitor.LoadEffects([imported], bypassed: false);
+
+        Assert.IsTrue(monitor.IsEnabled);
+        Assert.AreEqual(1, monitor.EffectSlots.Count);
+        Assert.AreEqual("Imported FX", monitor.EffectSlots[0].ExternalVst3?.Name);
+    }
+
+    [TestMethod]
+    public void Monitor_LoadingNormalSavedChain_DoesNotEnableInputByItself()
+    {
+        var monitor = new AudioInputMonitorItem
+        {
+            ChannelIndex = 0,
+            Name = "Mic",
+            Profile = AudioInputProfileKind.Voice,
+            IsEnabled = false
+        };
+        var saved = new AudioEffectSlotSetting(
+            "normal-slot",
+            AudioEffectKind.ExternalVst3,
+            ExternalVst3: Effect("Saved FX"));
+
+        monitor.LoadEffects([saved], bypassed: false);
+
+        Assert.IsFalse(monitor.IsEnabled);
+        Assert.AreEqual(1, monitor.EffectSlots.Count);
+    }
+
     private static Vst3EffectReference Effect(string name) => new(
         $@"C:\VST3\{name}.vst3",
         name,

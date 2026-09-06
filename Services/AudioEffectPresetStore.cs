@@ -13,6 +13,7 @@ public sealed record AudioEffectChainPreset(
 
 public sealed class AudioEffectPresetStore
 {
+    internal const string ImportedSlotIdPrefix = "imported-";
     private const int LegacySchemaVersion = 1;
     private const int SchemaVersion = 2;
     private const long MaximumPluginStateBytes = 64L * 1024 * 1024;
@@ -164,7 +165,7 @@ public sealed class AudioEffectPresetStore
         var imports = preset.Effects
             .Select(effect => new ImportedEffect(
                 effect,
-                Guid.NewGuid().ToString("N"),
+                $"{ImportedSlotIdPrefix}{Guid.NewGuid():N}",
                 preset.PluginStates?.GetValueOrDefault(effect.Id)))
             .ToArray();
 
