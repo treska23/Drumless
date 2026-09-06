@@ -262,21 +262,19 @@ public sealed class AudioInputMonitorItem : ObservableObject
     {
         var materializedEffects = (effects ?? AudioInputEffectPresetCatalog.Create(Profile))
             .ToArray();
+        var activatesImportedChain = !IsEnabled && materializedEffects.Any(effect =>
+            effect.Id.StartsWith(
+                AudioEffectPresetStore.ImportedSlotIdPrefix,
+                StringComparison.Ordinal));
 
-        // Un .dpsfx importado debe ser efectivo inmediatamente. Hasta ahora era posible cargar
-        // los slots en una entrada desactivada: la UI mostraba la cadena, pero el motor no recibía
-        // los plugins y la configuración tampoco entraba en la persistencia de entradas activas.
-        // Los IDs importados los crea exclusivamente AudioEffectPresetStore al leer un archivo.
-        if (!IsEnabled && materializedEffects.Any(effect =>
-                effect.Id.StartsWith(
-                    AudioEffectPresetStore.ImportedSlotIdPrefix,
-                    StringComparison.Ordinal)))
+        // Primero sustituimos la cadena completa y sólo después activamos la entrada. Así el evento
+        // IsEnabled nunca puede reiniciar ASIO con la cadena antigua justo en mitad de una importación.
+        ReplaceEffects(materializedEffects);
+        EffectsBypassed = bypassed;
+        if (activatesImportedChain)
         {
             IsEnabled = true;
         }
-
-        ReplaceEffects(materializedEffects);
-        EffectsBypassed = bypassed;
     }
 
     public void ReplaceEffects(IEnumerable<AudioEffectSlotSetting> effects)
