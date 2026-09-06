@@ -131,6 +131,42 @@ public sealed class AudioInputChannelItemTests
     }
 
     [TestMethod]
+    public void Monitor_ImportedChainIsAlreadyLoadedWhenInputBecomesEnabled()
+    {
+        var monitor = new AudioInputMonitorItem
+        {
+            ChannelIndex = 0,
+            Name = "Mic",
+            Profile = AudioInputProfileKind.Voice,
+            IsEnabled = false
+        };
+        monitor.LoadEffects(
+            [new AudioEffectSlotSetting(
+                "normal-slot",
+                AudioEffectKind.ExternalVst3,
+                ExternalVst3: Effect("Old FX"))],
+            bypassed: false);
+        string? effectSeenWhenEnabled = null;
+        monitor.PropertyChanged += (_, eventArgs) =>
+        {
+            if (eventArgs.PropertyName == nameof(AudioInputMonitorItem.IsEnabled))
+            {
+                effectSeenWhenEnabled = monitor.EffectSlots.Single().ExternalVst3?.Name;
+            }
+        };
+        var imported = new AudioEffectSlotSetting(
+            "imported-fedcba9876543210",
+            AudioEffectKind.ExternalVst3,
+            ExternalVst3: Effect("Imported FX"));
+
+        monitor.LoadEffects([imported], bypassed: false);
+
+        Assert.IsTrue(monitor.IsEnabled);
+        Assert.AreEqual("Imported FX", effectSeenWhenEnabled);
+        Assert.AreEqual("Imported FX", monitor.EffectSlots.Single().ExternalVst3?.Name);
+    }
+
+    [TestMethod]
     public void Monitor_LoadingNormalSavedChain_DoesNotEnableInputByItself()
     {
         var monitor = new AudioInputMonitorItem
