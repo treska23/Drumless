@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 using DrumPracticeStudio.Infrastructure;
+using DrumPracticeStudio.Services;
 
 namespace DrumPracticeStudio.Models;
 
@@ -259,7 +260,22 @@ public sealed class AudioInputMonitorItem : ObservableObject
         IEnumerable<AudioEffectSlotSetting>? effects,
         bool bypassed)
     {
-        ReplaceEffects(effects ?? AudioInputEffectPresetCatalog.Create(Profile));
+        var materializedEffects = (effects ?? AudioInputEffectPresetCatalog.Create(Profile))
+            .ToArray();
+
+        // Un .dpsfx importado debe ser efectivo inmediatamente. Hasta ahora era posible cargar
+        // los slots en una entrada desactivada: la UI mostraba la cadena, pero el motor no recibía
+        // los plugins y la configuración tampoco entraba en la persistencia de entradas activas.
+        // Los IDs importados los crea exclusivamente AudioEffectPresetStore al leer un archivo.
+        if (!IsEnabled && materializedEffects.Any(effect =>
+                effect.Id.StartsWith(
+                    AudioEffectPresetStore.ImportedSlotIdPrefix,
+                    StringComparison.Ordinal)))
+        {
+            IsEnabled = true;
+        }
+
+        ReplaceEffects(materializedEffects);
         EffectsBypassed = bypassed;
     }
 
