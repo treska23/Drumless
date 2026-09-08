@@ -17,6 +17,7 @@ public sealed partial class MainViewModel
     private LocalTrack? _lastRecordingTrack;
     private bool _isYouTubeAudioActive;
     private bool _isYouTubeAudioRouted;
+    private bool _isYouTubePlaybackAudible;
     private uint? _youtubeBrowserProcessId;
     private ProcessLoopbackWaveRecorder? _youtubeRecordingCapture;
     private string? _youtubeRecordingTempPath;
@@ -87,8 +88,21 @@ public sealed partial class MainViewModel
     public void SetYouTubeBrowserProcessId(uint? processId)
     {
         _youtubeBrowserProcessId = processId is > 0 ? processId : null;
-        if (IsRecordingOutput && !_isStoppingOutputRecording && _youtubeBrowserProcessId is not null)
+        if (IsRecordingOutput &&
+            !_isStoppingOutputRecording &&
+            _isYouTubePlaybackAudible &&
+            _youtubeBrowserProcessId is not null)
         {
+            _ = EnsureYouTubeRecordingCaptureAsync();
+        }
+    }
+
+    public void SetYouTubePlaybackAudible(bool audible)
+    {
+        _isYouTubePlaybackAudible = audible;
+        if (audible && IsRecordingOutput && !_isStoppingOutputRecording)
+        {
+            _youtubeWasActiveDuringRecording |= _isYouTubeAudioActive;
             _ = EnsureYouTubeRecordingCaptureAsync();
         }
     }
@@ -141,7 +155,10 @@ public sealed partial class MainViewModel
             if (active && IsRecordingOutput)
             {
                 _youtubeWasActiveDuringRecording = true;
-                _ = EnsureYouTubeRecordingCaptureAsync();
+                if (_isYouTubePlaybackAudible)
+                {
+                    _ = EnsureYouTubeRecordingCaptureAsync();
+                }
             }
             return;
         }
@@ -153,7 +170,10 @@ public sealed partial class MainViewModel
             if (IsRecordingOutput)
             {
                 _youtubeWasActiveDuringRecording = true;
-                _ = EnsureYouTubeRecordingCaptureAsync();
+                if (_isYouTubePlaybackAudible)
+                {
+                    _ = EnsureYouTubeRecordingCaptureAsync();
+                }
                 RecordingStatus = "● Grabando mezcla final: YouTube + instrumentos + entradas monitorizadas.";
             }
             else
@@ -217,9 +237,13 @@ public sealed partial class MainViewModel
             _youtubeWasActiveDuringRecording = _isYouTubeAudioActive;
             IsRecordingOutput = true;
 
-            // La captura de WebView2 se arma aunque YouTube todavía no esté sonando. Así la toma
-            // puede empezar primero y el vídeo incorporarse después sin cortar ni desalinear nada.
-            await EnsureYouTubeRecordingCaptureAsync();
+            // Nunca tocamos el proceso de WebView2 mientras setSinkId todavía está preparando la salida.
+            // Si YouTube ya es audible, la captura puede arrancar; si no, el bridge la activará justo
+            // después de que WebView2 quede desmuteado con la ruta de reproducción estable.
+            if (_isYouTubePlaybackAudible)
+            {
+                await EnsureYouTubeRecordingCaptureAsync();
+            }
 
             RecordingStatus = _isYouTubeAudioActive
                 ? "● Grabando mezcla final: YouTube + instrumentos + entradas monitorizadas."
@@ -260,6 +284,7 @@ public sealed partial class MainViewModel
     {
         if (!IsRecordingOutput ||
             _isStoppingOutputRecording ||
+            !_isYouTubePlaybackAudible ||
             _youtubeRecordingCapture is not null ||
             _youtubeBrowserProcessId is not { } browserProcessId ||
             browserProcessId == 0 ||
@@ -292,6 +317,7 @@ public sealed partial class MainViewModel
 
             if (!IsRecordingOutput ||
                 _isStoppingOutputRecording ||
+                !_isYouTubePlaybackAudible ||
                 _youtubeRecordingCapture is not null)
             {
                 return;
