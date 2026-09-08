@@ -10,12 +10,14 @@ namespace DrumPracticeStudio.Audio;
 /// </summary>
 internal sealed class OutputEndpointLoopbackRecorder : IDisposable
 {
+    private const int SampleRate = 48_000;
+    private const int Channels = 2;
     private const int SilenceChunkFrames = 4_096;
 
     private readonly object _gate = new();
     private readonly MMDeviceEnumerator _enumerator;
     private readonly MMDevice _device;
-    private readonly WasapiLoopbackCapture _capture;
+    private readonly WasapiRecorder _capture;
     private readonly WaveFileWriter _writer;
     private readonly WaveFormat _format;
     private readonly byte[] _silence;
@@ -31,7 +33,7 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
     private OutputEndpointLoopbackRecorder(
         MMDeviceEnumerator enumerator,
         MMDevice device,
-        WasapiLoopbackCapture capture,
+        WasapiRecorder capture,
         WaveFileWriter writer,
         string path)
     {
@@ -45,7 +47,6 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
         DeviceName = device.FriendlyName;
         _silence = new byte[SilenceChunkFrames * Math.Max(1, _format.BlockAlign)];
         _capture.DataAvailable += OnDataAvailable;
-        _capture.RecordingStopped += OnRecordingStopped;
     }
 
     public string Path { get; }
@@ -84,13 +85,22 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
 
         MMDeviceEnumerator? enumerator = null;
         MMDevice? device = null;
-        WasapiLoopbackCapture? capture = null;
+        WasapiRecorder? capture = null;
         WaveFileWriter? writer = null;
         try
         {
             enumerator = new MMDeviceEnumerator();
             device = enumerator.GetDevice(deviceId);
-            capture = new WasapiLoopbackCapture(device);
+            var requestedFormat = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels);
+            capture = new WasapiRecorderBuilder()
+                .WithDevice(device)
+                .WithLoopbackCapture()
+                .WithSharedMode()
+                .WithEventSync()
+                .WithFormat(requestedFormat)
+                .WithBufferLength(40)
+                .WithMmcssThreadPriority("Audio")
+                .Build();
             writer = new WaveFileWriter(resolvedPath, capture.WaveFormat);
             return new OutputEndpointLoopbackRecorder(
                 enumerator,
@@ -140,13 +150,12 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
         }
     }
 
-    private void OnDataAvailable(object? sender, WaveInEventArgs eventArgs)
+    private void OnDataAvailable(
+        ReadOnlySpan<byte> buffer,
+        AudioClientBufferFlags flags,
+        long devicePosition,
+        long qpcPosition)
     {
-        if (eventArgs.BytesRecorded <= 0)
-        {
-            return;
-        }
-
         lock (_gate)
         {
             if (!_started || _stopped || _disposed)
@@ -156,12 +165,17 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
 
             try
             {
-                var packetFrames = eventArgs.BytesRecorded / Math.Max(1, _format.BlockAlign);
+                var packetFrames = buffer.Length / Math.Max(1, _format.BlockAlign);
                 var elapsedFrames = GetElapsedFrames();
                 var packetStartFrame = Math.Max(0L, elapsedFrames - packetFrames);
                 if (packetStartFrame > _writtenFrames)
                 {
                     WriteSilence(packetStartFrame - _writtenFrames);
+                }
+
+                if (buffer.IsEmpty || flags.HasFlag(AudioClientBufferFlags.Silent))
+                {
+                    return;
                 }
 
                 var overlapFrames = Math.Max(0L, _writtenFrames - packetStartFrame);
@@ -171,14 +185,14 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
                 }
 
                 var skipBytes = checked((int)overlapFrames * _format.BlockAlign);
-                var bytesToWrite = eventArgs.BytesRecorded - skipBytes;
-                if (bytesToWrite <= 0)
+                var payload = buffer[skipBytes..];
+                if (payload.IsEmpty)
                 {
                     return;
                 }
 
-                _writer.Write(eventArgs.Buffer, skipBytes, bytesToWrite);
-                _writtenFrames += bytesToWrite / _format.BlockAlign;
+                _writer.Write(payload);
+                _writtenFrames += payload.Length / _format.BlockAlign;
                 _receivedPayload = true;
             }
             catch (Exception exception) when (exception is
@@ -189,19 +203,6 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
             {
                 _failure ??= exception;
             }
-        }
-    }
-
-    private void OnRecordingStopped(object? sender, StoppedEventArgs eventArgs)
-    {
-        if (eventArgs.Exception is null)
-        {
-            return;
-        }
-
-        lock (_gate)
-        {
-            _failure ??= eventArgs.Exception;
         }
     }
 
@@ -308,7 +309,6 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
         }
 
         _capture.DataAvailable -= OnDataAvailable;
-        _capture.RecordingStopped -= OnRecordingStopped;
         _capture.Dispose();
         _writer.Dispose();
         _device.Dispose();
