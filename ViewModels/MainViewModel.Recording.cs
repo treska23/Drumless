@@ -1,5 +1,8 @@
+using System.Diagnostics;
+using DrumPracticeStudio.Audio;
 using DrumPracticeStudio.Infrastructure;
 using DrumPracticeStudio.Models;
+using DrumPracticeStudio.Services;
 using Microsoft.Win32;
 
 namespace DrumPracticeStudio.ViewModels;
@@ -14,6 +17,12 @@ public sealed partial class MainViewModel
     private LocalTrack? _lastRecordingTrack;
     private bool _isYouTubeAudioActive;
     private bool _isYouTubeAudioRouted;
+    private OutputEndpointCaptureSession? _outputEndpointCapture;
+    private string? _recordingDestinationPath;
+    private string? _recordingWorkDirectory;
+    private bool _recordingUsesEndpointAsPrimary;
+    private bool _recordingInternalStarted;
+    private bool _youtubeWasActiveDuringRecording;
 
     public RelayCommand StartOutputRecordingCommand { get; private set; } = null!;
     public RelayCommand StopOutputRecordingCommand { get; private set; } = null!;
@@ -33,8 +42,7 @@ public sealed partial class MainViewModel
     }
 
     public bool CanStartOutputRecording =>
-        !IsRecordingOutput && !_isStartingOutputRecording &&
-        (_currentYouTubeItem is null || _isYouTubeAudioRouted);
+        !IsRecordingOutput && !_isStartingOutputRecording;
     public bool CanStopOutputRecording => IsRecordingOutput && !_isStoppingOutputRecording;
     public bool HasLastRecording => LastRecordingTrack is not null;
 
@@ -77,8 +85,8 @@ public sealed partial class MainViewModel
     public bool IsYouTubeAudioRouted => _isYouTubeAudioRouted;
 
     public Task StartYouTubeAudioRoutingAsync(uint browserProcessId) =>
-        // La creación de la captura termina añadiendo una fuente al mezclador. Si se ejecuta desde
-        // una continuación del Dispatcher, un driver de audio lento puede bloquear toda la ventana.
+        // Se conserva únicamente para la ruta histórica de reproducción. La grabación nueva no
+        // captura WebView2 por proceso: captura el endpoint físico de Windows.
         Task.Run(() => _audio.StartYouTubeAudioCaptureAsync(browserProcessId));
 
     public float TakeYouTubeAudioPeak() =>
@@ -94,15 +102,16 @@ public sealed partial class MainViewModel
         _isYouTubeAudioRouted = true;
         OnPropertyChanged(nameof(IsYouTubeAudioRouted));
         OnPropertyChanged(nameof(CanStartOutputRecording));
-        RecordingStatus = _isYouTubeAudioActive
-            ? "YouTube está en el mezclador: usa la salida elegida y se incluirá en la grabación."
-            : "YouTube preparado en el mezclador de la aplicación.";
+        if (!IsRecordingOutput)
+        {
+            RecordingStatus = _isYouTubeAudioActive
+                ? "YouTube conectado a la salida elegida."
+                : "YouTube preparado para la salida elegida.";
+        }
     }
 
     public void StopYouTubeAudioRouting(string? reason = null)
     {
-        // Retirar la fuente puede esperar al callback del driver o al proceso de captura. Esa espera
-        // nunca debe inmovilizar el Dispatcher de WPF.
         _ = Task.Run(_audio.StopYouTubeAudioCapture);
         if (_isYouTubeAudioRouted)
         {
@@ -111,7 +120,7 @@ public sealed partial class MainViewModel
             OnPropertyChanged(nameof(CanStartOutputRecording));
         }
 
-        if (!string.IsNullOrWhiteSpace(reason))
+        if (!string.IsNullOrWhiteSpace(reason) && !IsRecordingOutput)
         {
             RecordingStatus = reason;
         }
@@ -121,15 +130,26 @@ public sealed partial class MainViewModel
     {
         if (_isYouTubeAudioActive == active)
         {
+            if (active && IsRecordingOutput)
+            {
+                _youtubeWasActiveDuringRecording = true;
+            }
             return;
         }
+
         _isYouTubeAudioActive = active;
         OnPropertyChanged(nameof(CanStartOutputRecording));
         if (active)
         {
-            RecordingStatus = _isYouTubeAudioRouted
-                ? "YouTube está en el mezclador: usa la salida elegida y se incluirá en la grabación."
-                : "Conectando YouTube con la salida de audio elegida…";
+            if (IsRecordingOutput)
+            {
+                _youtubeWasActiveDuringRecording = true;
+                RecordingStatus = "● Grabando salida física: YouTube + mezcla de Drumless.";
+            }
+            else
+            {
+                RecordingStatus = "YouTube preparado; Grabar capturará la salida física seleccionada.";
+            }
         }
         else if (!IsRecordingOutput)
         {
@@ -145,22 +165,25 @@ public sealed partial class MainViewModel
         {
             return;
         }
-        if (_currentYouTubeItem is not null && !_isYouTubeAudioRouted)
-        {
-            RecordingStatus = "YouTube todavía no está conectado al mezclador de la aplicación.";
-            return;
-        }
 
+        OutputEndpointCaptureSession? preparedEndpointCapture = null;
+        string? workDirectory = null;
+        string? destination = null;
+        var internalStarted = false;
         try
         {
             _isStartingOutputRecording = true;
             OnPropertyChanged(nameof(CanStartOutputRecording));
+
+            var selectedOutput = SelectedAudioOutputDevice ??
+                throw new InvalidOperationException("Selecciona una salida de audio antes de grabar.");
+
             var recordingsFolder = Path.Combine(OutputFolderPath, "Tomas");
             Directory.CreateDirectory(recordingsFolder);
             var defaultName = $"Toma - {CurrentTrack?.Title ?? "práctica"} - {DateTime.Now:yyyyMMdd-HHmmss}.wav";
             var dialog = new SaveFileDialog
             {
-                Title = "Guardar grabación de la mezcla",
+                Title = "Guardar grabación de la salida",
                 Filter = "Audio WAV (*.wav)|*.wav",
                 InitialDirectory = recordingsFolder,
                 FileName = defaultName,
@@ -173,7 +196,7 @@ public sealed partial class MainViewModel
                 return;
             }
 
-            var destination = CreateUniqueRecordingPath(dialog.FileName);
+            destination = CreateUniqueRecordingPath(dialog.FileName);
             if (Tracks.Any(track => string.Equals(
                     track.Path,
                     destination,
@@ -182,11 +205,51 @@ public sealed partial class MainViewModel
                 RecordingStatus = "No se puede usar como destino un archivo ya registrado en la biblioteca.";
                 return;
             }
-            await _audio.StartRecordingAsync(destination);
+
+            var endpointCandidates = RecordingOutputEndpointResolver.ResolveCandidates(
+                selectedOutput,
+                AudioOutputDevices);
+            if (endpointCandidates.Count == 0)
+            {
+                throw new InvalidOperationException(selectedOutput.IsAsio
+                    ? $"No se encontró el endpoint WASAPI/WDM asociado a {selectedOutput.Name}. " +
+                      "Ese endpoint es necesario para capturar YouTube sin tocar WebView2."
+                    : $"La salida {selectedOutput.Name} ya no está disponible para loopback.");
+            }
+
+            workDirectory = Path.Combine(
+                AppPaths.RecordingWork,
+                $"physical-output-{Guid.NewGuid():N}");
+            preparedEndpointCapture = OutputEndpointCaptureSession.Prepare(
+                endpointCandidates,
+                workDirectory);
+
+            // ASIO no aparece en el mezclador de Windows: conservamos la grabación interna de
+            // Drumless (instrumentos, entradas y master) y sumaremos después el endpoint WDM donde
+            // suena YouTube. Con WASAPI el loopback del endpoint ya contiene la mezcla completa.
+            if (selectedOutput.IsAsio)
+            {
+                await _audio.StartRecordingAsync(destination);
+                internalStarted = true;
+            }
+
+            var timelineStart = Stopwatch.GetTimestamp();
+            preparedEndpointCapture.Start(timelineStart);
+
+            _outputEndpointCapture = preparedEndpointCapture;
+            _recordingDestinationPath = destination;
+            _recordingWorkDirectory = workDirectory;
+            _recordingUsesEndpointAsPrimary = !selectedOutput.IsAsio;
+            _recordingInternalStarted = internalStarted;
+            _youtubeWasActiveDuringRecording = _isYouTubeAudioActive;
+            preparedEndpointCapture = null;
+            workDirectory = null;
+            destination = null;
+
             IsRecordingOutput = true;
-            RecordingStatus = _currentYouTubeItem is not null
-                ? "● Grabando mezcla final: YouTube + instrumentos + entradas monitorizadas."
-                : "● Grabando mezcla final: pista + instrumentos + entradas monitorizadas.";
+            RecordingStatus = selectedOutput.IsAsio
+                ? "● Grabando salida: mezcla ASIO de Drumless + salida física WDM/YouTube."
+                : $"● Grabando exactamente lo que sale por {selectedOutput.Name}.";
             StatusMessage = "Grabación de salida iniciada";
         }
         catch (Exception exception) when (exception is
@@ -194,9 +257,24 @@ public sealed partial class MainViewModel
             UnauthorizedAccessException or
             ArgumentException or
             InvalidOperationException or
-            TimeoutException)
+            TimeoutException or
+            System.Runtime.InteropServices.COMException)
         {
-            RecordingStatus = $"No se pudo iniciar la grabación: {exception.Message}";
+            preparedEndpointCapture?.Dispose();
+            if (internalStarted)
+            {
+                try
+                {
+                    var abandoned = await _audio.StopRecordingAsync();
+                    TryDeleteRecordingFile(abandoned);
+                }
+                catch
+                {
+                    TryDeleteRecordingFile(destination);
+                }
+            }
+            TryDeleteRecordingWorkDirectory(workDirectory);
+            RecordingStatus = $"No se pudo iniciar la grabación de salida: {exception.Message}";
         }
         finally
         {
@@ -222,6 +300,21 @@ public sealed partial class MainViewModel
     private async Task StopOutputRecordingCoreAsync()
     {
         await Task.Yield();
+        var endpointCapture = _outputEndpointCapture;
+        var destination = _recordingDestinationPath;
+        var workDirectory = _recordingWorkDirectory;
+        var endpointIsPrimary = _recordingUsesEndpointAsPrimary;
+        var internalStarted = _recordingInternalStarted;
+        var youtubeWasActive = _youtubeWasActiveDuringRecording;
+        string? finalTempPath = null;
+
+        _outputEndpointCapture = null;
+        _recordingDestinationPath = null;
+        _recordingWorkDirectory = null;
+        _recordingUsesEndpointAsPrimary = false;
+        _recordingInternalStarted = false;
+        _youtubeWasActiveDuringRecording = false;
+
         try
         {
             if (_isStoppingOutputRecording)
@@ -230,36 +323,91 @@ public sealed partial class MainViewModel
             }
             _isStoppingOutputRecording = true;
             OnPropertyChanged(nameof(CanStopOutputRecording));
-            var path = await _audio.StopRecordingAsync();
-            IsRecordingOutput = false;
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+
+            if (endpointCapture is null || string.IsNullOrWhiteSpace(destination))
             {
-                RecordingStatus = "La grabación terminó sin producir un archivo.";
-                return;
+                throw new InvalidOperationException("La sesión de grabación no conserva su salida física.");
             }
 
-            LastRecordingTrack = _trackLibrary.RegisterRecording(path);
+            var endpointStopTask = endpointCapture.StopAndSelectAsync();
+            var internalStopTask = internalStarted
+                ? _audio.StopRecordingAsync()
+                : Task.FromResult<string?>(null);
+
+            var endpointResult = await endpointStopTask;
+            var internalPath = await internalStopTask;
+
+            Directory.CreateDirectory(workDirectory!);
+            finalTempPath = Path.Combine(workDirectory!, $"final-{Guid.NewGuid():N}.wav");
+
+            if (endpointIsPrimary)
+            {
+                // En WASAPI el loopback ya es la mezcla física completa: Drumless, WebView2,
+                // instrumentos aislados y cualquier otra señal realmente enviada a ese endpoint.
+                await RecordingAudioMixService.RenderAsync(
+                    [endpointResult.SelectedPath],
+                    finalTempPath);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(internalPath) || !File.Exists(internalPath))
+                {
+                    throw new InvalidDataException("La mezcla interna ASIO no produjo un archivo utilizable.");
+                }
+
+                await RecordingAudioMixService.RenderAsync(
+                    [internalPath, endpointResult.SelectedPath],
+                    finalTempPath);
+            }
+
+            File.Copy(finalTempPath, destination, overwrite: true);
+            IsRecordingOutput = false;
+
+            LastRecordingTrack = _trackLibrary.RegisterRecording(destination);
             SelectedLibraryTrack = LastRecordingTrack;
             RefreshLibraryPresentation();
             SaveTrackWorkspace();
+
+            var warnings = new List<string>();
+            if (!string.IsNullOrWhiteSpace(_audio.LastRecordingWarning))
+            {
+                warnings.Add(_audio.LastRecordingWarning);
+            }
+            if (!string.IsNullOrWhiteSpace(endpointResult.Warning))
+            {
+                warnings.Add(endpointResult.Warning);
+            }
+            if (youtubeWasActive && endpointResult.Energy < 0.000001d)
+            {
+                warnings.Add(
+                    $"YouTube estuvo activo, pero no se detectó señal en el endpoint capturado " +
+                    $"({endpointResult.Device.Name}).");
+            }
+
             RecordingStatus = $"Toma guardada y añadida a la biblioteca: {LastRecordingTrack.Title}" +
-                              (string.IsNullOrWhiteSpace(_audio.LastRecordingWarning)
+                              (warnings.Count == 0
                                   ? string.Empty
-                                  : $" · {_audio.LastRecordingWarning}");
-            StatusMessage = "Grabación finalizada";
+                                  : $" · {string.Join(" · ", warnings)}");
+            StatusMessage = warnings.Count == 0
+                ? "Grabación finalizada"
+                : "Grabación finalizada con avisos";
         }
         catch (Exception exception) when (exception is
             IOException or
             UnauthorizedAccessException or
             InvalidOperationException or
             InvalidDataException or
-            TimeoutException)
+            TimeoutException or
+            System.Runtime.InteropServices.COMException)
         {
             IsRecordingOutput = false;
             RecordingStatus = $"La grabación no pudo cerrarse correctamente: {exception.Message}";
         }
         finally
         {
+            endpointCapture?.Dispose();
+            TryDeleteRecordingFile(finalTempPath);
+            TryDeleteRecordingWorkDirectory(workDirectory);
             _isStoppingOutputRecording = false;
             _stopOutputRecordingTask = null;
             OnPropertyChanged(nameof(CanStopOutputRecording));
@@ -287,33 +435,103 @@ public sealed partial class MainViewModel
         return candidate;
     }
 
-    private void FinalizeRecordingOnShutdown()
+    private static void TryDeleteRecordingFile(string? path)
     {
-        if (_stopOutputRecordingTask is not null)
-        {
-            return;
-        }
-        if (!IsRecordingOutput)
+        if (string.IsNullOrWhiteSpace(path))
         {
             return;
         }
         try
         {
-            var path = _audio.StopRecordingAsync().GetAwaiter().GetResult();
-            IsRecordingOutput = false;
-            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            if (File.Exists(path))
             {
-                LastRecordingTrack = _trackLibrary.RegisterRecording(path);
+                File.Delete(path);
             }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryDeleteRecordingWorkDirectory(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void FinalizeRecordingOnShutdown()
+    {
+        if (_stopOutputRecordingTask is not null || !IsRecordingOutput)
+        {
+            return;
+        }
+
+        var endpointCapture = _outputEndpointCapture;
+        var destination = _recordingDestinationPath;
+        var workDirectory = _recordingWorkDirectory;
+        var endpointIsPrimary = _recordingUsesEndpointAsPrimary;
+        var internalStarted = _recordingInternalStarted;
+        string? finalTempPath = null;
+        try
+        {
+            var endpointResult = endpointCapture?.StopAndSelectAsync().GetAwaiter().GetResult();
+            var internalPath = internalStarted
+                ? _audio.StopRecordingAsync().GetAwaiter().GetResult()
+                : null;
+
+            if (endpointResult is null || string.IsNullOrWhiteSpace(destination))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(workDirectory!);
+            finalTempPath = Path.Combine(workDirectory!, $"final-close-{Guid.NewGuid():N}.wav");
+            var sources = endpointIsPrimary
+                ? new[] { endpointResult.SelectedPath }
+                : new[] { internalPath, endpointResult.SelectedPath }
+                    .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                    .Select(path => path!)
+                    .ToArray();
+
+            RecordingAudioMixService.RenderAsync(sources, finalTempPath)
+                .GetAwaiter()
+                .GetResult();
+            File.Copy(finalTempPath, destination, overwrite: true);
+            LastRecordingTrack = _trackLibrary.RegisterRecording(destination);
         }
         catch (Exception exception) when (exception is
             IOException or
             UnauthorizedAccessException or
             InvalidOperationException or
             InvalidDataException or
-            TimeoutException)
+            TimeoutException or
+            System.Runtime.InteropServices.COMException)
+        {
+        }
+        finally
         {
             IsRecordingOutput = false;
+            endpointCapture?.Dispose();
+            TryDeleteRecordingFile(finalTempPath);
+            TryDeleteRecordingWorkDirectory(workDirectory);
+            _outputEndpointCapture = null;
+            _recordingDestinationPath = null;
+            _recordingWorkDirectory = null;
+            _recordingUsesEndpointAsPrimary = false;
+            _recordingInternalStarted = false;
+            _youtubeWasActiveDuringRecording = false;
         }
     }
 }
