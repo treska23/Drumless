@@ -99,7 +99,12 @@ internal sealed class ProcessLoopbackWaveRecorder : IDisposable
         }
     }
 
-    public void Start()
+    /// <summary>
+    /// Inicia la captura. Si se proporciona el timestamp de inicio de la toma principal,
+    /// la pista de YouTube conserva el mismo origen temporal y rellena con silencio cualquier
+    /// tramo anterior a la creación de la captura.
+    /// </summary>
+    public void Start(long timelineStartTimestamp = 0)
     {
         lock (_gate)
         {
@@ -109,7 +114,9 @@ internal sealed class ProcessLoopbackWaveRecorder : IDisposable
                 throw new InvalidOperationException("La captura de YouTube ya se inició o terminó.");
             }
             _writtenFrames = 0;
-            _startTimestamp = Stopwatch.GetTimestamp();
+            _startTimestamp = timelineStartTimestamp > 0
+                ? timelineStartTimestamp
+                : Stopwatch.GetTimestamp();
             _started = true;
         }
 
