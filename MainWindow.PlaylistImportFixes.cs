@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using DrumPracticeStudio.Models;
 using DrumPracticeStudio.Services;
+using DrumPracticeStudio.Views;
 
 namespace DrumPracticeStudio;
 
@@ -56,15 +57,6 @@ public partial class MainWindow
 
     private async void OnImportCurrentYouTubePlaylistFixedClick(object sender, RoutedEventArgs e)
     {
-        var targetPlaylist = _viewModel.SelectedPlaylist;
-        if (targetPlaylist is null)
-        {
-            ShowYouTubePlaylistImportMessage(
-                "Selecciona primero, en el panel Playlists, la playlist de Drumless a la que quieres añadir los vídeos.",
-                MessageBoxImage.Information);
-            return;
-        }
-
         if (!YouTubeNavigationService.TryGetPlaylistId(YouTubeWebView.Source, out _))
         {
             ShowYouTubePlaylistImportMessage(
@@ -81,6 +73,30 @@ public partial class MainWindow
             return;
         }
 
+        var modeDialog = new YouTubePlaylistImportModeDialog(_viewModel.Playlists.Count > 0)
+        {
+            Owner = this
+        };
+        if (modeDialog.ShowDialog() != true || modeDialog.SelectedMode is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<Playlist> requestedTargets = Array.Empty<Playlist>();
+        if (modeDialog.SelectedMode == YouTubePlaylistImportMode.UseExisting)
+        {
+            var targetDialog = new YouTubePlaylistTargetDialog(_viewModel.Playlists)
+            {
+                Owner = this
+            };
+            if (targetDialog.ShowDialog() != true)
+            {
+                return;
+            }
+
+            requestedTargets = targetDialog.SelectedPlaylists;
+        }
+
         var button = sender as Button ?? _fixedYouTubePlaylistImportButton;
         if (button is not null)
         {
@@ -89,21 +105,12 @@ public partial class MainWindow
 
         try
         {
-            YouTubeStatusText.Text =
-                $"Importando la playlist de YouTube en «{targetPlaylist.Name}»…";
+            YouTubeStatusText.Text = "Leyendo la playlist completa de YouTube…";
             var payload = await ExtractCurrentYouTubePlaylistAsync();
             if (payload?.Items is not { Count: > 0 })
             {
                 ShowYouTubePlaylistImportMessage(
                     "No se encontraron vídeos. Espera a que YouTube termine de cargar la playlist y vuelve a intentarlo.",
-                    MessageBoxImage.Warning);
-                return;
-            }
-
-            if (!ReferenceEquals(_viewModel.SelectedPlaylist, targetPlaylist))
-            {
-                ShowYouTubePlaylistImportMessage(
-                    "La playlist seleccionada cambió mientras se estaba leyendo YouTube. No se ha importado nada; vuelve a pulsar el botón.",
                     MessageBoxImage.Warning);
                 return;
             }
@@ -125,16 +132,51 @@ public partial class MainWindow
             var sourceName = string.IsNullOrWhiteSpace(payload.Title)
                 ? "Playlist de YouTube"
                 : payload.Title.Trim();
-            var result = _viewModel.ImportYouTubePlaylist(entries, sourceName);
-            var message = result.Added switch
+
+            if (modeDialog.SelectedMode == YouTubePlaylistImportMode.CreateNew)
             {
-                0 => $"No se añadió ningún vídeo a «{targetPlaylist.Name}»: los {result.Duplicates} ya estaban incluidos.",
-                1 when result.Duplicates == 0 => $"Se añadió 1 vídeo a «{targetPlaylist.Name}».",
-                1 => $"Se añadió 1 vídeo a «{targetPlaylist.Name}» y se omitieron {result.Duplicates} duplicados.",
-                _ when result.Duplicates == 0 => $"Se añadieron {result.Added} vídeos a «{targetPlaylist.Name}».",
-                _ => $"Se añadieron {result.Added} vídeos a «{targetPlaylist.Name}» y se omitieron {result.Duplicates} duplicados."
+                var target = _viewModel.CreatePlaylistForYouTubeImport(sourceName);
+                var result = _viewModel.ImportYouTubePlaylistInto(target, entries, sourceName);
+                var message = result.Added == 1
+                    ? $"Se creó «{target.Name}» con 1 vídeo de YouTube."
+                    : $"Se creó «{target.Name}» con {result.Added} vídeos de YouTube.";
+                ShowYouTubePlaylistImportMessage(message, MessageBoxImage.Information);
+                return;
+            }
+
+            var targets = requestedTargets
+                .Where(target => _viewModel.Playlists.Contains(target))
+                .DistinctBy(target => target.Id, StringComparer.Ordinal)
+                .ToArray();
+            if (targets.Length == 0)
+            {
+                ShowYouTubePlaylistImportMessage(
+                    "Las playlists seleccionadas ya no están disponibles. No se ha importado nada.",
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            var totalAdded = 0;
+            var totalDuplicates = 0;
+            foreach (var target in targets)
+            {
+                var result = _viewModel.ImportYouTubePlaylistInto(target, entries, sourceName);
+                totalAdded += result.Added;
+                totalDuplicates += result.Duplicates;
+            }
+
+            var targetLabel = targets.Length == 1
+                ? $"«{targets[0].Name}»"
+                : $"{targets.Length} playlists";
+            var messageText = totalAdded switch
+            {
+                0 => $"No se añadió ningún vídeo a {targetLabel}: todos estaban ya incluidos.",
+                1 when totalDuplicates == 0 => $"Se añadió 1 vídeo a {targetLabel}.",
+                1 => $"Se añadió 1 vídeo a {targetLabel} y se omitieron {totalDuplicates} duplicados.",
+                _ when totalDuplicates == 0 => $"Se añadieron {totalAdded} vídeos a {targetLabel}.",
+                _ => $"Se añadieron {totalAdded} vídeos a {targetLabel} y se omitieron {totalDuplicates} duplicados."
             };
-            ShowYouTubePlaylistImportMessage(message, MessageBoxImage.Information);
+            ShowYouTubePlaylistImportMessage(messageText, MessageBoxImage.Information);
         }
         catch (Exception exception)
         {
