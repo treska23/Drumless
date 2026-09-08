@@ -89,9 +89,9 @@ public static class RecordingAudioMixService
 
         public WaveFormat WaveFormat { get; }
 
-        public int Read(float[] buffer, int offset, int count)
+        public int Read(Span<float> buffer)
         {
-            var requestedFrames = count / 2;
+            var requestedFrames = buffer.Length / 2;
             if (requestedFrames <= 0)
             {
                 return 0;
@@ -103,17 +103,20 @@ public static class RecordingAudioMixService
                 _scratch = new float[requestedInputSamples];
             }
 
-            var read = _source.Read(_scratch, 0, requestedInputSamples);
+            var read = _source.Read(_scratch.AsSpan(0, requestedInputSamples));
             var frames = read / _sourceChannels;
             for (var frame = 0; frame < frames; frame++)
             {
                 var sourceOffset = frame * _sourceChannels;
-                var destinationOffset = offset + frame * 2;
+                var destinationOffset = frame * 2;
                 buffer[destinationOffset] = _scratch[sourceOffset];
                 buffer[destinationOffset + 1] = _scratch[sourceOffset + 1];
             }
 
             return frames * 2;
         }
+
+        public int Read(float[] buffer, int offset, int count) =>
+            Read(buffer.AsSpan(offset, count));
     }
 }
