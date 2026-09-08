@@ -244,7 +244,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
             _recordingStarted = completion;
         }
         Send(new Vst3RuntimeCommand("StartRecording", Text: path));
-        await completion.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+        await completion.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
     }
 
     public async Task StopRecordingAsync(CancellationToken cancellationToken = default)
@@ -259,7 +259,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
             _recordingStopped = completion;
         }
         Send(new Vst3RuntimeCommand("StopRecording"));
-        await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+        await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
     }
 
     public bool OpenEditor()
@@ -349,7 +349,7 @@ internal sealed class Vst3InstrumentHost : IDisposable
     {
         try
         {
-            while (await reader.ReadLineAsync() is { } line)
+            while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
             {
                 Vst3RuntimeNotification? notification;
                 try

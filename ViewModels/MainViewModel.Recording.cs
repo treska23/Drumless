@@ -13,6 +13,8 @@ public sealed partial class MainViewModel
     private bool _isStartingOutputRecording;
     private bool _isStoppingOutputRecording;
     private Task? _stopOutputRecordingTask;
+    private Task? _startOutputRecordingTask;
+    private bool _isClosingForRecording;
     private string _recordingStatus = "Preparado para grabar la mezcla de salida.";
     private LocalTrack? _lastRecordingTrack;
     private bool _isYouTubeAudioActive;
@@ -35,14 +37,17 @@ public sealed partial class MainViewModel
         {
             if (SetProperty(ref _isRecordingOutput, value))
             {
-                OnPropertyChanged(nameof(CanStartOutputRecording));
-                OnPropertyChanged(nameof(CanStopOutputRecording));
+                NotifyRecordingAvailability();
             }
         }
     }
 
     public bool CanStartOutputRecording =>
-        !IsRecordingOutput && !_isStartingOutputRecording;
+        !HasPendingOutputRecording && !_isClosingForRecording;
+    public bool HasPendingOutputRecording =>
+        IsRecordingOutput || _isStartingOutputRecording || _isStoppingOutputRecording ||
+        _stopOutputRecordingTask is not null;
+    public bool CanChangeRecordingAudioSetup => !HasPendingOutputRecording && !_isClosingForRecording;
     public bool CanStopOutputRecording => IsRecordingOutput && !_isStoppingOutputRecording;
     public bool HasLastRecording => LastRecordingTrack is not null;
 
@@ -80,7 +85,24 @@ public sealed partial class MainViewModel
         });
     }
 
-    public Task CompleteRecordingBeforeCloseAsync() => StopOutputRecordingAsync(force: true);
+    public async Task CompleteRecordingBeforeCloseAsync()
+    {
+        _isClosingForRecording = true;
+        NotifyRecordingAvailability();
+        if (_startOutputRecordingTask is { } starting)
+        {
+            await starting;
+        }
+        await StopOutputRecordingAsync(force: true);
+    }
+
+    private void NotifyRecordingAvailability()
+    {
+        OnPropertyChanged(nameof(CanStartOutputRecording));
+        OnPropertyChanged(nameof(CanStopOutputRecording));
+        OnPropertyChanged(nameof(HasPendingOutputRecording));
+        OnPropertyChanged(nameof(CanChangeRecordingAudioSetup));
+    }
 
     public bool IsYouTubeAudioRouted => _isYouTubeAudioRouted;
 
@@ -159,12 +181,23 @@ public sealed partial class MainViewModel
         }
     }
 
-    private async Task StartOutputRecordingAsync()
+    private Task StartOutputRecordingAsync()
     {
-        if (IsRecordingOutput)
+        if (!CanStartOutputRecording)
         {
-            return;
+            return Task.CompletedTask;
         }
+
+        _isStartingOutputRecording = true;
+        NotifyRecordingAvailability();
+        _startOutputRecordingTask = StartOutputRecordingCoreAsync();
+        return _startOutputRecordingTask;
+    }
+
+    private async Task StartOutputRecordingCoreAsync()
+    {
+        // Publish the task before any nested dialog/dispatcher can request a close.
+        await Task.Yield();
 
         OutputEndpointCaptureSession? preparedEndpointCapture = null;
         string? workDirectory = null;
@@ -172,8 +205,7 @@ public sealed partial class MainViewModel
         var internalStarted = false;
         try
         {
-            _isStartingOutputRecording = true;
-            OnPropertyChanged(nameof(CanStartOutputRecording));
+            if (_isClosingForRecording) return;
 
             var selectedOutput = SelectedAudioOutputDevice ??
                 throw new InvalidOperationException("Selecciona una salida de audio antes de grabar.");
@@ -229,7 +261,7 @@ public sealed partial class MainViewModel
             // suena YouTube. Con WASAPI el loopback del endpoint ya contiene la mezcla completa.
             if (selectedOutput.IsAsio)
             {
-                await _audio.StartRecordingAsync(destination);
+                await _audio.StartRecordingAsync(Path.Combine(workDirectory, "internal.wav"));
                 internalStarted = true;
             }
 
@@ -279,12 +311,17 @@ public sealed partial class MainViewModel
         finally
         {
             _isStartingOutputRecording = false;
-            OnPropertyChanged(nameof(CanStartOutputRecording));
+            _startOutputRecordingTask = null;
+            NotifyRecordingAvailability();
         }
     }
 
     private Task StopOutputRecordingAsync(bool force = false)
     {
+        if (_stopOutputRecordingTask is not null)
+        {
+            return _stopOutputRecordingTask;
+        }
         if (!IsRecordingOutput)
         {
             return Task.CompletedTask;
@@ -298,10 +335,6 @@ public sealed partial class MainViewModel
             return Task.CompletedTask;
         }
 
-        if (_stopOutputRecordingTask is not null)
-        {
-            return _stopOutputRecordingTask;
-        }
         _stopOutputRecordingTask = StopOutputRecordingCoreAsync();
         return _stopOutputRecordingTask;
     }
@@ -333,6 +366,7 @@ public sealed partial class MainViewModel
         var internalStarted = _recordingInternalStarted;
         var youtubeWasActive = _youtubeWasActiveDuringRecording;
         string? finalTempPath = null;
+        string? publishedPath = null;
 
         _outputEndpointCapture = null;
         _recordingDestinationPath = null;
@@ -348,7 +382,7 @@ public sealed partial class MainViewModel
                 return;
             }
             _isStoppingOutputRecording = true;
-            OnPropertyChanged(nameof(CanStopOutputRecording));
+            NotifyRecordingAvailability();
 
             if (endpointCapture is null || string.IsNullOrWhiteSpace(destination))
             {
@@ -360,6 +394,8 @@ public sealed partial class MainViewModel
                 ? _audio.StopRecordingAsync()
                 : Task.FromResult<string?>(null);
 
+            // Both writers must finish even when one fails, before disposal/recovery.
+            await Task.WhenAll(endpointStopTask, internalStopTask);
             var endpointResult = await endpointStopTask;
             var internalPath = await internalStopTask;
 
@@ -386,16 +422,16 @@ public sealed partial class MainViewModel
                     finalTempPath);
             }
 
-            File.Copy(finalTempPath, destination, overwrite: true);
+            publishedPath = await Task.Run(() => RecordingFileStore.Publish(finalTempPath, destination));
             IsRecordingOutput = false;
 
-            LastRecordingTrack = _trackLibrary.RegisterRecording(destination);
+            LastRecordingTrack = _trackLibrary.RegisterRecording(publishedPath);
             SelectedLibraryTrack = LastRecordingTrack;
             RefreshLibraryPresentation();
             SaveTrackWorkspace();
 
             var warnings = new List<string>();
-            if (!string.IsNullOrWhiteSpace(_audio.LastRecordingWarning))
+            if (internalStarted && !string.IsNullOrWhiteSpace(_audio.LastRecordingWarning))
             {
                 warnings.Add(_audio.LastRecordingWarning);
             }
@@ -427,16 +463,23 @@ public sealed partial class MainViewModel
             System.Runtime.InteropServices.COMException)
         {
             IsRecordingOutput = false;
-            RecordingStatus = $"La grabación no pudo cerrarse correctamente: {exception.Message}";
+            RecordingFileStore.WriteRecoveryNote(workDirectory, destination, exception);
+            RecordingStatus = publishedPath is not null
+                ? $"Toma guardada en {publishedPath}, pero no pudo añadirse a la biblioteca: {exception.Message}"
+                : $"No se pudo guardar la toma: {exception.Message}. " +
+                  $"Se conservan los archivos recuperables en {workDirectory}";
         }
         finally
         {
             endpointCapture?.Dispose();
-            TryDeleteRecordingFile(finalTempPath);
-            TryDeleteRecordingWorkDirectory(workDirectory);
+            if (publishedPath is not null)
+            {
+                TryDeleteRecordingFile(finalTempPath);
+                TryDeleteRecordingWorkDirectory(workDirectory);
+            }
             _isStoppingOutputRecording = false;
             _stopOutputRecordingTask = null;
-            OnPropertyChanged(nameof(CanStopOutputRecording));
+            NotifyRecordingAvailability();
         }
     }
 

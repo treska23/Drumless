@@ -19,26 +19,47 @@ public static class RecordingAudioMixService
             throw new ArgumentException("Se necesita al menos una fuente de grabación.", nameof(sourcePaths));
         }
 
+        var resolvedDestination = Path.GetFullPath(destination);
+        var sources = sourcePaths.Select(path =>
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(path);
+            var resolved = Path.GetFullPath(path);
+            if (string.Equals(resolved, resolvedDestination, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("El destino no puede reemplazar una fuente de la toma.", nameof(destination));
+            }
+            return resolved;
+        }).ToArray();
+
         await Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var readers = sourcePaths
-                .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                .Select(path => new AudioFileReader(path))
-                .ToArray();
-            if (readers.Length == 0)
-            {
-                throw new InvalidDataException("No hay archivos de audio válidos para construir la toma.");
-            }
-
+            var readers = new List<AudioFileReader>();
+            var temporaryPath = resolvedDestination + $".{Guid.NewGuid():N}.tmp.wav";
             try
             {
+                // Every requested source is required. Keep ownership as each reader
+                // opens so a later invalid source cannot leave earlier files locked.
+                foreach (var source in sources)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    readers.Add(new AudioFileReader(source));
+                }
+
                 var normalized = readers
                     .Select(reader => Normalize(reader))
                     .ToArray();
                 var mixer = new MixingSampleProvider(normalized) { ReadFully = false };
-                WaveFileWriter.CreateWaveFile16(destination, mixer);
-                StemAudioMixer.ValidateWave(destination);
+                WaveFileWriter.CreateWaveFile16(
+                    temporaryPath,
+                    new CancellableSampleProvider(mixer, cancellationToken));
+                cancellationToken.ThrowIfCancellationRequested();
+                StemAudioMixer.ValidateWave(temporaryPath);
+                File.Move(temporaryPath, resolvedDestination, overwrite: true);
+            }
+            catch (Exception exception) when (exception is FormatException or NotSupportedException)
+            {
+                throw new InvalidDataException("Una fuente de la toma tiene un formato de audio no válido.", exception);
             }
             finally
             {
@@ -46,8 +67,29 @@ public static class RecordingAudioMixService
                 {
                     reader.Dispose();
                 }
+                try
+                {
+                    File.Delete(temporaryPath);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    // Preserve the original render failure; sources remain available for recovery.
+                }
             }
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private sealed class CancellableSampleProvider(
+        ISampleProvider source,
+        CancellationToken cancellationToken) : ISampleProvider
+    {
+        public WaveFormat WaveFormat => source.WaveFormat;
+
+        public int Read(Span<float> buffer)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return source.Read(buffer);
+        }
     }
 
     private static ISampleProvider Normalize(ISampleProvider source)

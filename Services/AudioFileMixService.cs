@@ -40,6 +40,6 @@ public static class AudioFileMixService
                     reader.Dispose();
                 }
             }
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
     }
 }

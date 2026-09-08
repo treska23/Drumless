@@ -134,8 +134,24 @@ internal sealed class OutputEndpointCaptureSession : IDisposable
         foreach (var candidate in _candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var energy = await MeasureEnergyAsync(candidate.Path, cancellationToken);
-            ranked.Add((candidate, energy));
+            try
+            {
+                var energy = await MeasureEnergyAsync(candidate.Path, cancellationToken)
+                    .ConfigureAwait(false);
+                ranked.Add((candidate, energy));
+            }
+            catch (Exception exception) when (exception is
+                IOException or UnauthorizedAccessException or InvalidOperationException or
+                InvalidDataException or FormatException or ArgumentException)
+            {
+                warnings.Add($"{candidate.Device.Name}: no se pudo leer la captura ({exception.Message})");
+            }
+        }
+
+        if (ranked.Count == 0)
+        {
+            throw new InvalidDataException(
+                "Ninguna salida produjo una captura WAV utilizable. " + string.Join(" | ", warnings));
         }
 
         var best = ranked
@@ -155,14 +171,13 @@ internal sealed class OutputEndpointCaptureSession : IDisposable
         string path,
         CancellationToken cancellationToken)
     {
-        if (!File.Exists(path))
-        {
-            return 0d;
-        }
-
         return await Task.Run(() =>
         {
             using var reader = new AudioFileReader(path);
+            if (reader.TotalTime <= TimeSpan.Zero)
+            {
+                throw new InvalidDataException("La captura no contiene audio reproducible.");
+            }
             var buffer = new float[8_192];
             double sumSquares = 0d;
             long samples = 0;
@@ -179,7 +194,7 @@ internal sealed class OutputEndpointCaptureSession : IDisposable
             }
 
             return samples == 0 ? 0d : Math.Sqrt(sumSquares / samples);
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     public void Dispose()
