@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DrumPracticeStudio.Audio;
 using DrumPracticeStudio.Infrastructure;
 using DrumPracticeStudio.Models;
@@ -19,6 +20,9 @@ public sealed partial class MainViewModel
     private uint? _youtubeBrowserProcessId;
     private ProcessLoopbackWaveRecorder? _youtubeRecordingCapture;
     private string? _youtubeRecordingTempPath;
+    private Task? _youtubeRecordingCaptureStartTask;
+    private long _outputRecordingStartTimestamp;
+    private bool _youtubeWasActiveDuringRecording;
 
     public RelayCommand StartOutputRecordingCommand { get; private set; } = null!;
     public RelayCommand StopOutputRecordingCommand { get; private set; } = null!;
@@ -38,8 +42,7 @@ public sealed partial class MainViewModel
     }
 
     public bool CanStartOutputRecording =>
-        !IsRecordingOutput && !_isStartingOutputRecording &&
-        (_currentYouTubeItem is null || _isYouTubeAudioRouted);
+        !IsRecordingOutput && !_isStartingOutputRecording;
     public bool CanStopOutputRecording => IsRecordingOutput && !_isStoppingOutputRecording;
     public bool HasLastRecording => LastRecordingTrack is not null;
 
@@ -64,7 +67,7 @@ public sealed partial class MainViewModel
     private void InitializeRecordingCommands()
     {
         StartOutputRecordingCommand = new RelayCommand(() => _ = StartOutputRecordingAsync());
-        StopOutputRecordingCommand = new RelayCommand(() => _ = StopOutputRecordingAsync());
+        StopOutputRecordingCommand = new RelayCommand(() => _ = StopOutputRecordingAsync(force: true));
         PlayLastRecordingCommand = new RelayCommand(() =>
         {
             if (LastRecordingTrack is not null)
@@ -77,12 +80,18 @@ public sealed partial class MainViewModel
         });
     }
 
-    public Task CompleteRecordingBeforeCloseAsync() => StopOutputRecordingAsync();
+    public Task CompleteRecordingBeforeCloseAsync() => StopOutputRecordingAsync(force: true);
 
     public bool IsYouTubeAudioRouted => _isYouTubeAudioRouted;
 
-    public void SetYouTubeBrowserProcessId(uint? processId) =>
+    public void SetYouTubeBrowserProcessId(uint? processId)
+    {
         _youtubeBrowserProcessId = processId is > 0 ? processId : null;
+        if (IsRecordingOutput && !_isStoppingOutputRecording && _youtubeBrowserProcessId is not null)
+        {
+            _ = EnsureYouTubeRecordingCaptureAsync();
+        }
+    }
 
     public Task StartYouTubeAudioRoutingAsync(uint browserProcessId) =>
         // La creación de la captura termina añadiendo una fuente al mezclador. Si se ejecuta desde
@@ -119,7 +128,7 @@ public sealed partial class MainViewModel
             OnPropertyChanged(nameof(CanStartOutputRecording));
         }
 
-        if (!string.IsNullOrWhiteSpace(reason))
+        if (!string.IsNullOrWhiteSpace(reason) && !IsRecordingOutput)
         {
             RecordingStatus = reason;
         }
@@ -129,15 +138,30 @@ public sealed partial class MainViewModel
     {
         if (_isYouTubeAudioActive == active)
         {
+            if (active && IsRecordingOutput)
+            {
+                _youtubeWasActiveDuringRecording = true;
+                _ = EnsureYouTubeRecordingCaptureAsync();
+            }
             return;
         }
+
         _isYouTubeAudioActive = active;
         OnPropertyChanged(nameof(CanStartOutputRecording));
         if (active)
         {
-            RecordingStatus = _isYouTubeAudioRouted
-                ? "YouTube está preparado para la salida elegida y se incluirá en la grabación."
-                : "Conectando YouTube con la salida de audio elegida…";
+            if (IsRecordingOutput)
+            {
+                _youtubeWasActiveDuringRecording = true;
+                _ = EnsureYouTubeRecordingCaptureAsync();
+                RecordingStatus = "● Grabando mezcla final: YouTube + instrumentos + entradas monitorizadas.";
+            }
+            else
+            {
+                RecordingStatus = _isYouTubeAudioRouted
+                    ? "YouTube está preparado para la salida elegida y se incluirá en la grabación."
+                    : "Conectando YouTube con la salida de audio elegida…";
+            }
         }
         else if (!IsRecordingOutput)
         {
@@ -153,14 +177,7 @@ public sealed partial class MainViewModel
         {
             return;
         }
-        if (_currentYouTubeItem is not null && !_isYouTubeAudioRouted)
-        {
-            RecordingStatus = "YouTube todavía no está preparado para la salida elegida.";
-            return;
-        }
 
-        ProcessLoopbackWaveRecorder? preparedYouTubeCapture = null;
-        string? preparedYouTubePath = null;
         string? startedPath = null;
         try
         {
@@ -194,46 +211,19 @@ public sealed partial class MainViewModel
                 return;
             }
 
-            if (_currentYouTubeItem is not null)
-            {
-                if (_youtubeBrowserProcessId is not { } browserProcessId || browserProcessId == 0)
-                {
-                    RecordingStatus =
-                        "No se puede iniciar una toma completa: WebView2 no ha expuesto el proceso de YouTube.";
-                    return;
-                }
-
-                Directory.CreateDirectory(AppPaths.RecordingWork);
-                preparedYouTubePath = Path.Combine(
-                    AppPaths.RecordingWork,
-                    $"youtube-{Guid.NewGuid():N}.wav");
-                RecordingStatus = "Preparando la captura de YouTube para la mezcla final…";
-                preparedYouTubeCapture = await ProcessLoopbackWaveRecorder.PrepareAsync(
-                    browserProcessId,
-                    preparedYouTubePath);
-            }
-
             await _audio.StartRecordingAsync(destination);
             startedPath = destination;
-            try
-            {
-                preparedYouTubeCapture?.Start();
-            }
-            catch
-            {
-                var abandoned = await _audio.StopRecordingAsync();
-                TryDeleteTemporaryRecording(abandoned);
-                throw;
-            }
-
-            _youtubeRecordingCapture = preparedYouTubeCapture;
-            _youtubeRecordingTempPath = preparedYouTubePath;
-            preparedYouTubeCapture = null;
-            preparedYouTubePath = null;
+            _outputRecordingStartTimestamp = Stopwatch.GetTimestamp();
+            _youtubeWasActiveDuringRecording = _isYouTubeAudioActive;
             IsRecordingOutput = true;
-            RecordingStatus = _currentYouTubeItem is not null
+
+            // La captura de WebView2 se arma aunque YouTube todavía no esté sonando. Así la toma
+            // puede empezar primero y el vídeo incorporarse después sin cortar ni desalinear nada.
+            await EnsureYouTubeRecordingCaptureAsync();
+
+            RecordingStatus = _isYouTubeAudioActive
                 ? "● Grabando mezcla final: YouTube + instrumentos + entradas monitorizadas."
-                : "● Grabando mezcla final: pista + instrumentos + entradas monitorizadas.";
+                : "● Grabando salida final: instrumentos, entradas y cualquier YouTube que empiece durante la toma.";
             StatusMessage = "Grabación de salida iniciada";
         }
         catch (Exception exception) when (exception is
@@ -245,25 +235,111 @@ public sealed partial class MainViewModel
         {
             if (startedPath is not null)
             {
-                TryDeleteTemporaryRecording(startedPath);
+                try
+                {
+                    var abandoned = await _audio.StopRecordingAsync();
+                    TryDeleteTemporaryRecording(abandoned);
+                }
+                catch
+                {
+                    TryDeleteTemporaryRecording(startedPath);
+                }
             }
+            IsRecordingOutput = false;
+            _outputRecordingStartTimestamp = 0;
             RecordingStatus = $"No se pudo iniciar la grabación: {exception.Message}";
         }
         finally
         {
-            preparedYouTubeCapture?.Dispose();
-            TryDeleteTemporaryRecording(preparedYouTubePath);
             _isStartingOutputRecording = false;
             OnPropertyChanged(nameof(CanStartOutputRecording));
         }
     }
 
-    private Task StopOutputRecordingAsync()
+    private Task EnsureYouTubeRecordingCaptureAsync()
+    {
+        if (!IsRecordingOutput ||
+            _isStoppingOutputRecording ||
+            _youtubeRecordingCapture is not null ||
+            _youtubeBrowserProcessId is not { } browserProcessId ||
+            browserProcessId == 0 ||
+            _outputRecordingStartTimestamp == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        return _youtubeRecordingCaptureStartTask ??=
+            StartYouTubeRecordingCaptureCoreAsync(
+                browserProcessId,
+                _outputRecordingStartTimestamp);
+    }
+
+    private async Task StartYouTubeRecordingCaptureCoreAsync(
+        uint browserProcessId,
+        long timelineStartTimestamp)
+    {
+        ProcessLoopbackWaveRecorder? preparedCapture = null;
+        string? preparedPath = null;
+        try
+        {
+            Directory.CreateDirectory(AppPaths.RecordingWork);
+            preparedPath = Path.Combine(
+                AppPaths.RecordingWork,
+                $"youtube-{Guid.NewGuid():N}.wav");
+            preparedCapture = await ProcessLoopbackWaveRecorder.PrepareAsync(
+                browserProcessId,
+                preparedPath);
+
+            if (!IsRecordingOutput ||
+                _isStoppingOutputRecording ||
+                _youtubeRecordingCapture is not null)
+            {
+                return;
+            }
+
+            preparedCapture.Start(timelineStartTimestamp);
+            _youtubeRecordingCapture = preparedCapture;
+            _youtubeRecordingTempPath = preparedPath;
+            preparedCapture = null;
+            preparedPath = null;
+        }
+        catch (Exception exception) when (exception is
+            IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            InvalidOperationException or
+            TimeoutException)
+        {
+            if (IsRecordingOutput && _youtubeWasActiveDuringRecording)
+            {
+                RecordingStatus =
+                    $"● La toma sigue grabando, pero YouTube aún no pudo engancharse: {exception.Message}";
+            }
+        }
+        finally
+        {
+            preparedCapture?.Dispose();
+            TryDeleteTemporaryRecording(preparedPath);
+            _youtubeRecordingCaptureStartTask = null;
+        }
+    }
+
+    private Task StopOutputRecordingAsync(bool force = false)
     {
         if (!IsRecordingOutput)
         {
             return Task.CompletedTask;
         }
+
+        // PlayNavigationTargetAsync tenía una orden histórica de cerrar la grabación justo antes
+        // de entrar en un elemento YouTube de una playlist. Durante esa transición el navegador ya
+        // apunta al nuevo ID, pero _currentYouTubeItem todavía no se ha actualizado. Esa llamada no
+        // debe terminar la toma: el usuario decide cuándo termina con el botón "Terminar".
+        if (!force && IsQueuedYouTubeNavigationPending())
+        {
+            return Task.CompletedTask;
+        }
+
         if (_stopOutputRecordingTask is not null)
         {
             return _stopOutputRecordingTask;
@@ -272,14 +348,30 @@ public sealed partial class MainViewModel
         return _stopOutputRecordingTask;
     }
 
+    private bool IsQueuedYouTubeNavigationPending()
+    {
+        var navigationId = _playbackNavigator.CurrentTrackId;
+        if (!_playlistQueueActive ||
+            string.IsNullOrWhiteSpace(navigationId) ||
+            !_playlistPlaybackItems.TryGetValue(navigationId, out var target) ||
+            target.Kind != PlaylistItemKind.YouTube)
+        {
+            return false;
+        }
+
+        return !string.Equals(
+            _currentYouTubeItem?.Id,
+            target.Id,
+            StringComparison.Ordinal);
+    }
+
     private async Task StopOutputRecordingCoreAsync()
     {
         await Task.Yield();
-        var youtubeCapture = _youtubeRecordingCapture;
-        var youtubePath = _youtubeRecordingTempPath;
-        _youtubeRecordingCapture = null;
-        _youtubeRecordingTempPath = null;
         string? mixedTempPath = null;
+        ProcessLoopbackWaveRecorder? youtubeCapture = null;
+        string? youtubePath = null;
+        var youtubeWasActive = _youtubeWasActiveDuringRecording;
         try
         {
             if (_isStoppingOutputRecording)
@@ -288,6 +380,18 @@ public sealed partial class MainViewModel
             }
             _isStoppingOutputRecording = true;
             OnPropertyChanged(nameof(CanStopOutputRecording));
+
+            // Si WebView2 apareció mientras la toma ya estaba en marcha, dejamos que termine de
+            // armarse o que se cancele al ver _isStoppingOutputRecording antes de tomar la referencia.
+            if (_youtubeRecordingCaptureStartTask is { } pendingCaptureStart)
+            {
+                await pendingCaptureStart;
+            }
+
+            youtubeCapture = _youtubeRecordingCapture;
+            youtubePath = _youtubeRecordingTempPath;
+            _youtubeRecordingCapture = null;
+            _youtubeRecordingTempPath = null;
 
             // Iniciamos el cierre de la mezcla principal y detenemos la captura paralela de
             // YouTube casi en el mismo instante. La escritura de la mezcla principal puede tardar
@@ -311,15 +415,9 @@ public sealed partial class MainViewModel
                         $"La captura de YouTube tuvo un problema ({captureFailure.Message}).";
                 }
 
-                if (!youtubeCapture.HasCapturedAudio ||
-                    string.IsNullOrWhiteSpace(youtubePath) ||
-                    !File.Exists(youtubePath))
-                {
-                    youtubeWarning = string.IsNullOrWhiteSpace(youtubeWarning)
-                        ? "No se recibió audio de YouTube durante la toma."
-                        : youtubeWarning + " No se recibió audio utilizable de YouTube.";
-                }
-                else
+                if (youtubeCapture.HasCapturedAudio &&
+                    !string.IsNullOrWhiteSpace(youtubePath) &&
+                    File.Exists(youtubePath))
                 {
                     try
                     {
@@ -342,6 +440,17 @@ public sealed partial class MainViewModel
                             $"YouTube no pudo incorporarse a la toma ({exception.Message}).";
                     }
                 }
+                else if (youtubeWasActive)
+                {
+                    youtubeWarning = string.IsNullOrWhiteSpace(youtubeWarning)
+                        ? "YouTube sonó durante la toma, pero no se recibió audio utilizable para el archivo."
+                        : youtubeWarning + " No se recibió audio utilizable de YouTube.";
+                }
+            }
+            else if (youtubeWasActive)
+            {
+                youtubeWarning =
+                    "YouTube sonó durante la toma, pero WebView2 no pudo abrir su captura para el archivo.";
             }
 
             LastRecordingTrack = _trackLibrary.RegisterRecording(path);
@@ -378,6 +487,8 @@ public sealed partial class MainViewModel
             youtubeCapture?.Dispose();
             TryDeleteTemporaryRecording(youtubePath);
             TryDeleteTemporaryRecording(mixedTempPath);
+            _youtubeWasActiveDuringRecording = false;
+            _outputRecordingStartTimestamp = 0;
             _isStoppingOutputRecording = false;
             _stopOutputRecordingTask = null;
             OnPropertyChanged(nameof(CanStopOutputRecording));
@@ -458,6 +569,8 @@ public sealed partial class MainViewModel
             _youtubeRecordingCapture = null;
             TryDeleteTemporaryRecording(_youtubeRecordingTempPath);
             _youtubeRecordingTempPath = null;
+            _youtubeWasActiveDuringRecording = false;
+            _outputRecordingStartTimestamp = 0;
         }
     }
 }
