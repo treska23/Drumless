@@ -2,51 +2,54 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
-using System.Windows.Media;
 
 namespace DrumPracticeStudio;
 
+/// <summary>
+/// Define una sola regla de tema para los Expander de Drumless antes de que WPF
+/// construya el template visual del control. Así el header no depende del
+/// AccessText/ToggleButton del tema de Windows ni de cambios tardíos en Loaded.
+/// </summary>
 internal static class DarkExpanderHeadersBootstrapper
 {
+    private static readonly DataTemplate HeaderTemplate = CreateHeaderTemplate();
+
     [ModuleInitializer]
     internal static void Initialize()
     {
         EventManager.RegisterClassHandler(
             typeof(Expander),
-            FrameworkElement.LoadedEvent,
-            new RoutedEventHandler(OnExpanderLoaded),
-            handledEventsToo: true);
+            FrameworkElement.InitializedEvent,
+            new EventHandler(OnExpanderInitialized));
     }
 
-    private static void OnExpanderLoaded(object sender, RoutedEventArgs eventArgs)
+    private static void OnExpanderInitialized(object? sender, EventArgs eventArgs)
     {
-        if (sender is not Expander expander ||
-            Window.GetWindow(expander) is not MainWindow ||
-            expander.TryFindResource("TextPrimary") is not Brush foreground)
+        if (sender is not Expander expander)
         {
             return;
         }
 
-        // El template estándar de Expander puede pintar su AccessText/HeaderPresenter con
-        // un brush del tema de Windows aunque Foreground del Expander sea claro. Por eso
-        // establecer sólo expander.Foreground no basta en el tema oscuro de Drumless.
-        expander.Foreground = foreground;
+        // El Foreground y el HeaderTemplate se fijan antes de ApplyTemplate.
+        // No hay un segundo parche en Loaded que compita con la plantilla de Windows.
+        expander.SetResourceReference(Control.ForegroundProperty, "TextPrimary");
 
-        // Forzamos el elemento visual que dibuja el header. El DataContext de HeaderTemplate
-        // es el propio Header (en estos buses es el string "Pista local", "YouTube", etc.).
-        // Un Foreground local en este TextBlock tiene prioridad sobre cualquier estilo o
-        // template intermedio que estuviera reintroduciendo texto negro.
-        if (expander.HeaderTemplate is null && expander.Header is not FrameworkElement)
+        if (expander.Header is not FrameworkElement)
         {
-            var headerText = new FrameworkElementFactory(typeof(TextBlock));
-            headerText.SetBinding(TextBlock.TextProperty, new Binding("."));
-            headerText.SetValue(TextBlock.ForegroundProperty, foreground);
-            headerText.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center);
-
-            expander.HeaderTemplate = new DataTemplate
-            {
-                VisualTree = headerText
-            };
+            expander.HeaderTemplate = HeaderTemplate;
         }
+    }
+
+    private static DataTemplate CreateHeaderTemplate()
+    {
+        var text = new FrameworkElementFactory(typeof(TextBlock));
+        text.SetBinding(TextBlock.TextProperty, new Binding("."));
+        text.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
+        text.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center);
+
+        return new DataTemplate
+        {
+            VisualTree = text
+        };
     }
 }
