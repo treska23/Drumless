@@ -6,6 +6,7 @@ namespace DrumPracticeStudio.Audio;
 internal sealed class OutputEndpointCaptureSession : IDisposable
 {
     private readonly List<Candidate> _candidates;
+    private bool _started;
     private bool _stopped;
     private bool _disposed;
 
@@ -18,8 +19,7 @@ internal sealed class OutputEndpointCaptureSession : IDisposable
 
     public static OutputEndpointCaptureSession Prepare(
         IReadOnlyList<AudioOutputDeviceItem> devices,
-        string workDirectory,
-        long timelineStartTimestamp)
+        string workDirectory)
     {
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentException.ThrowIfNullOrWhiteSpace(workDirectory);
@@ -41,7 +41,6 @@ internal sealed class OutputEndpointCaptureSession : IDisposable
             try
             {
                 recorder = OutputEndpointLoopbackRecorder.Prepare(device.Id, path);
-                recorder.Start(timelineStartTimestamp);
                 candidates.Add(new Candidate(device, path, recorder));
             }
             catch (Exception exception) when (exception is
@@ -67,9 +66,52 @@ internal sealed class OutputEndpointCaptureSession : IDisposable
         return new OutputEndpointCaptureSession(candidates);
     }
 
+    public void Start(long timelineStartTimestamp)
+    {
+        if (_started || _stopped)
+        {
+            throw new InvalidOperationException("La captura de salida ya se inició o terminó.");
+        }
+
+        var failures = new List<string>();
+        for (var index = _candidates.Count - 1; index >= 0; index--)
+        {
+            var candidate = _candidates[index];
+            try
+            {
+                candidate.Recorder.Start(timelineStartTimestamp);
+            }
+            catch (Exception exception) when (exception is
+                IOException or
+                UnauthorizedAccessException or
+                InvalidOperationException or
+                ArgumentException or
+                System.Runtime.InteropServices.COMException)
+            {
+                candidate.Recorder.Dispose();
+                TryDelete(candidate.Path);
+                _candidates.RemoveAt(index);
+                failures.Add($"{candidate.Device.Name}: {exception.Message}");
+            }
+        }
+
+        if (_candidates.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "No se pudo iniciar la captura de la salida física" +
+                (failures.Count == 0 ? "." : $": {string.Join(" | ", failures)}"));
+        }
+
+        _started = true;
+    }
+
     public async Task<OutputEndpointCaptureResult> StopAndSelectAsync(
         CancellationToken cancellationToken = default)
     {
+        if (!_started)
+        {
+            throw new InvalidOperationException("La captura de salida no se inició.");
+        }
         if (_stopped)
         {
             throw new InvalidOperationException("La captura de salida ya se detuvo.");
