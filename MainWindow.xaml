@@ -1233,6 +1233,7 @@
                                 <TextBlock Text="Salida de audio" FontSize="16" FontWeight="SemiBold" />
                                 <ComboBox ItemsSource="{Binding AudioOutputDevices}"
                                           SelectedItem="{Binding SelectedAudioOutputDevice}"
+                                          IsEnabled="{Binding CanChangeRecordingAudioSetup}"
                                           Margin="0,10,0,0"
                                           HorizontalAlignment="Stretch"
                                           AutomationProperties.AutomationId="AudioOutputCombo">
@@ -1244,7 +1245,8 @@
                                 </ComboBox>
                                 <WrapPanel Margin="0,10,0,0" HorizontalAlignment="Right">
                                     <Button Style="{StaticResource SecondaryButton}" Content="Actualizar"
-                                            Command="{Binding RefreshAudioOutputsCommand}" />
+                                            Command="{Binding RefreshAudioOutputsCommand}"
+                                            IsEnabled="{Binding CanChangeRecordingAudioSetup}" />
                                 </WrapPanel>
                                 <TextBlock Text="{Binding AudioOutputStatus}" Foreground="{StaticResource TextSecondary}"
                                            TextWrapping="Wrap" Margin="0,8,0,0" />

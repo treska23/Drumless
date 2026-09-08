@@ -384,6 +384,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         get => _selectedAudioOutputDevice;
         set
         {
+            if (!TryAllowAudioOutputChange())
+            {
+                return;
+            }
+
             if (!SetProperty(ref _selectedAudioOutputDevice, value) ||
                 value is null ||
                 _isRefreshingAudioDevices)
@@ -705,6 +710,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         get => _selectedVstInstrument;
         set
         {
+            if (!TryAllowInstrumentEngineChange())
+            {
+                return;
+            }
+
             if (!SetProperty(ref _selectedVstInstrument, value) ||
                 value is null ||
                 _isSynchronizingVstInstrumentSelection)
@@ -1360,6 +1370,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void RefreshAudioOutputDevices()
     {
+        if (!TryAllowAudioOutputChange())
+        {
+            return;
+        }
+
         try
         {
             var initialSetup = !_hasInitializedAudioDevices;
@@ -1431,6 +1446,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         bool showDialog,
         bool remember)
     {
+        if (!TryAllowAudioOutputChange())
+        {
+            return false;
+        }
+
         try
         {
             var rememberedInputs = selected.IsAsio &&
@@ -2033,6 +2053,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         bool showDialog,
         bool remember)
     {
+        if (!TryAllowAudioOutputChange())
+        {
+            return;
+        }
+
         if (showDialog)
         {
             _audioRecoveryCancellation?.Cancel();
@@ -2091,6 +2116,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             await LoadSelectedVstInstrumentAsync(showMessage: showDialog);
         }
+    }
+
+    private bool TryAllowAudioOutputChange()
+    {
+        if (CanChangeRecordingAudioSetup)
+        {
+            return true;
+        }
+
+        // El enrutado de WebView2 observa SelectedAudioOutputDevice y AudioOutputStatus.
+        // Rechazar el cambio no debe publicar esos eventos ni alterar la salida audible.
+        StatusMessage = "Termina la grabación antes de cambiar la salida de audio.";
+        return false;
     }
 
     private void RestoreActiveAudioOutputSelection()
@@ -2287,6 +2325,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private async Task ScanVstInstrumentsAsync(bool force)
     {
+        if (!TryAllowInstrumentEngineChange())
+        {
+            return;
+        }
+
         if (IsScanningVst || (_hasScannedVstInstruments && !force))
         {
             return;
@@ -2345,6 +2388,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private async Task LoadSelectedVstInstrumentAsync(bool showMessage = true)
     {
+        if (!TryAllowInstrumentEngineChange())
+        {
+            return;
+        }
+
         if (SelectedVstInstrument is not { } instrument)
         {
             VstStatus = "Selecciona un instrumento VST3.";
@@ -2446,6 +2494,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void UseInternalDrums()
     {
+        if (!TryAllowInstrumentEngineChange())
+        {
+            return;
+        }
+
         SaveActiveVstState(silent: true);
         var loading = Interlocked.Exchange(ref _vstLoadCancellation, null);
         loading?.Cancel();

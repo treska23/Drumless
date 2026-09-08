@@ -280,7 +280,7 @@ public partial class MainWindow : Window
 
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (_closeAfterRecording || !_viewModel.IsRecordingOutput)
+        if (_closeAfterRecording || !_viewModel.HasPendingOutputRecording)
         {
             return;
         }

@@ -280,10 +280,10 @@ public partial class MainWindow
 
     private void ProtectYouTubeSurface()
     {
-        // La página sigue viva y los scripts de Drumless pueden manejarla, pero el usuario no puede
-        // activar accidentalmente los controles nativos del reproductor con ratón o teclado.
+        // El WebView vuelve a recibir ratón para que el volumen nativo de YouTube se pueda mover.
+        // El script de protección bloquea el resto de interacciones físicas del reproductor.
         YouTubeWebView.Focusable = false;
-        YouTubeWebView.IsHitTestVisible = false;
+        YouTubeWebView.IsHitTestVisible = true;
         KeyboardNavigation.SetTabNavigation(YouTubeWebView, KeyboardNavigationMode.None);
     }
 
@@ -348,8 +348,25 @@ public partial class MainWindow
           if (window.__dpsPhysicalInputBlocked) return;
           window.__dpsPhysicalInputBlocked = true;
 
+          const volumeSelector = [
+            '.ytp-volume-area',
+            '.ytp-volume-panel',
+            '.ytp-volume-slider',
+            '.ytp-mute-button'
+          ].join(',');
+
+          const isVolumeInteraction = event => {
+            const target = event.target;
+            return target instanceof Element && !!target.closest(volumeSelector);
+          };
+
           const stopPhysicalInput = event => {
             if (!event.isTrusted) return;
+
+            // Sólo se permite el control de volumen nativo. Cambiar volumen/mute no toca sinkId,
+            // navegación ni la ruta de salida de Drumless.
+            if (isVolumeInteraction(event)) return;
+
             event.preventDefault();
             event.stopImmediatePropagation();
           };
@@ -372,7 +389,6 @@ public partial class MainWindow
             if (!document.documentElement) return;
             document.documentElement.style.userSelect = 'none';
             document.documentElement.style.webkitUserSelect = 'none';
-            document.documentElement.style.cursor = 'default';
           };
           protectDocument();
           new MutationObserver(protectDocument).observe(

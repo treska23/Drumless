@@ -15,6 +15,7 @@ public sealed class AudioEngine : IDisposable
     private readonly AudioEffectRackSampleProvider _trackEffects;
     private readonly MixingSampleProvider _mixer;
     private readonly OutputRecordingSink _recording = new();
+    private readonly SemaphoreSlim _recordingGate = new(1, 1);
     private readonly Vst3InstrumentHost _vstInstrument = new();
     private readonly object _youtubeCaptureGate = new();
     private DirectVst3Instrument? _directVstInstrument;
@@ -683,6 +684,19 @@ public sealed class AudioEngine : IDisposable
         string path,
         CancellationToken cancellationToken = default)
     {
+        await _recordingGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await StartRecordingCoreAsync(path, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _recordingGate.Release();
+        }
+    }
+
+    private async Task StartRecordingCoreAsync(string path, CancellationToken cancellationToken)
+    {
         if (IsRecording)
         {
             throw new InvalidOperationException("Ya hay una grabación en curso.");
@@ -704,7 +718,8 @@ public sealed class AudioEngine : IDisposable
         var vstPath = Path.Combine(jobRoot, "isolated-vst.wav");
         try
         {
-            await _vstInstrument.StartRecordingAsync(vstPath, cancellationToken);
+            await _vstInstrument.StartRecordingAsync(vstPath, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             _recording.Start(mainPath, format);
             _recordingDestination = destination;
             _recordingJobRoot = jobRoot;
@@ -712,14 +727,20 @@ public sealed class AudioEngine : IDisposable
         }
         catch
         {
+            var stopped = false;
             try
             {
-                await _vstInstrument.StopRecordingAsync(cancellationToken);
+                await _vstInstrument.StopRecordingAsync(CancellationToken.None).ConfigureAwait(false);
+                stopped = true;
             }
             catch
             {
+                LastRecordingWarning = $"Los archivos de la grabación VST3 se conservan en: {jobRoot}";
             }
-            TryDeleteRecordingJob(jobRoot);
+            if (stopped)
+            {
+                TryDeleteRecordingJob(jobRoot);
+            }
             throw;
         }
     }
@@ -727,52 +748,107 @@ public sealed class AudioEngine : IDisposable
     public async Task<string?> StopRecordingAsync(
         CancellationToken cancellationToken = default)
     {
-        var mainPath = await _recording.StopAsync();
-        var destination = _recordingDestination;
-        var jobRoot = _recordingJobRoot;
-        var vstPath = _isolatedVstRecordingPath;
-        _recordingDestination = null;
-        _recordingJobRoot = null;
-        _isolatedVstRecordingPath = null;
-        if (mainPath is null || destination is null)
-        {
-            return null;
-        }
-
-        if (vstPath is null)
-        {
-            return mainPath;
-        }
-
+        // A stop must finish draining both writers even when the caller cancels rendering.
+        await _recordingGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await _vstInstrument.StopRecordingAsync(cancellationToken);
-            await AudioFileMixService.MixAsync(
-                [mainPath, vstPath],
-                destination,
-                cancellationToken);
-            return destination;
-        }
-        catch (Exception exception) when (exception is
-            IOException or
-            InvalidDataException or
-            InvalidOperationException or
-            TimeoutException)
-        {
-            File.Copy(mainPath, destination, overwrite: false);
-            LastRecordingWarning =
-                $"El VST3 aislado no pudo incorporarse ({exception.Message}); " +
-                "se conservó la pista y el resto del mezclador.";
-            return destination;
+            return await StopRecordingCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            if (jobRoot is not null)
+            _recordingGate.Release();
+        }
+    }
+
+    private async Task<string?> StopRecordingCoreAsync(CancellationToken cancellationToken)
+    {
+        var destination = _recordingDestination;
+        var jobRoot = _recordingJobRoot;
+        var vstPath = _isolatedVstRecordingPath;
+        var recoveryPath = jobRoot ?? _recording.CurrentPath;
+        _recordingDestination = null;
+        _recordingJobRoot = null;
+        _isolatedVstRecordingPath = null;
+        var completedWithAllSources = false;
+        try
+        {
+            var mainStop = _recording.StopAsync();
+            var vstStop = vstPath is null
+                ? Task.CompletedTask
+                : _vstInstrument.StopRecordingAsync(CancellationToken.None);
+            Exception? vstFailure = null;
+            try
+            {
+                await Task.WhenAll(mainStop, vstStop).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (mainStop.IsCompletedSuccessfully &&
+                                               IsRecoverableRecordingFailure(exception))
+            {
+                vstFailure = exception;
+            }
+
+            var mainPath = await mainStop.ConfigureAwait(false);
+            if (mainPath is null || destination is null)
+            {
+                return null;
+            }
+            if (vstPath is null)
+            {
+                return mainPath;
+            }
+
+            var renderedPath = mainPath;
+            if (vstFailure is null)
+            {
+                try
+                {
+                    renderedPath = Path.Combine(jobRoot!, "mixed.wav");
+                    await AudioFileMixService.MixAsync(
+                        [mainPath, vstPath], renderedPath, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (IsRecoverableRecordingFailure(exception))
+                {
+                    vstFailure = exception;
+                    renderedPath = mainPath;
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(renderedPath, destination, overwrite: false);
+            completedWithAllSources = vstFailure is null;
+            if (vstFailure is not null)
+            {
+                LastRecordingWarning =
+                    $"El VST3 aislado no pudo incorporarse ({vstFailure.Message}); " +
+                    "se conservó la pista y el resto del mezclador. " +
+                    $"Las fuentes originales se conservan en: {jobRoot}";
+            }
+            return destination;
+        }
+        catch
+        {
+            if (recoveryPath is not null)
+            {
+                LastRecordingWarning = $"Los archivos de recuperación se conservan en: {recoveryPath}";
+            }
+            throw;
+        }
+        finally
+        {
+            if (completedWithAllSources && jobRoot is not null)
             {
                 TryDeleteRecordingJob(jobRoot);
             }
         }
     }
+
+    private static bool IsRecoverableRecordingFailure(Exception exception) => exception is
+        IOException or
+        InvalidDataException or
+        InvalidOperationException or
+        UnauthorizedAccessException or
+        TimeoutException;
 
     public void Dispose()
     {
