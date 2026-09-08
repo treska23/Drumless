@@ -89,7 +89,8 @@ public partial class MainWindow
             core.IsMutedChanged -= OnYouTubeRecordingMutedChanged;
         }
         catch (Exception exception) when (exception is
-            InvalidOperationException or ObjectDisposedException)
+            InvalidOperationException or
+            System.Runtime.InteropServices.COMException)
         {
         }
         _youtubeRecordingCore = null;
@@ -122,7 +123,8 @@ public partial class MainWindow
             _viewModel.SetYouTubePlaybackAudible(!core.IsMuted);
         }
         catch (Exception exception) when (exception is
-            InvalidOperationException or ObjectDisposedException)
+            InvalidOperationException or
+            System.Runtime.InteropServices.COMException)
         {
             _viewModel.SetYouTubePlaybackAudible(false);
         }
