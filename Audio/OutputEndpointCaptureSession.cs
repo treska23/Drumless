@@ -167,7 +167,7 @@ internal sealed class OutputEndpointCaptureSession : IDisposable
             double sumSquares = 0d;
             long samples = 0;
             int read;
-            while ((read = reader.Read(buffer, 0, buffer.Length)) > 0)
+            while ((read = reader.Read(buffer.AsSpan())) > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 for (var index = 0; index < read; index++)
