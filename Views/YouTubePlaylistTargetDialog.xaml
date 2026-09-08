@@ -6,6 +6,8 @@
         Width="560" Height="560"
         MinWidth="460" MinHeight="420"
         Background="{StaticResource AppBackground}"
+        Foreground="{StaticResource TextPrimary}"
+        FontFamily="Segoe UI"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
     <Grid Margin="24">
