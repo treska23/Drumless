@@ -67,7 +67,7 @@ public sealed partial class MainViewModel
     private void InitializeRecordingCommands()
     {
         StartOutputRecordingCommand = new RelayCommand(() => _ = StartOutputRecordingAsync());
-        StopOutputRecordingCommand = new RelayCommand(() => _ = StopOutputRecordingAsync());
+        StopOutputRecordingCommand = new RelayCommand(() => _ = StopOutputRecordingAsync(force: true));
         PlayLastRecordingCommand = new RelayCommand(() =>
         {
             if (LastRecordingTrack is not null)
@@ -80,7 +80,7 @@ public sealed partial class MainViewModel
         });
     }
 
-    public Task CompleteRecordingBeforeCloseAsync() => StopOutputRecordingAsync();
+    public Task CompleteRecordingBeforeCloseAsync() => StopOutputRecordingAsync(force: true);
 
     public bool IsYouTubeAudioRouted => _isYouTubeAudioRouted;
 
@@ -283,18 +283,44 @@ public sealed partial class MainViewModel
         }
     }
 
-    private Task StopOutputRecordingAsync()
+    private Task StopOutputRecordingAsync(bool force = false)
     {
         if (!IsRecordingOutput)
         {
             return Task.CompletedTask;
         }
+
+        // La navegación histórica a un elemento YouTube de una playlist llama a Stop justo antes
+        // de cargar el vídeo. Durante una toma eso no debe cerrarla: sólo el botón Terminar, el cierre
+        // de la aplicación o un fallo real de audio deben decidir el final de la grabación.
+        if (!force && IsQueuedYouTubeNavigationPending())
+        {
+            return Task.CompletedTask;
+        }
+
         if (_stopOutputRecordingTask is not null)
         {
             return _stopOutputRecordingTask;
         }
         _stopOutputRecordingTask = StopOutputRecordingCoreAsync();
         return _stopOutputRecordingTask;
+    }
+
+    private bool IsQueuedYouTubeNavigationPending()
+    {
+        var navigationId = _playbackNavigator.CurrentTrackId;
+        if (!_playlistQueueActive ||
+            string.IsNullOrWhiteSpace(navigationId) ||
+            !_playlistPlaybackItems.TryGetValue(navigationId, out var target) ||
+            target.Kind != PlaylistItemKind.YouTube)
+        {
+            return false;
+        }
+
+        return !string.Equals(
+            _currentYouTubeItem?.Id,
+            target.Id,
+            StringComparison.Ordinal);
     }
 
     private async Task StopOutputRecordingCoreAsync()
