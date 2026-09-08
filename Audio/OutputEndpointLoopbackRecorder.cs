@@ -13,6 +13,7 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
     private const int SampleRate = 48_000;
     private const int Channels = 2;
     private const int SilenceChunkFrames = 4_096;
+    private const int ClockGapCorrectionMilliseconds = 120;
 
     private readonly object _gate = new();
     private readonly MMDeviceEnumerator _enumerator;
@@ -165,34 +166,59 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
 
             try
             {
-                var packetFrames = buffer.Length / Math.Max(1, _format.BlockAlign);
+                var blockAlign = Math.Max(1, _format.BlockAlign);
+                var packetFrames = buffer.Length / blockAlign;
+                if (packetFrames <= 0)
+                {
+                    return;
+                }
+
                 var elapsedFrames = GetElapsedFrames();
-                var packetStartFrame = Math.Max(0L, elapsedFrames - packetFrames);
-                if (packetStartFrame > _writtenFrames)
+                var expectedPacketStart = Math.Max(0L, elapsedFrames - packetFrames);
+                var gapFrames = expectedPacketStart - _writtenFrames;
+                var correctionThresholdFrames = Math.Max(
+                    1L,
+                    (long)Math.Round(
+                        _format.SampleRate * ClockGapCorrectionMilliseconds / 1_000d));
+
+                // Los callbacks de WASAPI no llegan a intervalos perfectamente regulares. La
+                // versión anterior corregía cada pequeño desfase contra Stopwatch y recortaba
+                // muestras cuando el callback parecía solaparse con lo ya escrito. Eso puede
+                // convertir jitter normal del sistema en grano y microcortes audibles.
+                //
+                // Ahora nunca descartamos audio real. Sólo reconstruimos un silencio cuando el
+                // hueco es claramente mayor que el jitter normal (o antes del primer paquete).
+                if (!_receivedPayload)
                 {
-                    WriteSilence(packetStartFrame - _writtenFrames);
+                    if (gapFrames > 0)
+                    {
+                        WriteSilence(gapFrames);
+                    }
+                }
+                else if (gapFrames > correctionThresholdFrames)
+                {
+                    WriteSilence(gapFrames);
                 }
 
-                if (buffer.IsEmpty || flags.HasFlag(AudioClientBufferFlags.Silent))
+                if (flags.HasFlag(AudioClientBufferFlags.Silent))
+                {
+                    if (packetFrames > 0)
+                    {
+                        WriteSilence(packetFrames);
+                    }
+                    return;
+                }
+
+                if (buffer.IsEmpty)
                 {
                     return;
                 }
 
-                var overlapFrames = Math.Max(0L, _writtenFrames - packetStartFrame);
-                if (overlapFrames >= packetFrames)
-                {
-                    return;
-                }
-
-                var skipBytes = checked((int)overlapFrames * _format.BlockAlign);
-                var payload = buffer[skipBytes..];
-                if (payload.IsEmpty)
-                {
-                    return;
-                }
-
-                _writer.Write(payload);
-                _writtenFrames += payload.Length / _format.BlockAlign;
+                // El paquete se escribe completo y en orden. No se recorta por estimaciones del
+                // reloj: la continuidad del audio capturado tiene prioridad sobre el jitter del
+                // callback.
+                _writer.Write(buffer);
+                _writtenFrames += packetFrames;
                 _receivedPayload = true;
             }
             catch (Exception exception) when (exception is
@@ -241,6 +267,8 @@ internal sealed class OutputEndpointLoopbackRecorder : IDisposable
             {
                 try
                 {
+                    // El reloj sólo rellena el final de la línea temporal. No modifica muestras
+                    // ya capturadas y, por tanto, no puede introducir cortes dentro de la música.
                     var elapsedFrames = GetElapsedFrames();
                     if (elapsedFrames > _writtenFrames)
                     {
