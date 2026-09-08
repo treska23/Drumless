@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -36,6 +37,9 @@ public partial class MainWindow
     private bool _globalTransportAndProtectedYouTubeAttached;
     private Border? _globalTransportBar;
     private Slider? _globalTransportSlider;
+    private Slider? _youtubeVolumeSlider;
+    private TextBlock? _youtubeVolumeLabel;
+    private double _youtubeVolume = 1d;
 
     internal void AttachGlobalTransportAndProtectedYouTube()
     {
@@ -57,6 +61,7 @@ public partial class MainWindow
         {
             ConfigureProtectedYouTubeCore(core);
             _ = InstallYouTubePhysicalInputBlockAsync(core);
+            _ = ApplyYouTubeVolumeAsync(core);
         }
     }
 
@@ -185,6 +190,7 @@ public partial class MainWindow
         controls.Children.Add(CreateGlobalTransportButton(
             "Siguiente",
             _viewModel.NextTrackCommand));
+        controls.Children.Add(BuildYouTubeVolumeControl());
         Grid.SetColumn(controls, 1);
         layout.Children.Add(controls);
 
@@ -256,6 +262,115 @@ public partial class MainWindow
         return border;
     }
 
+    private FrameworkElement BuildYouTubeVolumeControl()
+    {
+        var panel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 0, 0)
+        };
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "YT",
+            FontSize = 10,
+            FontWeight = FontWeights.Bold,
+            Foreground = TryFindResource("TextSecondary") as Brush ?? Brushes.Gray,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+            ToolTip = "Volumen de YouTube"
+        });
+
+        var slider = new Slider
+        {
+            Minimum = 0,
+            Maximum = 100,
+            Value = _youtubeVolume * 100d,
+            Width = 82,
+            Height = 16,
+            IsMoveToPointEnabled = true,
+            VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = "Volumen de YouTube"
+        };
+        AutomationProperties.SetName(slider, "Volumen de YouTube");
+        slider.ValueChanged += OnYouTubeVolumeChanged;
+        panel.Children.Add(slider);
+        _youtubeVolumeSlider = slider;
+
+        var label = new TextBlock
+        {
+            Text = $"{Math.Round(_youtubeVolume * 100d):0}%",
+            MinWidth = 34,
+            Margin = new Thickness(5, 0, 0, 0),
+            TextAlignment = TextAlignment.Right,
+            FontSize = 10,
+            Foreground = TryFindResource("TextSecondary") as Brush ?? Brushes.Gray,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        panel.Children.Add(label);
+        _youtubeVolumeLabel = label;
+
+        return panel;
+    }
+
+    private void OnYouTubeVolumeChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> eventArgs)
+    {
+        _youtubeVolume = Math.Clamp(eventArgs.NewValue / 100d, 0d, 1d);
+        if (_youtubeVolumeLabel is not null)
+        {
+            _youtubeVolumeLabel.Text = $"{Math.Round(_youtubeVolume * 100d):0}%";
+        }
+
+        if (YouTubeWebView.CoreWebView2 is { } core)
+        {
+            _ = ApplyYouTubeVolumeAsync(core);
+        }
+    }
+
+    private async Task ApplyYouTubeVolumeAsync(CoreWebView2 core)
+    {
+        var volumeLiteral = _youtubeVolume.ToString("0.000", CultureInfo.InvariantCulture);
+        var script = $$"""
+            (() => {
+              const desiredVolume = {{volumeLiteral}};
+              window.__dpsDesiredYouTubeVolume = desiredVolume;
+
+              const apply = () => {
+                const volume = Number(window.__dpsDesiredYouTubeVolume);
+                if (!Number.isFinite(volume)) return;
+                document.querySelectorAll('video').forEach(video => {
+                  try {
+                    video.volume = Math.max(0, Math.min(1, volume));
+                  } catch { }
+                });
+              };
+
+              apply();
+              if (!window.__dpsYouTubeVolumeObserver && document.documentElement) {
+                window.__dpsYouTubeVolumeObserver = new MutationObserver(apply);
+                window.__dpsYouTubeVolumeObserver.observe(
+                  document.documentElement,
+                  { childList: true, subtree: true });
+              }
+            })();
+            """;
+
+        try
+        {
+            await core.ExecuteScriptAsync(script);
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or
+            ObjectDisposedException or
+            System.Runtime.InteropServices.COMException)
+        {
+            // Una navegación puede reemplazar el documento mientras movemos el volumen.
+        }
+    }
+
     private Button CreateGlobalTransportButton(
         string text,
         System.Windows.Input.ICommand command,
@@ -281,7 +396,8 @@ public partial class MainWindow
     private void ProtectYouTubeSurface()
     {
         // La página sigue viva y los scripts de Drumless pueden manejarla, pero el usuario no puede
-        // activar accidentalmente los controles nativos del reproductor con ratón o teclado.
+        // activar accidentalmente los controles nativos del reproductor con ratón o teclado. El
+        // volumen que faltaba se controla ahora desde la barra global de Drumless.
         YouTubeWebView.Focusable = false;
         YouTubeWebView.IsHitTestVisible = false;
         KeyboardNavigation.SetTabNavigation(YouTubeWebView, KeyboardNavigationMode.None);
@@ -298,6 +414,7 @@ public partial class MainWindow
 
         ConfigureProtectedYouTubeCore(core);
         _ = InstallYouTubePhysicalInputBlockAsync(core);
+        _ = ApplyYouTubeVolumeAsync(core);
     }
 
     private async void OnProtectedYouTubeNavigationCompleted(
@@ -307,6 +424,7 @@ public partial class MainWindow
         if (eventArgs.IsSuccess && YouTubeWebView.CoreWebView2 is { } core)
         {
             await InstallYouTubePhysicalInputBlockAsync(core);
+            await ApplyYouTubeVolumeAsync(core);
         }
     }
 
@@ -338,6 +456,12 @@ public partial class MainWindow
             OnProtectedYouTubeInitializationCompleted;
         YouTubeWebView.NavigationCompleted -= OnProtectedYouTubeNavigationCompleted;
         Closed -= OnGlobalTransportAndProtectedYouTubeClosed;
+        if (_youtubeVolumeSlider is not null)
+        {
+            _youtubeVolumeSlider.ValueChanged -= OnYouTubeVolumeChanged;
+        }
+        _youtubeVolumeLabel = null;
+        _youtubeVolumeSlider = null;
         _globalTransportSlider = null;
         _globalTransportBar = null;
     }
